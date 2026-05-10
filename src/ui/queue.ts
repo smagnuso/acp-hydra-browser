@@ -78,6 +78,19 @@ function scheduleSendPrompt(entry: QueueEntry): void {
         // before prompt_received arrives still sees us as busy and
         // queues correctly behind this one.
         c.inTurn = true;
+        // Pull the queued user bubble down to the end of the log so
+        // it anchors the new turn — regardless of what got appended
+        // below it while it was waiting (e.g. the tail of the prior
+        // turn's tool output or agent text). Without this, the bubble
+        // can end up wedged in the middle of the prior turn's
+        // content and look like it stayed where the user typed it.
+        const idx = c.log.findIndex(
+          (e) => e.kind === "stream" && e.role === "user" && e.queueEntry === entry,
+        );
+        if (idx >= 0 && idx < c.log.length - 1) {
+          const item = c.log.splice(idx, 1)[0];
+          if (item) c.log.push(item);
+        }
         // Surface the "thinking…" spinner immediately — gives the user
         // visible feedback before any frame comes back from the agent.
         // Same intent as acp-hydra-slack's ensureSpinner-on-send.
