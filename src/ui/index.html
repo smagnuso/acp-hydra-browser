@@ -1,0 +1,1316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>acp-hydra-browser</title>
+<style nonce="__CSP_NONCE__">
+:root {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-2: #1c2230;
+  --border: #2a3346;
+  --fg: #d6deeb;
+  --muted: #7c8aa8;
+  --accent: #6ea8fe;
+  --good: #4ec9b0;
+  --bad: #f97583;
+  --warn: #d4a17e;
+  --user-bg: #1f2a44;
+  --agent-bg: #161b22;
+  --tool-bg: #19202d;
+  --code-bg: #0a0d12;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); overflow: hidden; }
+button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.75rem; cursor: pointer; }
+button:hover { background: var(--panel-2); }
+button.primary { background: var(--accent); color: #0a0d12; border-color: var(--accent); font-weight: 600; }
+button.primary:hover { filter: brightness(0.9); }
+button.danger { color: var(--bad); border-color: var(--bad); }
+button.danger:hover { background: rgba(249, 117, 131, 0.12); }
+button.ghost { border-color: transparent; }
+input, select, textarea {
+  font: inherit; color: inherit; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem;
+}
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { background: var(--panel-2); padding: 0.1rem 0.4rem; border-radius: 4px; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.9em; }
+pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; overflow-x: auto; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.88em; line-height: 1.45; margin: 0.5rem 0; }
+pre code { background: transparent; padding: 0; }
+
+#app { height: 100dvh; display: flex; flex-direction: column; }
+
+/* Header */
+.topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--panel); }
+.topbar .title { font-weight: 600; font-size: 0.95rem; }
+.topbar .spacer { flex: 1; }
+.topbar .pill { font-size: 0.8rem; color: var(--muted); padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; }
+.topbar .pill.clickable { cursor: pointer; }
+.topbar .pill.clickable:hover { background: var(--panel-2); color: var(--fg); }
+
+/* Session list */
+.list { flex: 1; overflow-y: auto; padding: 1rem; }
+.list .group { margin-bottom: 1.25rem; }
+.list .group h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 0.5rem; }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
+.card:hover { background: var(--panel-2); }
+.card .meta { flex: 1; min-width: 0; }
+.card .meta .row1 { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .meta .row2 { color: var(--muted); font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 0.15rem; }
+.card .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.badge { font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+.badge.live { color: var(--good); border-color: var(--good); }
+.badge.cold { color: var(--warn); border-color: var(--warn); }
+.card .actions { display: flex; gap: 0.4rem; }
+.card .actions button { padding: 0.25rem 0.55rem; font-size: 0.85rem; }
+.empty { color: var(--muted); padding: 2rem; text-align: center; }
+
+/* Chat */
+.chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.chat-header { display: flex; gap: 0.5rem; align-items: center; padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--panel); }
+.chat-header .info { flex: 1; min-width: 0; }
+.chat-header .info .row1 { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-header .info .row2 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-body { flex: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.65rem; }
+.msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }
+.msg.user { background: var(--user-bg); border: 1px solid var(--border); align-self: flex-end; max-width: 85%; }
+.msg.agent { background: var(--agent-bg); border: 1px solid var(--border); align-self: flex-start; max-width: 95%; }
+.msg.system { background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; align-self: center; max-width: 70%; text-align: center; }
+.msg.error { background: rgba(249,117,131,0.1); border: 1px solid var(--bad); color: var(--bad); }
+.msg .body { margin: 0; }
+.msg .body p:first-child { margin-top: 0; }
+.msg .body p:last-child { margin-bottom: 0; }
+.msg .body p { margin: 0.4rem 0; line-height: 1.5; }
+.msg .body ul, .msg .body ol { margin: 0.4rem 0; padding-left: 1.4rem; }
+.msg .body li { margin: 0.2rem 0; }
+.msg .body blockquote { margin: 0.4rem 0; padding: 0.25rem 0.75rem; border-left: 3px solid var(--border); color: var(--muted); }
+.msg .body h1, .msg .body h2, .msg .body h3 { margin: 0.5rem 0 0.3rem; font-size: 1.05rem; }
+
+/* Tool spinner / cards */
+.spinner { background: var(--tool-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; align-self: stretch; }
+.spinner .head { display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
+.spinner .head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
+@keyframes pulse { 0%,100% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.4); opacity: 1; } }
+.spinner.expanded { background: var(--panel); }
+.spinner ul { margin: 0.4rem 0 0; padding-left: 1rem; font-size: 0.85rem; color: var(--fg); }
+.spinner li { margin: 0.15rem 0; display: flex; gap: 0.4rem; align-items: center; }
+.spinner li .icon { font-family: ui-monospace, monospace; }
+
+.toolcard { background: var(--tool-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0; align-self: stretch; }
+.toolcard .head { padding: 0.5rem 0.75rem; display: flex; gap: 0.5rem; align-items: center; cursor: pointer; }
+.toolcard .head .title { flex: 1; font-size: 0.9rem; }
+.toolcard .head .kind { color: var(--muted); font-size: 0.8rem; }
+.toolcard .body { display: none; padding: 0 0.75rem 0.75rem; border-top: 1px solid var(--border); }
+.toolcard.open .body { display: block; }
+.toolcard pre { margin: 0.5rem 0 0; max-height: 24rem; }
+
+/* Permission card */
+.perm { background: rgba(110,168,254,0.07); border: 1px solid var(--accent); border-radius: 8px; padding: 0.75rem 0.9rem; align-self: stretch; }
+.perm .title { font-weight: 600; margin-bottom: 0.35rem; }
+.perm .desc { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.6rem; }
+.perm .opts { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Composer */
+.composer { display: flex; gap: 0.5rem; padding: 0.6rem; border-top: 1px solid var(--border); background: var(--panel); align-items: flex-end; }
+.composer textarea { flex: 1; min-height: 2.4rem; max-height: 12rem; resize: none; }
+.composer .stop { color: var(--bad); border-color: var(--bad); }
+
+/* Modal */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }
+.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; width: 28rem; max-width: 100%; max-height: 100%; overflow-y: auto; }
+.modal h2 { margin: 0 0 0.75rem; font-size: 1.05rem; }
+.modal .field { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.7rem; }
+.modal .field label { font-size: 0.85rem; color: var(--muted); }
+.modal .actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+.modal .err { color: var(--bad); font-size: 0.85rem; margin-top: 0.4rem; }
+
+/* File overlay */
+.files { display: flex; flex-direction: column; height: 100%; }
+.files .crumbs { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-x: auto; white-space: nowrap; }
+.files .crumb { color: var(--accent); cursor: pointer; }
+.files .crumb:hover { text-decoration: underline; }
+.files .body { flex: 1; overflow-y: auto; padding: 0.5rem 0; }
+.files .entry { display: flex; gap: 0.5rem; align-items: center; padding: 0.35rem 0.75rem; cursor: pointer; }
+.files .entry:hover { background: var(--panel-2); }
+.files .entry .icon { width: 1.2rem; text-align: center; color: var(--muted); }
+.files .entry .name { flex: 1; }
+.files .entry .size { color: var(--muted); font-size: 0.8rem; }
+.files .preview { padding: 0.75rem; }
+.files .preview pre { max-height: none; }
+
+/* Banner */
+.banner { padding: 0.4rem 0.9rem; font-size: 0.85rem; text-align: center; }
+.banner.bad { background: rgba(249,117,131,0.12); color: var(--bad); border-bottom: 1px solid var(--bad); }
+.banner.warn { background: rgba(212,161,126,0.12); color: var(--warn); border-bottom: 1px solid var(--warn); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script nonce="__CSP_NONCE__">
+"use strict";
+
+// ---- State ---------------------------------------------------------
+
+const state = {
+  view: "list",
+  sessions: [],
+  agents: [],
+  groupBy: "project",
+  showCold: false,
+  banner: null,
+  modal: null,
+  current: null,
+};
+
+function setState(patch) {
+  Object.assign(state, patch);
+  render();
+}
+
+// ---- Markdown (XSS-safe) ------------------------------------------
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Apply inline markdown to a chunk of *already-escaped* HTML.
+function inlineMd(s) {
+  // Code spans first so their content isn't further transformed.
+  s = s.replace(/`([^`\n]+)`/g, (_m, c) => `<code>${c}</code>`);
+  // Bold + italic.
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
+  // Markdown links [text](url) — only http(s):// or relative paths.
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text, url) => {
+    if (!/^(https?:\/\/|\/|\.)/i.test(url)) {
+      return `[${text}](${url})`;
+    }
+    return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+  });
+  return s;
+}
+
+function renderMarkdown(src) {
+  if (typeof src !== "string") {
+    src = String(src ?? "");
+  }
+  const lines = src.split("\n");
+  let out = "";
+  let inCode = false;
+  let codeLang = "";
+  let codeBuf = [];
+  let listType = null; // "ul" | "ol"
+  let para = [];
+
+  function flushPara() {
+    if (para.length === 0) {
+      return;
+    }
+    out += `<p>${inlineMd(para.join(" "))}</p>`;
+    para = [];
+  }
+  function closeList() {
+    if (listType) {
+      out += `</${listType}>`;
+      listType = null;
+    }
+  }
+
+  for (const raw of lines) {
+    if (inCode) {
+      if (/^```/.test(raw)) {
+        out += `<pre><code data-lang="${escapeHtml(codeLang)}">${escapeHtml(codeBuf.join("\n"))}</code></pre>`;
+        inCode = false;
+        codeBuf = [];
+        codeLang = "";
+        continue;
+      }
+      codeBuf.push(raw);
+      continue;
+    }
+    if (/^```/.test(raw)) {
+      flushPara();
+      closeList();
+      inCode = true;
+      codeLang = raw.slice(3).trim();
+      continue;
+    }
+    const escaped = escapeHtml(raw);
+    if (/^\s*$/.test(raw)) {
+      flushPara();
+      closeList();
+      continue;
+    }
+    let m;
+    if ((m = raw.match(/^(#{1,3})\s+(.+)$/))) {
+      flushPara();
+      closeList();
+      const level = m[1].length;
+      out += `<h${level}>${inlineMd(escapeHtml(m[2]))}</h${level}>`;
+      continue;
+    }
+    if ((m = raw.match(/^\s*[-*]\s+(.*)$/))) {
+      flushPara();
+      if (listType !== "ul") {
+        closeList();
+        out += "<ul>";
+        listType = "ul";
+      }
+      out += `<li>${inlineMd(escapeHtml(m[1]))}</li>`;
+      continue;
+    }
+    if ((m = raw.match(/^\s*\d+\.\s+(.*)$/))) {
+      flushPara();
+      if (listType !== "ol") {
+        closeList();
+        out += "<ol>";
+        listType = "ol";
+      }
+      out += `<li>${inlineMd(escapeHtml(m[1]))}</li>`;
+      continue;
+    }
+    if ((m = raw.match(/^\s*>\s?(.*)$/))) {
+      flushPara();
+      closeList();
+      out += `<blockquote>${inlineMd(escapeHtml(m[1]))}</blockquote>`;
+      continue;
+    }
+    closeList();
+    para.push(escaped);
+  }
+  if (inCode) {
+    out += `<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`;
+  }
+  flushPara();
+  closeList();
+  return out;
+}
+
+// ---- DOM helpers ---------------------------------------------------
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  if (attrs) {
+    for (const [k, v] of Object.entries(attrs)) {
+      if (v === undefined || v === null || v === false) {
+        continue;
+      }
+      if (k === "class") {
+        node.className = v;
+      } else if (k.startsWith("on") && typeof v === "function") {
+        node.addEventListener(k.slice(2).toLowerCase(), v);
+      } else if (k === "html") {
+        node.innerHTML = v;
+      } else {
+        node.setAttribute(k, v);
+      }
+    }
+  }
+  for (const c of children) {
+    if (c == null || c === false) continue;
+    if (Array.isArray(c)) {
+      for (const cc of c) appendChild(node, cc);
+    } else {
+      appendChild(node, c);
+    }
+  }
+  return node;
+}
+function appendChild(parent, c) {
+  if (c instanceof Node) parent.appendChild(c);
+  else parent.appendChild(document.createTextNode(String(c)));
+}
+
+// ---- Network ------------------------------------------------------
+
+async function api(path, opts) {
+  const r = await fetch(path, {
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try {
+      const j = await r.json();
+      if (j && j.error) msg = j.error;
+    } catch {}
+    throw new Error(msg);
+  }
+  if (r.status === 204) return null;
+  return await r.json();
+}
+
+let pollTimer = null;
+async function pollSessions() {
+  try {
+    const params = state.showCold ? "?all=true" : "";
+    const data = await api("/api/sessions" + params);
+    setState({ sessions: data.sessions ?? [], banner: null });
+  } catch (err) {
+    setState({ banner: { kind: "bad", text: "hydra unreachable: " + err.message } });
+  }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollSessions();
+  pollTimer = setInterval(pollSessions, 2000);
+}
+
+async function loadAgents() {
+  try {
+    const data = await api("/api/agents");
+    setState({ agents: data.agents ?? [] });
+  } catch (err) {
+    setState({ banner: { kind: "warn", text: "agents unavailable: " + err.message } });
+  }
+}
+
+// ---- Session list rendering ---------------------------------------
+
+function renderList() {
+  const groups = groupSessions(state.sessions, state.groupBy);
+  const list = el("div", { class: "list" });
+  if (state.sessions.length === 0) {
+    list.appendChild(el("div", { class: "empty" }, "No sessions. Use + to spawn one, or run `acp-hydra launch <agent>` from your editor."));
+  }
+  for (const g of groups) {
+    const groupNode = el("div", { class: "group" });
+    if (g.label) {
+      groupNode.appendChild(el("h2", null, g.label));
+    }
+    for (const s of g.sessions) {
+      groupNode.appendChild(renderSessionCard(s));
+    }
+    list.appendChild(groupNode);
+  }
+  return list;
+}
+
+function groupSessions(sessions, mode) {
+  if (mode === "recent") {
+    const sorted = sessions.slice().sort((a, b) =>
+      String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")),
+    );
+    return [{ label: null, sessions: sorted }];
+  }
+  const map = new Map();
+  for (const s of sessions) {
+    const key = s.cwd || "(unknown)";
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(s);
+  }
+  const out = [];
+  for (const [cwd, items] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const last = cwd.split("/").filter(Boolean).pop() || cwd;
+    items.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    out.push({ label: `${last} — ${cwd}`, sessions: items });
+  }
+  return out;
+}
+
+function renderSessionCard(s) {
+  const title = s.title || s.sessionId.slice(0, 16);
+  const subtitle = `${s.agentId || "?"} · ${s.cwd || "?"}`;
+  return el(
+    "div",
+    {
+      class: "card",
+      onclick: (e) => {
+        if (e.target.closest("button")) return;
+        openChat(s.sessionId, s.status === "cold");
+      },
+    },
+    el(
+      "div",
+      { class: "meta" },
+      el("div", { class: "row1" }, title),
+      el("div", { class: "row2" }, subtitle),
+    ),
+    el(
+      "div",
+      { class: "badges" },
+      el(
+        "span",
+        { class: `badge ${s.status === "cold" ? "cold" : "live"}` },
+        s.status === "cold" ? "cold" : "live",
+      ),
+      el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
+    ),
+    el(
+      "div",
+      { class: "actions" },
+      el(
+        "button",
+        {
+          class: "danger",
+          onclick: (e) => {
+            e.stopPropagation();
+            killSession(s);
+          },
+        },
+        "×",
+      ),
+    ),
+  );
+}
+
+async function killSession(s) {
+  if (!confirm(`Kill session ${s.title || s.sessionId.slice(0, 12)}?`)) return;
+  try {
+    await api("/api/kill", { method: "POST", body: JSON.stringify({ sessionId: s.sessionId }) });
+    pollSessions();
+  } catch (err) {
+    setState({ banner: { kind: "bad", text: "kill failed: " + err.message } });
+  }
+}
+
+// ---- Spawn modal ---------------------------------------------------
+
+function openSpawnModal() {
+  setState({
+    modal: {
+      kind: "spawn",
+      cwd: "",
+      agentId: state.agents[0]?.id ?? "",
+      name: "",
+      prompt: "",
+      err: null,
+      busy: false,
+    },
+  });
+}
+
+function renderSpawnModal() {
+  const m = state.modal;
+  return el(
+    "div",
+    { class: "modal-bg", onclick: (e) => { if (e.target.classList.contains("modal-bg")) closeModal(); } },
+    el(
+      "div",
+      { class: "modal" },
+      el("h2", null, "Spawn session"),
+      el(
+        "div",
+        { class: "field" },
+        el("label", { for: "f-cwd" }, "cwd"),
+        el("input", {
+          id: "f-cwd",
+          value: m.cwd,
+          placeholder: "/home/you/dev/project",
+          oninput: (e) => { m.cwd = e.target.value; },
+        }),
+      ),
+      el(
+        "div",
+        { class: "field" },
+        el("label", { for: "f-agent" }, "agent"),
+        renderAgentSelect(m),
+      ),
+      el(
+        "div",
+        { class: "field" },
+        el("label", { for: "f-name" }, "name (optional)"),
+        el("input", {
+          id: "f-name",
+          value: m.name,
+          placeholder: "feature-x",
+          oninput: (e) => { m.name = e.target.value; },
+        }),
+      ),
+      el(
+        "div",
+        { class: "field" },
+        el("label", { for: "f-prompt" }, "first prompt (optional)"),
+        el(
+          "textarea",
+          {
+            id: "f-prompt",
+            rows: "4",
+            placeholder: "What should the agent do first?",
+            oninput: (e) => { m.prompt = e.target.value; },
+          },
+          m.prompt,
+        ),
+      ),
+      m.err ? el("div", { class: "err" }, m.err) : null,
+      el(
+        "div",
+        { class: "actions" },
+        el("button", { onclick: closeModal, disabled: m.busy }, "Cancel"),
+        el(
+          "button",
+          { class: "primary", onclick: doSpawn, disabled: m.busy },
+          m.busy ? "Spawning…" : "Spawn",
+        ),
+      ),
+    ),
+  );
+}
+
+function renderAgentSelect(m) {
+  const sel = el("select", {
+    id: "f-agent",
+    onchange: (e) => { m.agentId = e.target.value; },
+  });
+  if (state.agents.length === 0) {
+    sel.appendChild(el("option", { value: "" }, "(default)"));
+  }
+  for (const a of state.agents) {
+    const opt = el("option", { value: a.id }, a.id);
+    if (a.id === m.agentId) opt.setAttribute("selected", "");
+    sel.appendChild(opt);
+  }
+  return sel;
+}
+
+async function doSpawn() {
+  const m = state.modal;
+  if (!m.cwd) {
+    m.err = "cwd is required";
+    render();
+    return;
+  }
+  m.busy = true;
+  m.err = null;
+  render();
+  try {
+    const body = { cwd: m.cwd };
+    if (m.agentId) body.agentId = m.agentId;
+    if (m.name) body.name = m.name;
+    if (m.prompt) body.prompt = m.prompt;
+    const data = await api("/api/spawn", { method: "POST", body: JSON.stringify(body) });
+    closeModal();
+    pollSessions();
+    if (data && data.sessionId) {
+      openChat(data.sessionId, false);
+    }
+  } catch (err) {
+    m.err = err.message;
+    m.busy = false;
+    render();
+  }
+}
+
+function closeModal() {
+  setState({ modal: null });
+}
+
+// ---- Chat view -----------------------------------------------------
+
+function openChat(sessionId, load) {
+  closeChatSocket();
+  const session = state.sessions.find((s) => s.sessionId === sessionId);
+  state.current = {
+    sessionId,
+    title: session?.title || sessionId.slice(0, 16),
+    cwd: session?.cwd || "",
+    agentId: session?.agentId || "",
+    ws: null,
+    ready: false,
+    log: [], // ordered list of rendered items
+    toolCalls: new Map(),
+    pendingPermissions: new Map(),
+    pendingRequestById: new Map(),
+    spinner: null,
+    plan: null,
+    mode: null,
+    model: null,
+    modes: [],
+    models: [],
+    contextUsed: null,
+    contextSize: null,
+    cost: null,
+    fileOverlay: null,
+    composerValue: "",
+    busy: false,
+  };
+  setState({ view: "chat" });
+  const url = new URL("/ws", location.href);
+  url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("session", sessionId);
+  if (load) url.searchParams.set("load", "true");
+  const ws = new WebSocket(url.toString());
+  state.current.ws = ws;
+  ws.addEventListener("open", () => { /* wait for bridge/ready */ });
+  ws.addEventListener("message", (ev) => {
+    let parsed;
+    try { parsed = JSON.parse(ev.data); }
+    catch { return; }
+    handleFrame(parsed);
+  });
+  ws.addEventListener("close", () => {
+    if (state.current && state.current.ws === ws) {
+      state.current.ready = false;
+      pushLog({ kind: "system", text: "Disconnected." });
+      render();
+    }
+  });
+  ws.addEventListener("error", () => {
+    pushLog({ kind: "error", text: "Connection error." });
+    render();
+  });
+}
+
+function closeChat() {
+  closeChatSocket();
+  setState({ view: "list", current: null });
+}
+
+function closeChatSocket() {
+  if (state.current && state.current.ws) {
+    try { state.current.ws.close(); } catch {}
+    state.current.ws = null;
+  }
+}
+
+function pushLog(item) {
+  if (!state.current) return;
+  state.current.log.push(item);
+}
+
+function send(method, params) {
+  if (!state.current || !state.current.ws || state.current.ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  const id = (state.current.nextId = (state.current.nextId || 1)) ;
+  state.current.nextId = id + 1;
+  state.current.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+}
+
+function reply(id, result) {
+  if (!state.current || !state.current.ws || state.current.ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  state.current.ws.send(JSON.stringify({ jsonrpc: "2.0", id, result }));
+}
+
+function handleFrame(frame) {
+  if (!state.current) return;
+  if (frame.method === "bridge/ready") {
+    state.current.ready = true;
+    pushLog({ kind: "system", text: "Connected." });
+    render();
+    return;
+  }
+  if (frame.method === "bridge/error") {
+    pushLog({ kind: "error", text: `Bridge error: ${frame.params?.message ?? "?"}` });
+    render();
+    return;
+  }
+  if (frame.method && "id" in frame) {
+    handleAgentRequest(frame);
+    render();
+    return;
+  }
+  if (frame.method) {
+    handleNotification(frame);
+    render();
+    return;
+  }
+  // It's a response. We don't currently track replies for our own
+  // outbound requests in the UI; they're observed via the ensuing
+  // notifications.
+}
+
+function handleNotification(frame) {
+  if (frame.method !== "session/update") return;
+  const update = frame.params?.update;
+  if (!update || typeof update !== "object") return;
+  const kind = update.sessionUpdate;
+  switch (kind) {
+    case "user_message_chunk":
+      pushChunk("user", update.content);
+      break;
+    case "agent_message_chunk":
+      pushChunk("agent", update.content);
+      break;
+    case "agent_thought_chunk":
+      pushChunk("thought", update.content);
+      break;
+    case "tool_call":
+      onToolCall(update);
+      break;
+    case "tool_call_update":
+      onToolCallUpdate(update);
+      break;
+    case "current_mode_update":
+      state.current.mode = update.modeId ?? update.currentModeId;
+      if (update.availableModes) state.current.modes = update.availableModes;
+      break;
+    case "current_model_update":
+      state.current.model = update.modelId ?? update.currentModelId;
+      if (update.availableModels) state.current.models = update.availableModels;
+      break;
+    case "usage_update":
+      state.current.contextUsed = update.contextUsed ?? state.current.contextUsed;
+      state.current.contextSize = update.contextSize ?? state.current.contextSize;
+      if (update.cost) state.current.cost = update.cost;
+      break;
+    case "plan":
+      state.current.plan = update.entries ?? update.plan ?? null;
+      break;
+    case "prompt_received":
+      // Echo will appear via user_message_chunk; nothing to do.
+      break;
+    case "stop":
+    case "turn_complete":
+      finalizeTurn();
+      break;
+    default:
+      // Unknown but harmless; ignore.
+      break;
+  }
+}
+
+function pushChunk(role, content) {
+  const text = contentToText(content);
+  if (!text) return;
+  const last = state.current.log[state.current.log.length - 1];
+  const targetKind = role === "thought" ? "thought" : role;
+  if (last && last.kind === "stream" && last.role === targetKind) {
+    last.text += text;
+    return;
+  }
+  state.current.log.push({ kind: "stream", role: targetKind, text });
+}
+
+function contentToText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map(contentToText).join("");
+  }
+  if (content && typeof content === "object") {
+    if (typeof content.text === "string") return content.text;
+    if (typeof content.content === "string") return content.content;
+  }
+  return "";
+}
+
+function onToolCall(update) {
+  const tc = {
+    toolCallId: update.toolCallId,
+    title: update.title || update.kind || "tool",
+    kind: update.kind || "",
+    status: update.status || "in_progress",
+    content: extractToolContent(update.content),
+  };
+  state.current.toolCalls.set(tc.toolCallId, tc);
+  ensureSpinner();
+  state.current.spinner.toolCallIds.push(tc.toolCallId);
+}
+
+function onToolCallUpdate(update) {
+  const existing = state.current.toolCalls.get(update.toolCallId);
+  if (!existing) return;
+  if (update.status) existing.status = update.status;
+  if (update.title) existing.title = update.title;
+  if (update.content !== undefined) {
+    existing.content = (existing.content || "") + extractToolContent(update.content);
+  }
+}
+
+function extractToolContent(content) {
+  if (!content) return "";
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content.map(extractToolContent).join("");
+  if (typeof content === "object") {
+    if (content.text) return String(content.text);
+    if (content.content) return extractToolContent(content.content);
+    if (content.diff) return String(content.diff);
+    try { return JSON.stringify(content, null, 2); }
+    catch { return String(content); }
+  }
+  return "";
+}
+
+function ensureSpinner() {
+  if (!state.current.spinner) {
+    state.current.spinner = { toolCallIds: [], expanded: false };
+    pushLog({ kind: "spinner", spinner: state.current.spinner });
+  }
+}
+
+function finalizeTurn() {
+  // Drop the spinner entry; the tool call records remain in state but
+  // are no longer rendered as a clutter list.
+  state.current.spinner = null;
+  state.current.log = state.current.log.filter((e) => e.kind !== "spinner");
+}
+
+function handleAgentRequest(req) {
+  if (req.method === "session/request_permission") {
+    const params = req.params || {};
+    state.current.pendingPermissions.set(req.id, {
+      requestId: req.id,
+      toolCall: params.toolCall || {},
+      options: params.options || [],
+    });
+    pushLog({ kind: "perm", requestId: req.id });
+    return;
+  }
+  if (req.method === "session/permission_resolved") {
+    state.current.pendingPermissions.delete(req.id);
+    state.current.log = state.current.log.filter((e) => !(e.kind === "perm" && e.requestId === req.id));
+    return;
+  }
+  // Unknown agent request — reply with method-not-found so we don't
+  // hold the agent up.
+  state.current.ws.send(JSON.stringify({
+    jsonrpc: "2.0",
+    id: req.id,
+    error: { code: -32601, message: `method not handled: ${req.method}` },
+  }));
+}
+
+function respondPermission(requestId, optionId) {
+  const entry = state.current.pendingPermissions.get(requestId);
+  if (!entry) return;
+  state.current.pendingPermissions.delete(requestId);
+  state.current.log = state.current.log.filter((e) => !(e.kind === "perm" && e.requestId === requestId));
+  reply(requestId, {
+    outcome: optionId === "__cancel__"
+      ? { outcome: "cancelled" }
+      : { outcome: "selected", optionId },
+  });
+  render();
+}
+
+function sendPrompt() {
+  const text = state.current.composerValue.trim();
+  if (!text) return;
+  send("session/prompt", {
+    sessionId: state.current.sessionId,
+    prompt: [{ type: "text", text }],
+  });
+  state.current.composerValue = "";
+  render();
+}
+
+function sendCancel() {
+  send("session/cancel", { sessionId: state.current.sessionId });
+}
+
+function sendSetMode(modeId) {
+  send("session/set_mode", { sessionId: state.current.sessionId, modeId });
+}
+
+function sendSetModel(modelId) {
+  send("session/set_model", { sessionId: state.current.sessionId, modelId });
+}
+
+// ---- File overlay --------------------------------------------------
+
+async function openFiles() {
+  state.current.fileOverlay = { path: "", entries: [], preview: null, err: null };
+  render();
+  await listFiles("");
+}
+
+async function listFiles(p) {
+  try {
+    const data = await api("/api/files/list", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: state.current.sessionId, path: p }),
+    });
+    state.current.fileOverlay = {
+      path: data.path,
+      entries: data.entries || [],
+      preview: null,
+      err: null,
+    };
+    render();
+  } catch (err) {
+    state.current.fileOverlay = {
+      path: p,
+      entries: [],
+      preview: null,
+      err: err.message,
+    };
+    render();
+  }
+}
+
+async function readFile(p) {
+  try {
+    const data = await api("/api/files/read", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: state.current.sessionId, path: p }),
+    });
+    state.current.fileOverlay = {
+      path: state.current.fileOverlay.path,
+      entries: state.current.fileOverlay.entries,
+      preview: { path: p, content: data.content },
+      err: null,
+    };
+    render();
+  } catch (err) {
+    state.current.fileOverlay = {
+      ...state.current.fileOverlay,
+      err: err.message,
+    };
+    render();
+  }
+}
+
+function closeFiles() {
+  state.current.fileOverlay = null;
+  render();
+}
+
+function navigateFile(entry) {
+  const fo = state.current.fileOverlay;
+  const childPath = fo.path ? `${fo.path}/${entry.name}` : entry.name;
+  if (entry.kind === "dir") {
+    listFiles(childPath);
+  } else if (entry.kind === "file") {
+    readFile(childPath);
+  }
+}
+
+function fileBreadcrumb(path) {
+  const parts = path ? path.split("/").filter(Boolean) : [];
+  const crumbs = [
+    el("span", { class: "crumb", onclick: () => listFiles("") }, "."),
+  ];
+  let acc = "";
+  for (const p of parts) {
+    acc = acc ? `${acc}/${p}` : p;
+    const target = acc;
+    crumbs.push(document.createTextNode(" / "));
+    crumbs.push(el("span", { class: "crumb", onclick: () => listFiles(target) }, p));
+  }
+  return el("div", { class: "crumbs" }, crumbs);
+}
+
+function renderFileOverlay() {
+  const fo = state.current.fileOverlay;
+  if (!fo) return null;
+  const body = fo.preview
+    ? el(
+        "div",
+        { class: "preview" },
+        el("div", { class: "crumbs" }, el("span", { class: "crumb", onclick: () => closeFilePreview() }, "← back to listing"), document.createTextNode(`  ${fo.preview.path}`)),
+        el("pre", { html: escapeHtml(fo.preview.content) }),
+      )
+    : el(
+        "div",
+        { class: "body" },
+        fo.err ? el("div", { class: "msg error" }, fo.err) : null,
+        fo.entries.map((e) =>
+          el(
+            "div",
+            { class: "entry", onclick: () => navigateFile(e) },
+            el("span", { class: "icon" }, e.kind === "dir" ? "▸" : "·"),
+            el("span", { class: "name" }, e.name),
+            el("span", { class: "size" }, e.kind === "file" ? `${e.size}b` : ""),
+          ),
+        ),
+      );
+  return el(
+    "div",
+    { class: "modal-bg", onclick: (ev) => { if (ev.target.classList.contains("modal-bg")) closeFiles(); } },
+    el(
+      "div",
+      { class: "modal", style: "width:42rem;height:80vh;display:flex;flex-direction:column;padding:0" },
+      el(
+        "div",
+        { class: "topbar", style: "border-bottom:1px solid var(--border)" },
+        el("span", { class: "title" }, "Files"),
+        el("span", { class: "pill" }, state.current.cwd),
+        el("span", { class: "spacer" }),
+        el("button", { onclick: closeFiles }, "×"),
+      ),
+      fileBreadcrumb(fo.path),
+      el("div", { class: "files", style: "flex:1;overflow:hidden;display:flex;flex-direction:column" }, body),
+    ),
+  );
+}
+
+function closeFilePreview() {
+  const fo = state.current.fileOverlay;
+  fo.preview = null;
+  render();
+}
+
+// ---- Mode / model picker ------------------------------------------
+
+function openModePicker() {
+  if (!state.current.modes || state.current.modes.length === 0) {
+    return;
+  }
+  setState({ modal: { kind: "modes" } });
+}
+
+function openModelPicker() {
+  if (!state.current.models || state.current.models.length === 0) {
+    return;
+  }
+  setState({ modal: { kind: "models" } });
+}
+
+function renderListModal(title, items, selectedId, onPick) {
+  return el(
+    "div",
+    { class: "modal-bg", onclick: (e) => { if (e.target.classList.contains("modal-bg")) closeModal(); } },
+    el(
+      "div",
+      { class: "modal" },
+      el("h2", null, title),
+      items.map((it) =>
+        el(
+          "div",
+          { class: "card", onclick: () => { onPick(it); closeModal(); } },
+          el(
+            "div",
+            { class: "meta" },
+            el("div", { class: "row1" }, it.name || it.id),
+            el("div", { class: "row2" }, it.id),
+          ),
+          it.id === selectedId ? el("span", { class: "badge live" }, "current") : null,
+        ),
+      ),
+    ),
+  );
+}
+
+// ---- Top-level render ---------------------------------------------
+
+function renderChat() {
+  const c = state.current;
+  const header = el(
+    "div",
+    { class: "chat-header" },
+    el("button", { class: "ghost", onclick: closeChat }, "←"),
+    el(
+      "div",
+      { class: "info" },
+      el("div", { class: "row1" }, c.title),
+      el("div", { class: "row2" }, `${c.agentId || "?"} · ${c.cwd || "?"}`),
+    ),
+    c.mode ? el("span", { class: "pill clickable", onclick: openModePicker }, "mode: " + c.mode) : null,
+    c.model ? el("span", { class: "pill clickable", onclick: openModelPicker }, "model: " + c.model) : null,
+    c.contextUsed != null && c.contextSize ? el("span", { class: "pill" }, `${c.contextUsed}/${c.contextSize} ctx`) : null,
+    el("button", { onclick: openFiles }, "Files"),
+  );
+
+  const body = el("div", { class: "chat-body" });
+  for (const item of c.log) {
+    body.appendChild(renderLogItem(item));
+  }
+  if (c.plan) {
+    body.appendChild(renderPlan(c.plan));
+  }
+
+  const composerOnKey = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      sendPrompt();
+    }
+  };
+  const textarea = el("textarea", {
+    placeholder: c.ready ? "Message…" : "Connecting…",
+    rows: "1",
+    onkeydown: composerOnKey,
+    oninput: (e) => {
+      c.composerValue = e.target.value;
+      e.target.style.height = "auto";
+      e.target.style.height = e.target.scrollHeight + "px";
+    },
+  }, c.composerValue);
+
+  const composer = el(
+    "div",
+    { class: "composer" },
+    textarea,
+    el("button", { class: "stop", onclick: sendCancel, title: "Cancel current turn" }, "Stop"),
+    el("button", { class: "primary", onclick: sendPrompt, disabled: !c.ready }, "Send"),
+  );
+
+  // Defer scroll-to-bottom so children are rendered first.
+  setTimeout(() => { body.scrollTop = body.scrollHeight; }, 0);
+
+  return el("div", { class: "chat" }, header, body, composer);
+}
+
+function renderLogItem(item) {
+  if (item.kind === "stream") {
+    const cls = item.role === "user" ? "msg user" : item.role === "thought" ? "msg system" : "msg agent";
+    const node = el("div", { class: cls });
+    const body = el("div", { class: "body" });
+    body.innerHTML = renderMarkdown(item.text);
+    node.appendChild(body);
+    return node;
+  }
+  if (item.kind === "system") {
+    return el("div", { class: "msg system" }, item.text);
+  }
+  if (item.kind === "error") {
+    return el("div", { class: "msg error" }, item.text);
+  }
+  if (item.kind === "spinner") {
+    return renderSpinner(item.spinner);
+  }
+  if (item.kind === "perm") {
+    const entry = state.current.pendingPermissions.get(item.requestId);
+    if (!entry) return document.createTextNode("");
+    return renderPermission(entry);
+  }
+  return document.createTextNode("");
+}
+
+function renderSpinner(spinner) {
+  if (!spinner.expanded) {
+    return el(
+      "div",
+      { class: "spinner", onclick: () => { spinner.expanded = true; render(); } },
+      el(
+        "div",
+        { class: "head" },
+        el("span", { class: "dot" }),
+        el("span", null, spinner.toolCallIds.length === 0 ? "thinking…" : `working — ${spinner.toolCallIds.length} tool call${spinner.toolCallIds.length === 1 ? "" : "s"}`),
+      ),
+    );
+  }
+  const items = spinner.toolCallIds.map((id) => {
+    const tc = state.current.toolCalls.get(id);
+    if (!tc) return null;
+    const icon = tc.status === "completed" || tc.status === "success" ? "✅" : tc.status === "failed" || tc.status === "error" ? "❌" : "▶";
+    return el("li", null, el("span", { class: "icon" }, icon), document.createTextNode(" " + tc.title));
+  });
+  return el(
+    "div",
+    { class: "spinner expanded", onclick: () => { spinner.expanded = false; render(); } },
+    el("div", { class: "head" }, el("span", { class: "dot" }), el("span", null, "working")),
+    el("ul", null, items),
+  );
+}
+
+function renderPermission(entry) {
+  const tc = entry.toolCall || {};
+  return el(
+    "div",
+    { class: "perm" },
+    el("div", { class: "title" }, "🔒 Permission requested"),
+    el("div", { class: "desc" }, tc.title || tc.name || "tool call"),
+    el(
+      "div",
+      { class: "opts" },
+      entry.options.map((o) =>
+        el(
+          "button",
+          {
+            class: o.kind?.startsWith("allow") ? "primary" : o.kind?.startsWith("reject") ? "danger" : "",
+            onclick: () => respondPermission(entry.requestId, o.optionId),
+          },
+          o.name || o.optionId,
+        ),
+      ),
+      el(
+        "button",
+        { onclick: () => respondPermission(entry.requestId, "__cancel__") },
+        "Cancel",
+      ),
+    ),
+  );
+}
+
+function renderPlan(plan) {
+  if (!Array.isArray(plan)) return document.createTextNode("");
+  return el(
+    "div",
+    { class: "msg agent" },
+    el("div", { class: "body" }, el("strong", null, "Plan")),
+    el(
+      "ul",
+      null,
+      plan.map((p) =>
+        el(
+          "li",
+          null,
+          `${p.status === "completed" ? "✓" : p.status === "in_progress" ? "▸" : "·"} ${p.content || p.title || ""}`,
+        ),
+      ),
+    ),
+  );
+}
+
+// ---- Top-level shell ----------------------------------------------
+
+function render() {
+  const root = document.getElementById("app");
+  if (!root) return;
+  root.replaceChildren();
+  if (state.banner) {
+    root.appendChild(el("div", { class: "banner " + state.banner.kind }, state.banner.text));
+  }
+  if (state.view === "list") {
+    root.appendChild(renderTopbar());
+    root.appendChild(renderList());
+  } else if (state.view === "chat") {
+    root.appendChild(renderChat());
+    if (state.current.fileOverlay) {
+      root.appendChild(renderFileOverlay());
+    }
+  }
+  if (state.modal) {
+    if (state.modal.kind === "spawn") {
+      root.appendChild(renderSpawnModal());
+    } else if (state.modal.kind === "modes") {
+      root.appendChild(renderListModal("Mode", state.current.modes, state.current.mode, (m) => sendSetMode(m.id)));
+    } else if (state.modal.kind === "models") {
+      root.appendChild(renderListModal("Model", state.current.models, state.current.model, (m) => sendSetModel(m.id)));
+    }
+  }
+}
+
+function renderTopbar() {
+  return el(
+    "div",
+    { class: "topbar" },
+    el("span", { class: "title" }, "acp-hydra-browser"),
+    el(
+      "span",
+      {
+        class: "pill clickable",
+        onclick: () => setState({ groupBy: state.groupBy === "project" ? "recent" : "project" }),
+      },
+      `group: ${state.groupBy}`,
+    ),
+    el(
+      "span",
+      {
+        class: "pill clickable",
+        onclick: () => { state.showCold = !state.showCold; pollSessions(); },
+      },
+      state.showCold ? "incl. cold" : "live only",
+    ),
+    el("span", { class: "spacer" }),
+    el("button", { onclick: openSpawnModal, class: "primary" }, "+ Spawn"),
+  );
+}
+
+// ---- Boot ----------------------------------------------------------
+
+window.addEventListener("DOMContentLoaded", () => {
+  render();
+  startPolling();
+  loadAgents();
+});
+</script>
+</body>
+</html>
