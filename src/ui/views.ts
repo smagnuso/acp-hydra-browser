@@ -506,7 +506,7 @@ function renderChat(c: ChatState): HTMLElement {
             class: "pill",
             title: `${c.contextUsed.toLocaleString()} / ${c.contextSize.toLocaleString()} context tokens`,
           },
-          `ctx ${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
+          `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)} tokens`,
         )
       : null,
     fmtCost(c.cost)
