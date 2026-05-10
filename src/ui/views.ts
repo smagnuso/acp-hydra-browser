@@ -28,6 +28,47 @@ import type {
   SpinnerState,
 } from "./types.js";
 
+// ---- Format helpers ---------------------------------------------
+
+// Compact-format a token count: <1k → "n", <1M → "n.nk", else "n.nM".
+// Used in the chat header where horizontal space is scarce.
+function fmtTokens(n: number): string {
+  if (!Number.isFinite(n)) return "?";
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) {
+    const v = (n / 1000).toFixed(n < 10_000 ? 1 : 0);
+    return v.replace(/\.0$/, "") + "k";
+  }
+  return (n / 1_000_000).toFixed(2).replace(/\.?0+$/, "") + "M";
+}
+
+// Format an ACP cost field. The agent-side shape varies — sometimes
+// a bare number (assumed USD), sometimes { amount, currency }, and
+// some agents nest under { total: { amount, currency } }. We probe
+// each layout, fall back to USD, and stretch decimals based on
+// magnitude so sub-dollar costs stay readable.
+function fmtCost(cost: unknown): string | null {
+  let amount: number | null = null;
+  let currency = "USD";
+  if (typeof cost === "number") {
+    amount = cost;
+  } else if (cost && typeof cost === "object") {
+    const c = cost as { amount?: unknown; currency?: unknown; total?: unknown };
+    if (typeof c.amount === "number") amount = c.amount;
+    else if (typeof c.total === "number") amount = c.total;
+    else if (c.total && typeof c.total === "object") {
+      const t = c.total as { amount?: unknown; currency?: unknown };
+      if (typeof t.amount === "number") amount = t.amount;
+      if (typeof t.currency === "string") currency = t.currency;
+    }
+    if (typeof c.currency === "string") currency = c.currency;
+  }
+  if (amount === null) return null;
+  const decimals = amount < 0.01 ? 4 : amount < 1 ? 3 : 2;
+  if (currency === "USD") return `$${amount.toFixed(decimals)}`;
+  return `${amount.toFixed(decimals)} ${currency}`;
+}
+
 // ---- Top-level shell ---------------------------------------------
 
 export function renderApp(root: HTMLElement, s: AppState): void {

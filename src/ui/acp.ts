@@ -336,8 +336,14 @@ export function handleNotification(frame: JsonRpcFrame): void {
       break;
     case "usage_update":
       if (state.current) {
-        if (typeof update.contextUsed === "number") state.current.contextUsed = update.contextUsed;
-        if (typeof update.contextSize === "number") state.current.contextSize = update.contextSize;
+        // Wire shape (per acp-hydra-slack's session.ts:583): { used,
+        // size, cost: { amount, currency } }. Accept the alternate
+        // contextUsed/contextSize names too in case any agent uses
+        // them.
+        const used = (update.used ?? update.contextUsed) as unknown;
+        const size = (update.size ?? update.contextSize) as unknown;
+        if (typeof used === "number") state.current.contextUsed = used;
+        if (typeof size === "number") state.current.contextSize = size;
         if (update.cost) state.current.cost = update.cost;
       }
       break;
