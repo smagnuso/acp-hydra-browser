@@ -64,7 +64,11 @@ export function openChat(sessionId: string, load: boolean): void {
   );
   const initial: ChatState = {
     sessionId,
-    title: session?.title || sessionId.slice(0, 16),
+    // Empty string is the right sentinel here — renderChat falls back
+    // to its own placeholder when this is empty and there's no live
+    // session metadata yet. Doing the placeholder here too would mean
+    // a brief flash of "untitled · …" before the title-cache landed.
+    title: session?.title ?? "",
     cwd: session?.cwd || "",
     agentId: session?.agentId || "",
     ws: null,

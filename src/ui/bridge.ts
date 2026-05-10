@@ -34,6 +34,16 @@ export function send(method: string, params: unknown): number | undefined {
   return id;
 }
 
+// Send a JSON-RPC notification (no id, no response expected). Used for
+// session/cancel, which is a notification per the ACP spec.
+export function notify(method: string, params: unknown): void {
+  const c = state.current;
+  if (!c || !c.ws || c.ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  c.ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+}
+
 // Send a JSON-RPC response (used for replying to permission asks).
 export function reply(id: number | string, result: unknown): void {
   const c = state.current;

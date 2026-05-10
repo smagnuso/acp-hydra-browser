@@ -6,7 +6,7 @@
 
 import { state } from "./state.js";
 import { render } from "./renderer.js";
-import { send } from "./bridge.js";
+import { notify, send } from "./bridge.js";
 import { ensureSpinner } from "./acp.js";
 import type { ChatState, QueueEntry } from "./types.js";
 

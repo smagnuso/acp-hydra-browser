@@ -30,6 +30,22 @@ import type {
 
 // ---- Format helpers ---------------------------------------------
 
+// Title fallback when neither hydra nor the title-cache has a real
+// title for the session. Subtitle rows always show the short session
+// id alongside agent/cwd, so the title row can stay clean.
+function fallbackTitle(_sessionId: string): string {
+  return "untitled";
+}
+
+// Short, copy-pasteable form of the session id for inline display in
+// subtitle rows. Strips the redundant "hydra_session_" prefix and
+// truncates to the first 10 chars of the unique suffix — long enough
+// to be distinct, short enough to leave room for agent + cwd.
+function shortSessionId(sessionId: string): string {
+  const tail = sessionId.replace(/^hydra_session_/, "");
+  return tail.length > 10 ? tail.slice(0, 10) : tail;
+}
+
 // Compact-format a token count: <1k → "n", <1M → "n.nk", else "n.nM".
 // Used in the chat header where horizontal space is scarce.
 function fmtTokens(n: number): string {
@@ -200,8 +216,8 @@ function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): Ses
 }
 
 function renderSessionCard(s: SessionInfo): HTMLElement {
-  const title = s.title || s.sessionId.slice(0, 16);
-  const subtitle = `${s.agentId || "?"} · ${s.cwd || "?"}`;
+  const title = s.title || fallbackTitle(s.sessionId);
+  const subtitle = `${shortSessionId(s.sessionId)} · ${s.agentId || "?"} · ${s.cwd || "?"}`;
   return el(
     "div",
     {
@@ -253,7 +269,12 @@ function renderSessionCard(s: SessionInfo): HTMLElement {
 }
 
 async function killSession(s: SessionInfo): Promise<void> {
-  if (!confirm(`Kill session ${s.title || s.sessionId.slice(0, 12)}?`)) return;
+  if (
+    !confirm(
+      `Kill session ${s.title ? `"${s.title}" (${shortSessionId(s.sessionId)})` : shortSessionId(s.sessionId)}?`,
+    )
+  )
+    return;
   try {
     await api("/api/kill", {
       method: "POST",
@@ -479,7 +500,7 @@ function renderChat(c: ChatState): HTMLElement {
   // deep-link reload (where the SPA opened the chat before any poll
   // landed) gets the real title/cwd/agentId once polling completes.
   const live = state.sessions.find((s) => s.sessionId === c.sessionId);
-  const title = live?.title || c.title;
+  const title = live?.title || c.title || fallbackTitle(c.sessionId);
   const cwd = live?.cwd || c.cwd;
   const agentId = live?.agentId || c.agentId;
   const header = el(
@@ -490,7 +511,11 @@ function renderChat(c: ChatState): HTMLElement {
       "div",
       { class: "info" },
       el("div", { class: "row1" }, title),
-      el("div", { class: "row2" }, `${agentId || "?"} · ${cwd || "?"}`),
+      el(
+        "div",
+        { class: "row2" },
+        `${shortSessionId(c.sessionId)} · ${agentId || "?"} · ${cwd || "?"}`,
+      ),
     ),
     !c.ready ? el("span", { class: "pill" }, "connecting…") : null,
     c.mode
