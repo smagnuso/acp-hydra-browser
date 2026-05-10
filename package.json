@@ -1,8 +1,35 @@
 {
-  "name": "acp-hydra-browser",
+  "name": "@acp-hydra/browser",
   "version": "0.1.0",
   "description": "Browser-based UI for acp-hydra sessions.",
+  "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/smagnuson/acp-hydra-browser#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smagnuson/acp-hydra-browser.git"
+  },
+  "bugs": {
+    "url": "https://github.com/smagnuson/acp-hydra-browser/issues"
+  },
+  "keywords": [
+    "acp",
+    "acp-hydra",
+    "browser",
+    "spa",
+    "agent-client-protocol",
+    "claude",
+    "codex"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "main": "dist/index.js",
   "bin": {
     "acp-hydra-browser": "dist/index.js"
@@ -15,7 +42,8 @@
     "start": "node dist/index.js",
     "dev": "npm run build && node dist/index.js",
     "test": "node --test --import tsx 'test/**/*.test.ts'",
-    "lint": "tsc -p . --noEmit && tsc -p tsconfig.ui.json --noEmit"
+    "lint": "tsc -p . --noEmit && tsc -p tsconfig.ui.json --noEmit",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20"

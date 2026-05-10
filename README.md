@@ -37,16 +37,33 @@ The extension exposes:
 
 ## Setup
 
-1. **Build.**
+1. **Install or build.**
+
+   From npm (recommended once published):
 
    ```sh
+   npm install -g @acp-hydra/browser
+   ```
+
+   This drops an `acp-hydra-browser` binary on your PATH.
+
+   Or from source:
+
+   ```sh
+   git clone https://github.com/smagnuson/acp-hydra-browser.git ~/dev/acp-hydra-browser
    cd ~/dev/acp-hydra-browser
    npm install
    npm run build
    ```
 
 2. **Run as a hydra extension (recommended).** Register the extension
-   with hydra:
+   with hydra. If installed via npm:
+
+   ```sh
+   acp-hydra extensions add acp-hydra-browser --command acp-hydra-browser
+   ```
+
+   Or pointed at a local build:
 
    ```sh
    acp-hydra extensions add acp-hydra-browser \
