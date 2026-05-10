@@ -4,7 +4,7 @@ A browser-based UI for [acp-hydra](https://github.com/smagnuson/acp-hydra)
 sessions. Runs as a hydra extension (or standalone) and serves a small
 single-page app on localhost that lists live sessions, mirrors them in real
 time, and lets you prompt, approve permission requests, switch modes/models,
-spawn fresh sessions, kill old ones, and browse the project files of any
+create fresh sessions, kill old ones, and browse the project files of any
 session — all from a phone or laptop browser.
 
 The hydra master token never leaves the machine; the browser authenticates
@@ -26,8 +26,8 @@ with a separate per-host authkey instead.
 
 The extension exposes:
 
-- **HTTP routes** at `/api/sessions`, `/api/agents`, `/api/spawn`, `/api/kill`,
-  `/api/files/list`, `/api/files/read`, `/api/health`.
+- **HTTP routes** at `/api/sessions` (GET list, POST create), `/api/agents`,
+  `/api/kill`, `/api/files/list`, `/api/files/read`, `/api/health`.
 - **A WebSocket bridge** at `/ws?session=<id>`. Each browser tab gets its
   own attach to hydra's `/acp` as `controller`; ACP frames flow through
   unchanged in the upstream→browser direction. Browser→upstream traffic is
@@ -249,7 +249,7 @@ under the built-in Node test runner.
 ## Status
 
 Experimental. v1 covers list / chat / tool calls / permissions /
-spawn / kill / file browse / mode + model picker. Out of scope:
+session create / kill / file browse / mode + model picker. Out of scope:
 multi-user UI, image upload from the browser into the agent,
 transcript search.
 

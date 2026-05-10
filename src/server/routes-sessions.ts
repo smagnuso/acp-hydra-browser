@@ -6,7 +6,7 @@ import type { ServerContext } from "./http.js";
 
 const log = logger("routes-sessions");
 
-interface SpawnBody {
+interface CreateSessionBody {
   cwd?: string;
   agentId?: string;
   name?: string;
@@ -63,23 +63,23 @@ export function registerSessionRoutes(
     }
   });
 
-  app.post("/api/spawn", async (request, reply) => {
-    const body = (request.body ?? {}) as SpawnBody;
+  app.post("/api/sessions", async (request, reply) => {
+    const body = (request.body ?? {}) as CreateSessionBody;
     if (!body.cwd || typeof body.cwd !== "string") {
       reply.code(400).send({ error: "cwd required" });
       return;
     }
     try {
-      const result = await spawnSession(ctx, body);
+      const result = await createSession(ctx, body);
       reply.code(201).send(result);
     } catch (err) {
-      log.warn(`spawn failed: ${(err as Error).message}`);
+      log.warn(`session creation failed: ${(err as Error).message}`);
       reply.code(502).send({ error: (err as Error).message });
     }
   });
 }
 
-interface SpawnResult {
+interface CreateSessionResult {
   sessionId: string;
   agentId: string | undefined;
   cwd: string;
@@ -87,14 +87,14 @@ interface SpawnResult {
 
 // Open a transient WSS to hydra, initialize, session/new (with name in
 // _meta), optionally session/prompt, close. Returns the new sessionId.
-async function spawnSession(
+async function createSession(
   ctx: ServerContext,
-  body: SpawnBody,
-): Promise<SpawnResult> {
+  body: CreateSessionBody,
+): Promise<CreateSessionResult> {
   const conn = new UpstreamConnection({
     daemonWsUrl: ctx.config.hydraWsUrl,
     token: ctx.config.hydraToken,
-    clientName: "acp-hydra-browser-spawn",
+    clientName: "acp-hydra-browser-session",
   });
 
   const opened = new Promise<void>((resolveOpen, rejectOpen) => {

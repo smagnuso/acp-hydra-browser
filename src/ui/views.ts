@@ -24,7 +24,7 @@ import type {
   PermissionEntry,
   QueueEntry,
   SessionInfo,
-  SpawnModalData,
+  SessionModalData,
   SpinnerState,
 } from "./types.js";
 
@@ -103,8 +103,8 @@ export function renderApp(root: HTMLElement, s: AppState): void {
     }
   }
   if (s.modal) {
-    if (s.modal.kind === "spawn") {
-      root.appendChild(renderSpawnModal(s.modal));
+    if (s.modal.kind === "session") {
+      root.appendChild(renderSessionModal(s.modal));
     } else if (s.modal.kind === "modes" && s.current) {
       root.appendChild(
         renderListModal(
@@ -156,7 +156,7 @@ function renderTopbar(): HTMLElement {
       state.showCold ? "all" : "live",
     ),
     el("span", { class: "spacer" }),
-    el("button", { onclick: openSpawnModal, class: "primary" }, "+ Spawn"),
+    el("button", { onclick: openSessionModal, class: "primary" }, "+ Session"),
   );
 }
 
@@ -170,7 +170,7 @@ function renderList(): HTMLElement {
       el(
         "div",
         { class: "empty" },
-        "No sessions. Use + to spawn one, or run `acp-hydra launch <agent>` from your editor.",
+        "No sessions. Use + to create one, or run `acp-hydra launch <agent>` from your editor.",
       ),
     );
   }
@@ -289,12 +289,12 @@ async function killSession(s: SessionInfo): Promise<void> {
   }
 }
 
-// ---- Spawn modal -------------------------------------------------
+// ---- New-session modal -------------------------------------------
 
-function openSpawnModal(): void {
+function openSessionModal(): void {
   setState({
     modal: {
-      kind: "spawn",
+      kind: "session",
       cwd: "",
       agentId: state.agents[0]?.id ?? "",
       name: "",
@@ -305,7 +305,7 @@ function openSpawnModal(): void {
   });
 }
 
-function renderSpawnModal(m: SpawnModalData): HTMLElement {
+function renderSessionModal(m: SessionModalData): HTMLElement {
   return el(
     "div",
     {
@@ -317,7 +317,7 @@ function renderSpawnModal(m: SpawnModalData): HTMLElement {
     el(
       "div",
       { class: "modal" },
-      el("h2", null, "Spawn session"),
+      el("h2", null, "New session"),
       el(
         "div",
         { class: "field" },
@@ -374,15 +374,15 @@ function renderSpawnModal(m: SpawnModalData): HTMLElement {
         el("button", { onclick: closeModal, disabled: m.busy }, "Cancel"),
         el(
           "button",
-          { class: "primary", onclick: doSpawn, disabled: m.busy },
-          m.busy ? "Spawning…" : "Spawn",
+          { class: "primary", onclick: createSession, disabled: m.busy },
+          m.busy ? "Creating…" : "Create",
         ),
       ),
     ),
   );
 }
 
-function renderAgentSelect(m: SpawnModalData): HTMLElement {
+function renderAgentSelect(m: SessionModalData): HTMLElement {
   const sel = el("select", {
     id: "f-agent",
     onchange: (e: Event) => {
@@ -400,9 +400,9 @@ function renderAgentSelect(m: SpawnModalData): HTMLElement {
   return sel;
 }
 
-async function doSpawn(): Promise<void> {
-  const m = state.modal as SpawnModalData | null;
-  if (!m || m.kind !== "spawn") return;
+async function createSession(): Promise<void> {
+  const m = state.modal as SessionModalData | null;
+  if (!m || m.kind !== "session") return;
   if (!m.cwd) {
     m.err = "cwd is required";
     render();
@@ -416,7 +416,7 @@ async function doSpawn(): Promise<void> {
     if (m.agentId) body.agentId = m.agentId;
     if (m.name) body.name = m.name;
     if (m.prompt) body.prompt = m.prompt;
-    const data = await api<{ sessionId?: string }>("/api/spawn", {
+    const data = await api<{ sessionId?: string }>("/api/sessions", {
       method: "POST",
       body: JSON.stringify(body),
     });

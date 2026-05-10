@@ -126,8 +126,8 @@ export interface ChatState {
   nextId?: number;
 }
 
-export interface SpawnModalData {
-  kind: "spawn";
+export interface SessionModalData {
+  kind: "session";
   cwd: string;
   agentId: string;
   name: string;
@@ -137,7 +137,7 @@ export interface SpawnModalData {
 }
 
 export type ModalState =
-  | SpawnModalData
+  | SessionModalData
   | { kind: "modes" }
   | { kind: "models" }
   | null;
