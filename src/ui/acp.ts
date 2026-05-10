@@ -357,6 +357,16 @@ export function handleNotification(frame: JsonRpcFrame): void {
     case "turn_complete":
       finalizeTurn();
       break;
+    case "session_info_update":
+      // Hydra synthesizes this on the first prompt of a session and
+      // forwards any agent-emitted update authoritatively. Either way,
+      // adopt the new title in the chat header. The session list view
+      // picks the same change up via /api/sessions polling, so list
+      // and chat stay coherent without an extra request.
+      if (state.current && typeof update.title === "string") {
+        state.current.title = update.title;
+      }
+      break;
     default:
       // Unknown but harmless; ignore.
       break;

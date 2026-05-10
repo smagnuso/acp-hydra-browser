@@ -3,7 +3,6 @@ import { HydraRestError } from "../hydra/client.js";
 import { UpstreamConnection, runInitialize } from "../hydra/ws.js";
 import { logger } from "../util/log.js";
 import type { ServerContext } from "./http.js";
-import { getSeededTitle, seedSessionTitle } from "./title-cache.js";
 
 const log = logger("routes-sessions");
 
@@ -42,18 +41,6 @@ export function registerSessionRoutes(
     const all = query?.all === "true" || query?.all === "1";
     try {
       const result = await ctx.rest.listSessions({ cwd: query?.cwd, all });
-      // Fold our local first-prompt seed into any session whose hydra
-      // title is empty so the list view and chat header show something
-      // meaningful for !spawn-style sessions that never received an
-      // editor name via _meta.acp-hydra.name at session/new.
-      for (const s of result.sessions ?? []) {
-        if (!s.title) {
-          const seed = getSeededTitle(s.sessionId);
-          if (seed) {
-            s.title = seed;
-          }
-        }
-      }
       reply.send(result);
     } catch (err) {
       const status = err instanceof HydraRestError ? err.status : 502;
@@ -135,7 +122,6 @@ async function spawnSession(
       _meta?: Record<string, unknown>;
     };
     if (body.prompt && body.prompt.trim().length > 0) {
-      seedSessionTitle(newResult.sessionId, body.prompt);
       await conn.request("session/prompt", {
         sessionId: newResult.sessionId,
         prompt: [{ type: "text", text: body.prompt }],

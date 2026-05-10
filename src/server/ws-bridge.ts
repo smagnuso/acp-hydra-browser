@@ -17,7 +17,6 @@ import {
   constantTimeKeyMatch,
   parseCookies,
 } from "./auth.js";
-import { extractPromptText, seedSessionTitle } from "./title-cache.js";
 import { checkStateChanging } from "../util/csrf.js";
 import type { ServerContext } from "./http.js";
 
@@ -212,15 +211,6 @@ function handleConnection(
         msg.params && typeof msg.params === "object"
           ? { ...(msg.params as Record<string, unknown>), sessionId }
           : { sessionId };
-      // Seed a fallback title from the first prompt's text so sessions
-      // without an editor-supplied name (e.g. spawned through this UI)
-      // still get a useful header in the list view.
-      if (msg.method === "session/prompt") {
-        const text = extractPromptText(params);
-        if (text) {
-          seedSessionTitle(sessionId, text);
-        }
-      }
       upstream.sendRaw({
         jsonrpc: "2.0",
         id: msg.id,
