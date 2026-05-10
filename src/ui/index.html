@@ -175,7 +175,11 @@ const state = {
   sessions: [],
   agents: [],
   groupBy: "project",
-  showCold: false,
+  // Default to listing cold (disk-only) sessions too. Clicking one
+  // attaches over WSS, which causes hydra to resurrect it from disk
+  // automatically — same flow acp-hydra-slack uses when a user types
+  // in a thread whose bridge has gone away.
+  showCold: true,
   banner: null,
   modal: null,
   current: null,
@@ -504,7 +508,13 @@ function renderSessionCard(s) {
       { class: "badges" },
       el(
         "span",
-        { class: `badge ${s.status === "cold" ? "cold" : "live"}` },
+        {
+          class: `badge ${s.status === "cold" ? "cold" : "live"}`,
+          title:
+            s.status === "cold"
+              ? "Disk-only — opening will resurrect the session"
+              : "Live in-memory session",
+        },
         s.status === "cold" ? "cold" : "live",
       ),
       el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
@@ -721,6 +731,12 @@ function openChat(sessionId, load) {
     // resolves once it flips false.
     inTurn: false,
     idleListeners: [],
+    // Drained when the WS bridge sends bridge/ready. Lets a queued
+    // prompt wait for the handshake to finish (especially relevant
+    // for cold-session resurrection: clicking a cold card opens a
+    // WS that takes a moment to attach, and the user may have
+    // started typing immediately).
+    readyListeners: [],
   };
   setState({ view: "chat" });
   const url = new URL("/ws", location.href);
@@ -739,6 +755,12 @@ function openChat(sessionId, load) {
   ws.addEventListener("close", () => {
     if (state.current && state.current.ws === ws) {
       state.current.ready = false;
+      // Cancel anything still in the queue — the WS is gone, so the
+      // chain would otherwise hang waiting for ready/idle that won't
+      // arrive. cancelQueuedPrompt force-resolves their waiters.
+      for (const entry of state.current.promptQueue) {
+        if (!entry.cancelled) cancelQueuedPrompt(entry);
+      }
       setState({ banner: { kind: "warn", text: "Disconnected from session." } });
     }
   });
@@ -829,6 +851,12 @@ function handleFrame(frame) {
   if (frame.method === "bridge/ready") {
     state.current.ready = true;
     state.banner = null;
+    // Wake any queued prompt that was waiting for the bridge handshake.
+    const listeners = state.current.readyListeners;
+    state.current.readyListeners = [];
+    for (const fn of listeners) {
+      try { fn(); } catch {}
+    }
     render();
     return;
   }
@@ -853,6 +881,13 @@ function handleFrame(frame) {
 }
 
 function handleNotification(frame) {
+  // Sibling-resolved permission tear-down. Lives outside the
+  // session/update gate because it's a transient signal, not session
+  // activity.
+  if (frame.method === "session/permission_resolved") {
+    onPermissionResolved(frame.params);
+    return;
+  }
   if (frame.method !== "session/update") return;
   const update = frame.params?.update;
   if (!update || typeof update !== "object") return;
@@ -875,11 +910,23 @@ function handleNotification(frame) {
       break;
   }
   switch (kind) {
-    case "user_message_chunk":
+    case "user_message_chunk": {
+      // Hydra emits a marked user_message_chunk alongside prompt_received
+      // for backwards compat. We render the sibling-client path via
+      // prompt_received below, so drop the compat copy. (Same handling
+      // acp-hydra-slack uses.)
+      const meta = (update._meta ?? {});
+      const hydraMeta = (meta["acp-hydra"] ?? {});
+      if (hydraMeta.compatFor === "prompt_received") {
+        break;
+      }
+      // Streaming user message from a sibling that *isn't* using
+      // prompt_received yet. Suppress own-echo via recentOwnPrompts.
       if (!consumeOwnPromptEcho(update.content)) {
         pushChunk("user", update.content);
       }
       break;
+    }
     case "agent_message_chunk":
       pushChunk("agent", update.content);
       break;
@@ -906,10 +953,10 @@ function handleNotification(frame) {
       if (update.cost) state.current.cost = update.cost;
       break;
     case "plan":
-      state.current.plan = update.entries ?? update.plan ?? null;
+      onPlanUpdate(update);
       break;
     case "prompt_received":
-      // Echo will appear via user_message_chunk; nothing to do.
+      onPromptReceived(update);
       break;
     case "stop":
     case "turn_complete":
@@ -986,7 +1033,51 @@ function contentToText(content) {
   return "";
 }
 
-function onToolCall(update) {
+// Sibling client (or our own re-attach) sent a session/prompt — hydra
+// fans this to all controllers EXCEPT the originator. So if we see
+// it, it's a sibling. Mirror it as a user bubble. Defensive: also
+// consume own-prompt echoes here in case hydra sends prompt_received
+// for our prompts in some configurations.
+function onPromptReceived(update) {
+  const blocks = Array.isArray(update.prompt) ? update.prompt : [];
+  const text = blocks.map(contentToText).join("");
+  if (!text) return;
+  if (consumeOwnPromptEcho({ text })) {
+    return;
+  }
+  // Sibling prompt — push as a fresh closed bubble. closeOpenStream
+  // first so any in-flight agent stream is broken.
+  closeOpenStream();
+  state.current.log.push({
+    kind: "stream",
+    role: "user",
+    text,
+    closed: true,
+  });
+}
+
+// Plan updates redeliver the full updated plan. We render plan as
+// an inline log item so subsequent bubbles push it up the scroll
+// rather than leaving it stuck at the bottom of the chat.
+function onPlanUpdate(update) {
+  const entries = update.entries ?? update.plan ?? null;
+  state.current.plan = entries;
+  // Update an existing plan log item if there is one in the active
+  // turn (carries the same toolCallId in our model: none — so we
+  // tag log items with kind="plan" and identify the most recent).
+  for (let i = state.current.log.length - 1; i >= 0; i--) {
+    const e = state.current.log[i];
+    if (e.kind === "plan") {
+      e.entries = entries;
+      return;
+    }
+    // Stop searching past the most recent agent activity boundary
+    // so a fresh turn pushes a fresh plan card. (We use spinner as
+    // the boundary marker; if we cross one, fall through and push.)
+    if (e.kind === "spinner") break;
+  }
+  state.current.log.push({ kind: "plan", entries });
+}
   // Close any streaming agent message before this tool so the next
   // agent chunk after the tool starts a fresh bubble — same pattern
   // acp-hydra-slack uses with closeAgentMessage.
@@ -1051,17 +1142,17 @@ function finalizeTurn() {
 function handleAgentRequest(req) {
   if (req.method === "session/request_permission") {
     const params = req.params || {};
-    state.current.pendingPermissions.set(req.id, {
+    // Key by stringified id since hydra forwards permission_resolved
+    // with requestId as a string (and our id may be a number). Storing
+    // here under String() means the resolved-by-sibling cleanup below
+    // matches reliably.
+    const idKey = String(req.id);
+    state.current.pendingPermissions.set(idKey, {
       requestId: req.id,
       toolCall: params.toolCall || {},
       options: params.options || [],
     });
-    pushLog({ kind: "perm", requestId: req.id });
-    return;
-  }
-  if (req.method === "session/permission_resolved") {
-    state.current.pendingPermissions.delete(req.id);
-    state.current.log = state.current.log.filter((e) => !(e.kind === "perm" && e.requestId === req.id));
+    pushLog({ kind: "perm", requestId: idKey });
     return;
   }
   // Unknown agent request — reply with method-not-found so we don't
@@ -1073,12 +1164,31 @@ function handleAgentRequest(req) {
   }));
 }
 
-function respondPermission(requestId, optionId) {
-  const entry = state.current.pendingPermissions.get(requestId);
+// Sibling client (slack, editor, …) answered a permission request first.
+// Tear down our (now-stale) prompt card. Idempotent: if we don't have an
+// entry for the requestId, no-op.
+function onPermissionResolved(params) {
+  if (!state.current) return;
+  const requestId = params?.requestId;
+  if (requestId === undefined) return;
+  const idKey = String(requestId);
+  state.current.pendingPermissions.delete(idKey);
+  state.current.log = state.current.log.filter(
+    (e) => !(e.kind === "perm" && String(e.requestId) === idKey),
+  );
+}
+
+function respondPermission(idKey, optionId) {
+  const entry = state.current.pendingPermissions.get(idKey);
   if (!entry) return;
-  state.current.pendingPermissions.delete(requestId);
-  state.current.log = state.current.log.filter((e) => !(e.kind === "perm" && e.requestId === requestId));
-  reply(requestId, {
+  state.current.pendingPermissions.delete(idKey);
+  state.current.log = state.current.log.filter(
+    (e) => !(e.kind === "perm" && String(e.requestId) === String(idKey)),
+  );
+  // Reply with the original request id (not the string key) so JSON-RPC
+  // type matches what hydra sent us. respondPermission is only called
+  // for entries we've registered, so entry.requestId is the right value.
+  reply(entry.requestId, {
     outcome: optionId === "__cancel__"
       ? { outcome: "cancelled" }
       : { outcome: "selected", optionId },
@@ -1167,6 +1277,14 @@ function scheduleSendPrompt(entry) {
         return;
       }
       try {
+        // Wait for the WS bridge handshake before doing anything else
+        // — this is what makes "click a cold session and start typing"
+        // work (the prompt waits for resurrection to finish, then
+        // proceeds normally).
+        await waitForReadyOrCancel(entry);
+        if (entry.cancelled) {
+          return;
+        }
         await waitForIdleOrCancel(entry);
         if (entry.cancelled) {
           return;
@@ -1207,21 +1325,32 @@ function scheduleSendPrompt(entry) {
 // cancelled. cancelEntry() invokes entry.waitResolver to wake the
 // awaiter immediately, regardless of agent state.
 function waitForIdleOrCancel(entry) {
+  return waitOnListOrCancel(entry, state.current.idleListeners, () => state.current.inTurn);
+}
+
+// Same shape, but waits for the WS bridge to finish its handshake
+// (so session/prompt actually reaches hydra). Lets a user click a
+// cold-session card and start typing immediately; the prompt sits
+// in the chain until bridge/ready arrives.
+function waitForReadyOrCancel(entry) {
+  return waitOnListOrCancel(entry, state.current.readyListeners, () => !state.current.ready);
+}
+
+function waitOnListOrCancel(entry, list, shouldWait) {
   if (entry.cancelled) {
     return Promise.resolve();
   }
-  if (!state.current.inTurn) {
+  if (!shouldWait()) {
     return Promise.resolve();
   }
   return new Promise((resolve) => {
-    const idleListener = () => {
+    const listener = () => {
       entry.waitResolver = null;
       resolve();
     };
-    state.current.idleListeners.push(idleListener);
+    list.push(listener);
     entry.waitResolver = () => {
-      const list = state.current.idleListeners;
-      const idx = list.indexOf(idleListener);
+      const idx = list.indexOf(listener);
       if (idx >= 0) list.splice(idx, 1);
       entry.waitResolver = null;
       resolve();
@@ -1493,9 +1622,6 @@ function renderChat() {
   for (const item of c.log) {
     body.appendChild(renderLogItem(item));
   }
-  if (c.plan) {
-    body.appendChild(renderPlan(c.plan));
-  }
 
   const composerOnKey = (e) => {
     if (e.key !== "Enter" || e.isComposing) return;
@@ -1528,7 +1654,7 @@ function renderChat() {
     { class: "composer" },
     textarea,
     el("button", { class: "stop", onclick: sendCancel, title: "Cancel current turn" }, "Stop"),
-    el("button", { class: "primary", onclick: sendPrompt, disabled: !c.ready }, "Send"),
+    el("button", { class: "primary", onclick: sendPrompt }, "Send"),
   );
 
   // Defer scroll-to-bottom so children are rendered first.
@@ -1542,7 +1668,12 @@ function renderLogItem(item) {
     const cls = item.role === "user" ? "msg user" : item.role === "thought" ? "msg system" : "msg agent";
     const node = el("div", { class: cls });
     const qe = item.queueEntry;
-    if (qe && (qe.status === "queued" || qe.status === "processing" || qe.status === "cancelled")) {
+    // Only show a chip while the prompt is still waiting locally
+    // (queued) or ended in cancellation. Once it's sent ("processing"
+    // or "done"), the bubble looks like a normal user message — the
+    // spinner and agent stream take over visual responsibility, and
+    // a brief "processing" chip would just flicker in/out.
+    if (qe && (qe.status === "queued" || qe.status === "cancelled")) {
       node.appendChild(renderQueueChip(qe));
     }
     const body = el("div", { class: "body" });
@@ -1567,6 +1698,9 @@ function renderLogItem(item) {
     const entry = state.current.pendingPermissions.get(item.requestId);
     if (!entry) return document.createTextNode("");
     return renderPermission(entry);
+  }
+  if (item.kind === "plan") {
+    return renderPlan(item.entries);
   }
   return document.createTextNode("");
 }
