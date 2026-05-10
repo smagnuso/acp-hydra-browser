@@ -8,12 +8,14 @@
     "acp-hydra-browser": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p . && node scripts/copy-ui.mjs",
+    "build": "tsc -p . && tsc -p tsconfig.ui.json && node scripts/build-ui.mjs",
+    "build:server": "tsc -p .",
+    "build:ui": "tsc -p tsconfig.ui.json && node scripts/build-ui.mjs",
     "watch": "tsc -p . --watch",
     "start": "node dist/index.js",
-    "dev": "tsc -p . && node scripts/copy-ui.mjs && node dist/index.js",
+    "dev": "npm run build && node dist/index.js",
     "test": "node --test --import tsx 'test/**/*.test.ts'",
-    "lint": "tsc -p . --noEmit"
+    "lint": "tsc -p . --noEmit && tsc -p tsconfig.ui.json --noEmit"
   },
   "engines": {
     "node": ">=20"
@@ -26,6 +28,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.0",
     "tsx": "^4.20.0",
     "typescript": "^5.6.3"
   }

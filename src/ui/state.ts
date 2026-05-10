@@ -1,0 +1,48 @@
+// Module-scoped app state. All other modules read/write through this
+// object and call setState() (or directly mutate then call render()) to
+// surface changes. Kept loose by design — typing every wire-shape would
+// add ceremony with little payoff.
+
+import type { AppState } from "./types.js";
+import { render } from "./renderer.js";
+
+export const state: AppState = {
+  view: "list",
+  sessions: [],
+  agents: [],
+  groupBy: "project",
+  // Default to listing cold (disk-only) sessions too. Clicking one
+  // attaches over WSS, which causes hydra to resurrect it from disk
+  // automatically — same flow acp-hydra-slack uses when a user types
+  // in a thread whose bridge has gone away.
+  showCold: true,
+  banner: null,
+  modal: null,
+  current: null,
+};
+
+export function setState(patch: Partial<AppState>): void {
+  let changed = false;
+  for (const k of Object.keys(patch) as Array<keyof AppState>) {
+    const next = (patch as Record<string, unknown>)[k as string];
+    if (!sameValue(state[k], next)) {
+      (state as unknown as Record<string, unknown>)[k as string] = next;
+      changed = true;
+    }
+  }
+  if (changed) {
+    render();
+  }
+}
+
+// Shallow-deep equality good enough for state slices (banner objects,
+// session arrays, etc.). Stops setState from triggering a re-render
+// when the patch repeats existing values — common when poll fails
+// repeatedly with the same banner text.
+export function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== "object") return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
