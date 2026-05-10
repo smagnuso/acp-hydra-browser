@@ -97,6 +97,8 @@ function actuallyRender(): void {
     oldWasAtBottom =
       oldBody.scrollHeight - oldBody.scrollTop - oldBody.clientHeight < 50;
   }
+  const oldList = root.querySelector<HTMLElement>(".list");
+  const oldListScrollTop = oldList ? oldList.scrollTop : null;
 
   root.replaceChildren();
   renderApp(root, state);
@@ -108,6 +110,10 @@ function actuallyRender(): void {
     } else {
       newBody.scrollTop = oldScrollTop;
     }
+  }
+  const newList = root.querySelector<HTMLElement>(".list");
+  if (newList && oldListScrollTop !== null) {
+    newList.scrollTop = oldListScrollTop;
   }
 
   if (focusKey) {

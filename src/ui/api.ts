@@ -2,8 +2,16 @@
 // (with the bearer token attached server-side); the browser only
 // presents its session cookie.
 
-import { setState, state } from "./state.js";
+import { setState, state, sameValue } from "./state.js";
 import { render } from "./renderer.js";
+
+function hasActiveSelection(): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed) {
+    return false;
+  }
+  return sel.toString().length > 0;
+}
 
 export async function api<T = unknown>(
   path: string,
@@ -34,9 +42,19 @@ export async function pollSessions(): Promise<void> {
   try {
     const params = state.showCold ? "?all=true" : "";
     const data = await api<{ sessions?: unknown[] }>("/api/sessions" + params);
+    const newSessions = (data.sessions as Array<Record<string, unknown>> ?? []) as never;
     const hadBanner = state.banner !== null;
-    state.sessions = (data.sessions as Array<Record<string, unknown>> ?? []) as never;
+    const sessionsChanged = !sameValue(state.sessions, newSessions);
+    state.sessions = newSessions;
     state.banner = null;
+    if (!sessionsChanged && !hadBanner) {
+      return;
+    }
+    // Don't disrupt the user mid-selection. Skip this cycle; the next
+    // poll re-checks. Banner changes still render so errors surface.
+    if (!hadBanner && hasActiveSelection()) {
+      return;
+    }
     // While the user is typing in chat view, re-rendering blows away
     // the textarea (and focus). Render the list view normally; render
     // chat view only when a banner was just cleared, or when the

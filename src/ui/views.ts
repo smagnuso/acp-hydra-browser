@@ -582,6 +582,10 @@ function renderChat(c: ChatState): HTMLElement {
     e.preventDefault();
     sendPrompt();
   };
+  const autosize = (t: HTMLTextAreaElement): void => {
+    t.style.height = "auto";
+    t.style.height = t.scrollHeight + "px";
+  };
   const textarea = el(
     "textarea",
     {
@@ -592,12 +596,14 @@ function renderChat(c: ChatState): HTMLElement {
       oninput: (e: Event) => {
         const t = e.target as HTMLTextAreaElement;
         c.composerValue = t.value;
-        t.style.height = "auto";
-        t.style.height = t.scrollHeight + "px";
+        autosize(t);
       },
     },
     c.composerValue,
   ) as HTMLTextAreaElement;
+  if (c.composerValue && c.composerValue.length > 0) {
+    queueMicrotask(() => autosize(textarea));
+  }
 
   const composer = el(
     "div",
