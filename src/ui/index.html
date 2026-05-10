@@ -725,6 +725,13 @@ function openChat(sessionId, load) {
     // show "queued"/"processing" chips on each user bubble.
     promptQueue: [],
     promptChain: null,
+    // Stringified JSON-RPC ids of session/prompt requests we've sent
+    // to hydra. Hydra excludes the originator from the synthesized
+    // turn_complete broadcast, so the JSON-RPC *response* to our own
+    // session/prompt is the only reliable own-turn-end signal. When
+    // we see a response with one of these ids, we run markIdleAndDrain
+    // and remove the id from this set.
+    ownPromptIds: new Set(),
     // True while the agent appears to be working on a turn for this
     // session — set on prompt_received, agent/user/thought chunks,
     // and tool_calls; cleared on turn_complete/stop. waitForIdle
@@ -832,11 +839,12 @@ function pushLog(item) {
 
 function send(method, params) {
   if (!state.current || !state.current.ws || state.current.ws.readyState !== WebSocket.OPEN) {
-    return;
+    return undefined;
   }
-  const id = (state.current.nextId = (state.current.nextId || 1)) ;
+  const id = (state.current.nextId = (state.current.nextId || 1));
   state.current.nextId = id + 1;
   state.current.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+  return id;
 }
 
 function reply(id, result) {
@@ -875,9 +883,17 @@ function handleFrame(frame) {
     render();
     return;
   }
-  // It's a response. We don't currently track replies for our own
-  // outbound requests in the UI; they're observed via the ensuing
-  // notifications.
+  // It's a JSON-RPC response. Most replies we don't track (we observe
+  // the resulting notifications instead). One exception: responses to
+  // session/prompt requests we sent — those are the only own-turn-end
+  // signal hydra gives us, since it excludes the originator from
+  // turn_complete fan-out. When we see one, drive idle-drain so the
+  // queue chain unblocks the next entry.
+  if ("id" in frame && state.current.ownPromptIds.has(String(frame.id))) {
+    state.current.ownPromptIds.delete(String(frame.id));
+    finalizeTurn();
+    render();
+  }
 }
 
 function handleNotification(frame) {
@@ -1298,10 +1314,18 @@ function scheduleSendPrompt(entry) {
         // queues correctly behind this one.
         state.current.inTurn = true;
         render();
-        send("session/prompt", {
+        const promptId = send("session/prompt", {
           sessionId: state.current.sessionId,
           prompt: [{ type: "text", text: entry.text }],
         });
+        // Hydra omits the originator from turn_complete fan-out, so
+        // the JSON-RPC response to *this* request is our turn-end
+        // signal. handleFrame's response branch sees the id, calls
+        // markIdleAndDrain, and our `await waitForIdleOrCancel` below
+        // resolves.
+        if (promptId !== undefined) {
+          state.current.ownPromptIds.add(String(promptId));
+        }
         // Wait for the next idle transition (turn_complete from this
         // turn). This keeps the chain head reserved until our turn
         // wraps so the next queued entry doesn't overlap.
