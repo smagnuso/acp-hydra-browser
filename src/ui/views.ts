@@ -517,7 +517,21 @@ function renderChat(c: ChatState): HTMLElement {
         `${shortSessionId(c.sessionId)} · ${agentId || "?"} · ${cwd || "?"}`,
       ),
     ),
-    !c.ready ? el("span", { class: "pill" }, "connecting…") : null,
+    !c.ready
+      ? el("span", { class: "pill" }, "connecting…")
+      : c.inTurn
+      ? el(
+          "span",
+          { class: "pill working", title: "Agent is working" },
+          el("span", { class: "dot" }, "●"),
+          "working",
+        )
+      : el(
+          "span",
+          { class: "pill ready", title: "Ready for a prompt" },
+          el("span", { class: "dot" }, "●"),
+          "ready",
+        ),
     c.mode
       ? el("span", { class: "pill clickable", onclick: openModePicker }, "mode: " + c.mode)
       : null,
