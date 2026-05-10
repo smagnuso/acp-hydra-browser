@@ -162,13 +162,17 @@ function onToolCall(update: AnyRecord): void {
   state.current.toolCalls.set(tc.toolCallId, tc);
   ensureSpinner();
   state.current.spinner!.toolCallIds.push(tc.toolCallId);
+  maybeResolvePermissionByToolCall(tc.toolCallId, tc.status);
 }
 
 function onToolCallUpdate(update: AnyRecord): void {
   if (!state.current) return;
   const existing = state.current.toolCalls.get(String(update.toolCallId));
   if (!existing) return;
-  if (typeof update.status === "string") existing.status = update.status;
+  if (typeof update.status === "string") {
+    existing.status = update.status;
+    maybeResolvePermissionByToolCall(existing.toolCallId, update.status);
+  }
   if (typeof update.title === "string") existing.title = update.title;
   if (update.content !== undefined) {
     existing.content =
@@ -243,11 +247,38 @@ function onPermissionResolved(params: AnyRecord | undefined): void {
   if (!state.current) return;
   const requestId = params?.requestId;
   if (requestId === undefined) return;
-  const idKey = String(requestId);
+  resolvePermissionByRequestId(String(requestId));
+}
+
+function resolvePermissionByRequestId(idKey: string): void {
+  if (!state.current) return;
   state.current.pendingPermissions.delete(idKey);
   state.current.log = state.current.log.filter(
     (e) => !(e.kind === "perm" && String(e.requestId) === idKey),
   );
+}
+
+// Fallback for the case where session/permission_resolved didn't arrive
+// (or arrived without a matching requestId): if the agent emits a
+// tool_call_update for our pending permission's toolCallId in any
+// non-pending state, the decision was clearly made elsewhere — clear
+// our prompt card the same way.
+function maybeResolvePermissionByToolCall(
+  toolCallId: string | undefined,
+  status: string | undefined,
+): void {
+  if (!state.current || !toolCallId || !status || status === "pending") {
+    return;
+  }
+  for (const [idKey, entry] of state.current.pendingPermissions) {
+    const entryToolCallId = (entry.toolCall as AnyRecord | undefined)?.toolCallId as
+      | string
+      | undefined;
+    if (entryToolCallId === toolCallId) {
+      resolvePermissionByRequestId(idKey);
+      return;
+    }
+  }
 }
 
 // ---- Notification dispatcher ------------------------------------
