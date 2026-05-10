@@ -29,6 +29,53 @@ function inlineMd(s: string): string {
   return s;
 }
 
+// Parse a `| a | b | c |` row into trimmed cell strings, or null if
+// the line doesn't look like a table row. Leading/trailing pipes are
+// optional. Escaped pipes (`\|`) aren't supported — none of the
+// agents we drive emit them in tables.
+function parseTableRow(s: string): string[] | null {
+  const trimmed = s.trim();
+  if (!trimmed.includes("|")) return null;
+  let stripped = trimmed;
+  if (stripped.startsWith("|")) stripped = stripped.slice(1);
+  if (stripped.endsWith("|")) stripped = stripped.slice(0, -1);
+  return stripped.split("|").map((c) => c.trim());
+}
+
+// Returns alignment array (one per cell) if `s` is a table separator
+// like `|---|:---:|---:|`, else null. Also asserts at least one cell
+// has hyphens — protects against false-positives on lines like `|||`.
+function parseTableSeparator(s: string): Array<"left" | "center" | "right" | null> | null {
+  const cells = parseTableRow(s);
+  if (!cells || cells.length === 0) return null;
+  const aligns: Array<"left" | "center" | "right" | null> = [];
+  for (const cell of cells) {
+    if (!/^:?-+:?$/.test(cell)) return null;
+    const left = cell.startsWith(":");
+    const right = cell.endsWith(":");
+    if (left && right) aligns.push("center");
+    else if (right) aligns.push("right");
+    else if (left) aligns.push("left");
+    else aligns.push(null);
+  }
+  return aligns;
+}
+
+function renderTableRow(
+  cells: string[],
+  aligns: Array<"left" | "center" | "right" | null>,
+  tag: "th" | "td",
+): string {
+  let out = "<tr>";
+  for (let i = 0; i < cells.length; i++) {
+    const align = aligns[i] ?? null;
+    const styleAttr = align ? ` style="text-align:${align}"` : "";
+    out += `<${tag}${styleAttr}>${inlineMd(escapeHtml(cells[i]!))}</${tag}>`;
+  }
+  out += "</tr>";
+  return out;
+}
+
 export function renderMarkdown(src: unknown): string {
   if (typeof src !== "string") {
     src = String(src ?? "");
@@ -53,16 +100,20 @@ export function renderMarkdown(src: unknown): string {
     }
   }
 
-  for (const raw of lines) {
+  let i = 0;
+  while (i < lines.length) {
+    const raw = lines[i]!;
     if (inCode) {
       if (/^```/.test(raw)) {
         out += `<pre><code data-lang="${escapeHtml(codeLang)}">${escapeHtml(codeBuf.join("\n"))}</code></pre>`;
         inCode = false;
         codeBuf = [];
         codeLang = "";
+        i++;
         continue;
       }
       codeBuf.push(raw);
+      i++;
       continue;
     }
     if (/^```/.test(raw)) {
@@ -70,12 +121,46 @@ export function renderMarkdown(src: unknown): string {
       closeList();
       inCode = true;
       codeLang = raw.slice(3).trim();
+      i++;
       continue;
     }
-    const escaped = escapeHtml(raw);
+    // GFM table: header row followed by a separator row, then any
+    // number of body rows. Detected by looking ahead at the next line.
+    if (i + 1 < lines.length && raw.includes("|")) {
+      const headerCells = parseTableRow(raw);
+      const aligns = parseTableSeparator(lines[i + 1]!);
+      if (
+        headerCells &&
+        aligns &&
+        headerCells.length > 0 &&
+        // Most agents emit equal-cell-count tables; pad/truncate
+        // gracefully if the separator's count differs.
+        aligns.length > 0
+      ) {
+        flushPara();
+        closeList();
+        const cols = Math.max(headerCells.length, aligns.length);
+        const paddedAligns: Array<"left" | "center" | "right" | null> = [];
+        for (let c = 0; c < cols; c++) paddedAligns.push(aligns[c] ?? null);
+        out += "<table><thead>";
+        out += renderTableRow(headerCells, paddedAligns, "th");
+        out += "</thead><tbody>";
+        let j = i + 2;
+        while (j < lines.length) {
+          const rowCells = parseTableRow(lines[j]!);
+          if (!rowCells) break;
+          out += renderTableRow(rowCells, paddedAligns, "td");
+          j++;
+        }
+        out += "</tbody></table>";
+        i = j;
+        continue;
+      }
+    }
     if (/^\s*$/.test(raw)) {
       flushPara();
       closeList();
+      i++;
       continue;
     }
     let m: RegExpMatchArray | null;
@@ -84,6 +169,7 @@ export function renderMarkdown(src: unknown): string {
       closeList();
       const level = m[1]!.length;
       out += `<h${level}>${inlineMd(escapeHtml(m[2]!))}</h${level}>`;
+      i++;
       continue;
     }
     if ((m = raw.match(/^\s*[-*]\s+(.*)$/))) {
@@ -94,6 +180,7 @@ export function renderMarkdown(src: unknown): string {
         listType = "ul";
       }
       out += `<li>${inlineMd(escapeHtml(m[1]!))}</li>`;
+      i++;
       continue;
     }
     if ((m = raw.match(/^\s*\d+\.\s+(.*)$/))) {
@@ -104,16 +191,19 @@ export function renderMarkdown(src: unknown): string {
         listType = "ol";
       }
       out += `<li>${inlineMd(escapeHtml(m[1]!))}</li>`;
+      i++;
       continue;
     }
     if ((m = raw.match(/^\s*>\s?(.*)$/))) {
       flushPara();
       closeList();
       out += `<blockquote>${inlineMd(escapeHtml(m[1]!))}</blockquote>`;
+      i++;
       continue;
     }
     closeList();
-    para.push(escaped);
+    para.push(escapeHtml(raw));
+    i++;
   }
   if (inCode) {
     out += `<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`;
