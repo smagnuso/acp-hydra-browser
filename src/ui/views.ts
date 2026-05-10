@@ -133,7 +133,7 @@ function renderTopbar(): HTMLElement {
   return el(
     "div",
     { class: "topbar" },
-    el("span", { class: "title" }, "acp-hydra-browser"),
+    el("span", { class: "title" }, "hydra-acp-browser"),
     el(
       "span",
       {
@@ -170,7 +170,7 @@ function renderList(): HTMLElement {
       el(
         "div",
         { class: "empty" },
-        "No sessions. Use + to create one, or run `acp-hydra launch <agent>` from your editor.",
+        "No sessions. Use + to create one, or run `hydra-acp launch <agent>` from your editor.",
       ),
     );
   }

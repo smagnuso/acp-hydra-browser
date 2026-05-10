@@ -94,7 +94,7 @@ async function createSession(
   const conn = new UpstreamConnection({
     daemonWsUrl: ctx.config.hydraWsUrl,
     token: ctx.config.hydraToken,
-    clientName: "acp-hydra-browser-session",
+    clientName: "hydra-acp-browser-session",
   });
 
   const opened = new Promise<void>((resolveOpen, rejectOpen) => {
@@ -115,7 +115,7 @@ async function createSession(
       newParams.agentId = body.agentId;
     }
     if (body.name) {
-      newParams._meta = { "acp-hydra": { name: body.name } };
+      newParams._meta = { "hydra": { name: body.name } };
     }
     const newResult = (await conn.request("session/new", newParams)) as {
       sessionId: string;

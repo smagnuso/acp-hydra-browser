@@ -68,7 +68,7 @@ function loginPage(nonce: string): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>acp-hydra-browser</title>
+<title>hydra-acp-browser</title>
 <style nonce="${nonce}">
 :root { color-scheme: dark; font-family: system-ui, sans-serif; }
 body { background: #0e1116; color: #d6deeb; margin: 0; padding: 4rem 1.5rem; max-width: 38rem; margin-inline: auto; line-height: 1.5; }
@@ -78,9 +78,9 @@ code { background: #1c2230; padding: 0.1rem 0.4rem; border-radius: 4px; }
 </style>
 </head>
 <body>
-<h1>acp-hydra-browser</h1>
+<h1>hydra-acp-browser</h1>
 <p>Authentication required.</p>
-<p class="note">Open the URL printed by the server (it contains <code>?authkey=…</code>). The link is also written to <code>~/.acp-hydra-browser/link</code>.</p>
+<p class="note">Open the URL printed by the server (it contains <code>?authkey=…</code>). The link is also written to <code>~/.hydra-acp-browser/link</code>.</p>
 </body>
 </html>`;
 }

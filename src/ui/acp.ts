@@ -74,7 +74,7 @@ export function pushChunk(role: "user" | "agent" | "thought", content: unknown):
 // Mark the most recent stream entry as closed so a subsequent chunk
 // of the same role starts a fresh bubble rather than appending. Called
 // at every natural boundary: a tool call begins, a turn ends, etc. —
-// the same places acp-hydra-slack calls closeAgentMessage().
+// the same places hydra-acp-slack calls closeAgentMessage().
 export function closeOpenStream(): void {
   if (!state.current) return;
   for (let i = state.current.log.length - 1; i >= 0; i--) {
@@ -150,7 +150,7 @@ function onToolCall(update: AnyRecord): void {
   if (!state.current) return;
   // Close any streaming agent message before this tool so the next
   // agent chunk after the tool starts a fresh bubble — same pattern
-  // acp-hydra-slack uses with closeAgentMessage.
+  // hydra-acp-slack uses with closeAgentMessage.
   closeOpenStream();
   const tc: ToolCallState = {
     toolCallId: String(update.toolCallId),
@@ -324,9 +324,9 @@ export function handleNotification(frame: JsonRpcFrame): void {
       // Hydra emits a marked user_message_chunk alongside prompt_received
       // for backwards compat. We render the sibling-client path via
       // prompt_received, so drop the compat copy. (Same handling
-      // acp-hydra-slack uses.)
+      // hydra-acp-slack uses.)
       const meta = (update._meta ?? {}) as AnyRecord;
-      const hydraMeta = (meta["acp-hydra"] ?? {}) as AnyRecord;
+      const hydraMeta = (meta["hydra"] ?? {}) as AnyRecord;
       if (hydraMeta.compatFor === "prompt_received") {
         break;
       }
@@ -367,7 +367,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
       break;
     case "usage_update":
       if (state.current) {
-        // Wire shape (per acp-hydra-slack's session.ts:583): { used,
+        // Wire shape (per hydra-acp-slack's session.ts:583): { used,
         // size, cost: { amount, currency } }. Accept the alternate
         // contextUsed/contextSize names too in case any agent uses
         // them.

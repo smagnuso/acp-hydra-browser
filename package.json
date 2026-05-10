@@ -1,20 +1,20 @@
 {
-  "name": "@acp-hydra/browser",
+  "name": "@hydra-acp/browser",
   "version": "0.1.0",
-  "description": "Browser-based UI for acp-hydra sessions.",
+  "description": "Browser-based UI for hydra-acp sessions.",
   "license": "MIT",
   "type": "module",
-  "homepage": "https://github.com/smagnuson/acp-hydra-browser#readme",
+  "homepage": "https://github.com/smagnuso/hydra-acp-browser#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/smagnuson/acp-hydra-browser.git"
+    "url": "git+https://github.com/smagnuso/hydra-acp-browser.git"
   },
   "bugs": {
-    "url": "https://github.com/smagnuson/acp-hydra-browser/issues"
+    "url": "https://github.com/smagnuso/hydra-acp-browser/issues"
   },
   "keywords": [
     "acp",
-    "acp-hydra",
+    "hydra-acp",
     "browser",
     "spa",
     "agent-client-protocol",
@@ -32,7 +32,7 @@
   ],
   "main": "dist/index.js",
   "bin": {
-    "acp-hydra-browser": "dist/index.js"
+    "hydra-acp-browser": "dist/index.js"
   },
   "scripts": {
     "build": "tsc -p . && tsc -p tsconfig.ui.json && node scripts/build-ui.mjs",

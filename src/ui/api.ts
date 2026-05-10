@@ -56,7 +56,7 @@ export async function pollSessions(): Promise<void> {
       }
     }
   } catch (err) {
-    // Could be from acp-hydra-browser (auth, CSRF, host allowlist) or
+    // Could be from hydra-acp-browser (auth, CSRF, host allowlist) or
     // from the upstream hydra daemon (502). The error text comes from
     // whichever responded; surface it directly without claiming hydra.
     setState({

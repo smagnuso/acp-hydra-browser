@@ -1,6 +1,6 @@
-# acp-hydra-browser
+# hydra-acp-browser
 
-A browser-based UI for [acp-hydra](https://github.com/smagnuson/acp-hydra)
+A browser-based UI for [hydra-acp](https://github.com/smagnuso/hydra-acp)
 sessions. Runs as a hydra extension (or standalone) and serves a small
 single-page app on localhost that lists live sessions, mirrors them in real
 time, and lets you prompt, approve permission requests, switch modes/models,
@@ -15,11 +15,11 @@ with a separate per-host authkey instead.
 ```
                      hydra REST    +-------------------+         browser
        /v1/sessions   <----------  |                   |  ---->   GET /
-                                   |  acp-hydra-browser |  <---->  /ws?session=<id>
+                                   |  hydra-acp-browser |  <---->  /ws?session=<id>
        hydra WSS      <----------> |                   |
        /acp                        +-------------------+
                                             |
-                                  ~/.acp-hydra-browser/
+                                  ~/.hydra-acp-browser/
                                     authkey
                                     link
 ```
@@ -42,16 +42,16 @@ The extension exposes:
    From npm (recommended once published):
 
    ```sh
-   npm install -g @acp-hydra/browser
+   npm install -g @hydra-acp/browser
    ```
 
-   This drops an `acp-hydra-browser` binary on your PATH.
+   This drops an `hydra-acp-browser` binary on your PATH.
 
    Or from source:
 
    ```sh
-   git clone https://github.com/smagnuson/acp-hydra-browser.git ~/dev/acp-hydra-browser
-   cd ~/dev/acp-hydra-browser
+   git clone https://github.com/smagnuso/hydra-acp-browser.git ~/dev/hydra-acp-browser
+   cd ~/dev/hydra-acp-browser
    npm install
    npm run build
    ```
@@ -60,25 +60,25 @@ The extension exposes:
    with hydra. If installed via npm:
 
    ```sh
-   acp-hydra extensions add acp-hydra-browser --command acp-hydra-browser
+   hydra-acp extensions add hydra-acp-browser --command hydra-acp-browser
    ```
 
    Or pointed at a local build:
 
    ```sh
-   acp-hydra extensions add acp-hydra-browser \
+   hydra-acp extensions add hydra-acp-browser \
      --command node \
-     --args ~/dev/acp-hydra-browser/dist/index.js
+     --args ~/dev/hydra-acp-browser/dist/index.js
    ```
 
-   That writes the equivalent entry into `~/.acp-hydra/config.json`:
+   That writes the equivalent entry into `~/.hydra-acp/config.json`:
 
    ```json
    {
      "extensions": {
-       "acp-hydra-browser": {
+       "hydra-acp-browser": {
          "command": ["node"],
-         "args": ["/home/you/dev/acp-hydra-browser/dist/index.js"],
+         "args": ["/home/you/dev/hydra-acp-browser/dist/index.js"],
          "enabled": true
        }
      }
@@ -90,22 +90,22 @@ The extension exposes:
    kick the extension into life:
 
    ```sh
-   acp-hydra extensions start acp-hydra-browser
+   hydra-acp extensions start hydra-acp-browser
    ```
 
-   On startup, hydra spawns acp-hydra-browser with these env vars set:
-   `ACP_HYDRA_DAEMON_URL`, `ACP_HYDRA_TOKEN`, `ACP_HYDRA_WS_URL`. The
-   first launch generates `~/.acp-hydra-browser/authkey` and writes
-   the open URL (with `?authkey=…`) to `~/.acp-hydra-browser/link`.
-   Stdout/stderr land in `~/.acp-hydra/extensions/acp-hydra-browser.log`.
+   On startup, hydra spawns hydra-acp-browser with these env vars set:
+   `HYDRA_ACP_DAEMON_URL`, `HYDRA_ACP_TOKEN`, `HYDRA_ACP_WS_URL`. The
+   first launch generates `~/.hydra-acp-browser/authkey` and writes
+   the open URL (with `?authkey=…`) to `~/.hydra-acp-browser/link`.
+   Stdout/stderr land in `~/.hydra-acp/extensions/hydra-acp-browser.log`.
    Lifecycle is managed with
-   `acp-hydra extensions start|stop|restart acp-hydra-browser` —
+   `hydra-acp extensions start|stop|restart hydra-acp-browser` —
    `restart` is the right call after `npm run build`. Tail the log
-   with `acp-hydra extensions logs acp-hydra-browser -f` (the open URL
+   with `hydra-acp extensions logs hydra-acp-browser -f` (the open URL
    shows up there on first launch).
 
 3. **Run standalone (alternative).** Set `HYDRA_TOKEN` in
-   `~/.acp-hydra-browser.conf` (or export `ACP_HYDRA_TOKEN`), then:
+   `~/.hydra-acp-browser.conf` (or export `HYDRA_ACP_TOKEN`), then:
 
    ```sh
    npm start
@@ -113,21 +113,21 @@ The extension exposes:
 
 4. **Open the browser** to the URL printed on stderr. The first request
    sets a cookie; subsequent requests are authenticated by the cookie
-   alone. The URL is also at `~/.acp-hydra-browser/link` for convenience.
+   alone. The URL is also at `~/.hydra-acp-browser/link` for convenience.
 
 ## HTTPS
 
 Optional on `127.0.0.1`, **required** for any non-loopback bind (the server
 refuses otherwise — same rule as the hydra daemon). The simplest setup
-is a self-signed cert in `~/.acp-hydra-browser/tls/`.
+is a self-signed cert in `~/.hydra-acp-browser/tls/`.
 
 1. **Generate cert + key.** ECDSA P-256, 5-year validity, with a SAN
    covering loopback. Add any extra hostnames you'll hit it from
    (Tailscale name, LAN IP, etc.) to the SAN inline:
 
    ```sh
-   mkdir -p ~/.acp-hydra-browser/tls && chmod 700 ~/.acp-hydra-browser/tls
-   cd ~/.acp-hydra-browser/tls
+   mkdir -p ~/.hydra-acp-browser/tls && chmod 700 ~/.hydra-acp-browser/tls
+   cd ~/.hydra-acp-browser/tls
 
    SAN='subjectAltName=DNS:localhost,DNS:'"$(hostname)"',IP:127.0.0.1,IP:::1'
    #     ^ add ,DNS:my.tailnet.ts.net  or  ,IP:100.64.x.y  if needed.
@@ -136,7 +136,7 @@ is a self-signed cert in `~/.acp-hydra-browser/tls/`.
      -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
      -sha256 -days 1825 -nodes \
      -keyout key.pem -out cert.pem \
-     -subj "/CN=acp-hydra-browser" \
+     -subj "/CN=hydra-acp-browser" \
      -addext "$SAN" \
      -addext "extendedKeyUsage=serverAuth"
    chmod 600 key.pem cert.pem
@@ -152,11 +152,11 @@ is a self-signed cert in `~/.acp-hydra-browser/tls/`.
    Skipping `-addext "subjectAltName=…"` will make every browser reject
    the cert with `NET::ERR_CERT_COMMON_NAME_INVALID`.
 
-2. **Wire into config.** Append to `~/.acp-hydra-browser.conf`:
+2. **Wire into config.** Append to `~/.hydra-acp-browser.conf`:
 
    ```sh
-   BROWSER_TLS_CERT=~/.acp-hydra-browser/tls/cert.pem
-   BROWSER_TLS_KEY=~/.acp-hydra-browser/tls/key.pem
+   BROWSER_TLS_CERT=~/.hydra-acp-browser/tls/cert.pem
+   BROWSER_TLS_KEY=~/.hydra-acp-browser/tls/key.pem
    ```
 
    To expose beyond loopback, also set:
@@ -168,7 +168,7 @@ is a self-signed cert in `~/.acp-hydra-browser/tls/`.
 
    Every entry in `BROWSER_ALLOWED_HOSTS` must also be in the cert's SAN.
 
-3. **Apply** with `acp-hydra extensions restart acp-hydra-browser`. The
+3. **Apply** with `hydra-acp extensions restart hydra-acp-browser`. The
    log line should now read `listening on https://…` and the
    `Open: https://…/?authkey=…` URL is what you load. The auth cookie
    carries `Secure` automatically when serving HTTPS.
@@ -176,7 +176,7 @@ is a self-signed cert in `~/.acp-hydra-browser/tls/`.
 4. **Trust the cert.** Self-signed certs trip browser warnings.
    - **Click-through:** open the URL, accept the warning. Per-site only.
    - **Linux Chrome/Chromium:**
-     `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n acp-hydra-browser -i ~/.acp-hydra-browser/tls/cert.pem`
+     `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n hydra-acp-browser -i ~/.hydra-acp-browser/tls/cert.pem`
    - **macOS:** double-click `cert.pem`, add to System keychain, set
      "Always Trust" in Get Info.
    - **iOS:** AirDrop/email `cert.pem` to the device, install profile
@@ -191,11 +191,11 @@ step 4.
 
 If you flip-flop between HTTP and HTTPS, the `Secure` cookie set under
 HTTPS won't be sent over plain HTTP. Run
-`acp-hydra-browser --rotate-authkey` to start fresh.
+`hydra-acp-browser --rotate-authkey` to start fresh.
 
 ## Configuration keys
 
-`~/.acp-hydra-browser.conf` (KEY=VALUE). All keys are optional unless noted.
+`~/.hydra-acp-browser.conf` (KEY=VALUE). All keys are optional unless noted.
 
 | Key                          | Default                                | Notes |
 |------------------------------|----------------------------------------|-------|
@@ -203,12 +203,12 @@ HTTPS won't be sent over plain HTTP. Run
 | `BROWSER_PORT`               | `9099`                                 | Listen port. |
 | `BROWSER_TLS_CERT`           | (none)                                 | If set with `BROWSER_TLS_KEY`, listen on HTTPS. |
 | `BROWSER_TLS_KEY`            | (none)                                 | Path to TLS key. |
-| `BROWSER_AUTHKEY_FILE`       | `~/.acp-hydra-browser/authkey`         | Where the browser-side authkey lives. |
-| `BROWSER_LINK_FILE`          | `~/.acp-hydra-browser/link`            | URL written for convenience. |
+| `BROWSER_AUTHKEY_FILE`       | `~/.hydra-acp-browser/authkey`         | Where the browser-side authkey lives. |
+| `BROWSER_LINK_FILE`          | `~/.hydra-acp-browser/link`            | URL written for convenience. |
 | `BROWSER_ALLOWED_HOSTS`      | empty                                  | Comma-sep extra Host values for DNS-rebind allowlist (e.g. Tailscale name). |
 | `BROWSER_FILE_MAX_BYTES`     | `262144`                               | Upper bound for `/api/files/read`. |
-| `HYDRA_DAEMON_URL`           | from env / `http://127.0.0.1:8765`     | `ACP_HYDRA_DAEMON_URL` env wins. |
-| `HYDRA_WS_URL`               | derived                                | `ACP_HYDRA_WS_URL` env wins. |
+| `HYDRA_DAEMON_URL`           | from env / `http://127.0.0.1:8765`     | `HYDRA_ACP_DAEMON_URL` env wins. |
+| `HYDRA_WS_URL`               | derived                                | `HYDRA_ACP_WS_URL` env wins. |
 | `HYDRA_TOKEN`                | (required)                             | Same precedence as the slack ext. |
 | `DEBUG`                      | `false`                                | Verbose logging. |
 

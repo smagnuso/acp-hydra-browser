@@ -1,4 +1,4 @@
-// Client-side prompt queue. Mirrors what acp-hydra-slack does:
+// Client-side prompt queue. Mirrors what hydra-acp-slack does:
 // serialize our own session/prompt requests so they don't all pile
 // into hydra's per-session queue at once. Lets us cancel a queued
 // prompt locally (without sending session/cancel) and show
@@ -93,7 +93,7 @@ function scheduleSendPrompt(entry: QueueEntry): void {
         }
         // Surface the "thinking…" spinner immediately — gives the user
         // visible feedback before any frame comes back from the agent.
-        // Same intent as acp-hydra-slack's ensureSpinner-on-send.
+        // Same intent as hydra-acp-slack's ensureSpinner-on-send.
         ensureSpinner();
         render();
         const promptId = send("session/prompt", {

@@ -104,18 +104,18 @@ export function loadConfig(path: string = paths.configFile()): Config {
   const map = parseEnvFile(text);
 
   const hydraDaemonUrl =
-    process.env.ACP_HYDRA_DAEMON_URL ??
+    process.env.HYDRA_ACP_DAEMON_URL ??
     map.get("HYDRA_DAEMON_URL") ??
     "http://127.0.0.1:8765";
   const hydraToken =
-    process.env.ACP_HYDRA_TOKEN ?? map.get("HYDRA_TOKEN") ?? "";
+    process.env.HYDRA_ACP_TOKEN ?? map.get("HYDRA_TOKEN") ?? "";
   if (!hydraToken) {
     throw new Error(
-      "Missing ACP_HYDRA_TOKEN env var (or HYDRA_TOKEN config key). When run as a hydra extension, hydra injects this automatically; otherwise set it in ~/.acp-hydra-browser.conf.",
+      "Missing HYDRA_ACP_TOKEN env var (or HYDRA_TOKEN config key). When run as a hydra extension, hydra injects this automatically; otherwise set it in ~/.hydra-acp-browser.conf.",
     );
   }
   const hydraWsUrl =
-    process.env.ACP_HYDRA_WS_URL ??
+    process.env.HYDRA_ACP_WS_URL ??
     map.get("HYDRA_WS_URL") ??
     deriveWsUrl(hydraDaemonUrl);
 

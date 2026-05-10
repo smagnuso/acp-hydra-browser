@@ -22,7 +22,7 @@ function ensureLoopbackOrTls(host: string, hasTls: boolean): void {
     host === "[::1]";
   if (!isLoopback && !hasTls) {
     throw new Error(
-      `Refusing to bind to non-loopback host ${host} without TLS configured. Set BROWSER_TLS_CERT and BROWSER_TLS_KEY in ~/.acp-hydra-browser.conf.`,
+      `Refusing to bind to non-loopback host ${host} without TLS configured. Set BROWSER_TLS_CERT and BROWSER_TLS_KEY in ~/.hydra-acp-browser.conf.`,
     );
   }
 }
@@ -95,18 +95,18 @@ function writeLinkFile(path: string, url: string): void {
 
 function printHelp(): void {
   process.stdout.write(
-    `acp-hydra-browser — web UI extension for acp-hydra
+    `hydra-acp-browser — web UI extension for hydra-acp
 
 Usage:
-  acp-hydra-browser                Start the server.
-  acp-hydra-browser --rotate-authkey
+  hydra-acp-browser                Start the server.
+  hydra-acp-browser --rotate-authkey
                                    Generate a fresh authkey, kicking existing
                                    browsers, and exit after starting.
-  acp-hydra-browser --help         Show this message.
+  hydra-acp-browser --help         Show this message.
 
-Config: ~/.acp-hydra-browser.conf (KEY=VALUE).
-When run as an acp-hydra extension, ACP_HYDRA_DAEMON_URL / ACP_HYDRA_TOKEN /
-ACP_HYDRA_WS_URL are injected automatically.
+Config: ~/.hydra-acp-browser.conf (KEY=VALUE).
+When run as an hydra-acp extension, HYDRA_ACP_DAEMON_URL / HYDRA_ACP_TOKEN /
+HYDRA_ACP_WS_URL are injected automatically.
 `,
   );
 }

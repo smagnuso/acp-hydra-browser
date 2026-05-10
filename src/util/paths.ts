@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-const HOME_DIR = `${homedir()}/.acp-hydra-browser`;
+const HOME_DIR = `${homedir()}/.hydra-acp-browser`;
 
 export function expandHome(p: string): string {
   if (p.startsWith("~/")) {
@@ -21,6 +21,6 @@ export const paths = {
     return `${HOME_DIR}/link`;
   },
   configFile(): string {
-    return `${homedir()}/.acp-hydra-browser.conf`;
+    return `${homedir()}/.hydra-acp-browser.conf`;
   },
 };

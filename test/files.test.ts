@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { PathScopeError, resolveScopedPath } from "../src/server/routes-files.js";
 
 function makeRoot(): { cwd: string; cleanup: () => void } {
-  const cwd = mkdtempSync(join(tmpdir(), "acp-hydra-browser-"));
+  const cwd = mkdtempSync(join(tmpdir(), "hydra-acp-browser-"));
   mkdirSync(join(cwd, "sub"), { recursive: true });
   writeFileSync(join(cwd, "a.txt"), "hi");
   writeFileSync(join(cwd, "sub/b.txt"), "ok");
