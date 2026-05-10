@@ -37,3 +37,27 @@ test("agent reverse-call short-circuit list", () => {
     assert.equal(_internal.SHORT_CIRCUIT_AGENT_REQUEST_METHODS.has(m), true);
   }
 });
+
+test("browser notification whitelist allows session/cancel only", () => {
+  // session/cancel is a notification per the ACP spec — the bridge must
+  // forward the notification form upstream so hydra's onNotification
+  // handler routes it correctly.
+  assert.equal(
+    _internal.ALLOWED_BROWSER_NOTIFICATION_METHODS.has("session/cancel"),
+    true,
+  );
+  // Nothing else is allowed as a browser-originated notification.
+  for (const m of [
+    "session/prompt",
+    "session/new",
+    "session/attach",
+    "session/load",
+    "initialize",
+  ]) {
+    assert.equal(
+      _internal.ALLOWED_BROWSER_NOTIFICATION_METHODS.has(m),
+      false,
+      `blocked notification: ${m}`,
+    );
+  }
+});

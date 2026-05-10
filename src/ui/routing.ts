@@ -14,23 +14,24 @@ export function buildSessionHash(sessionId: string, load: boolean): string {
   return load ? `#/session/${id}?load=true` : `#/session/${id}`;
 }
 
-// We use replaceState rather than directly assigning location.hash so
-// the browser's back button doesn't accumulate a per-action history
-// entry. We also guard against re-firing applyHashRoute when the SPA
-// itself is the one writing to the hash.
+// pushState (not replaceState) so the browser's back/forward buttons
+// step through chat ↔ list transitions. The "already matches" guard
+// makes the case where applyHashRoute is the caller (hashchange after
+// a user-initiated back/forward) a no-op — the URL is already where
+// it needs to be, so we skip the push and don't double up history.
+// hashWriting still defends against a re-entrant applyHashRoute if a
+// future browser variant queues hashchange synchronously off pushState.
 let hashWriting = false;
 function setLocationHash(hash: string): void {
   if (window.location.hash === hash) return;
   hashWriting = true;
   try {
-    history.replaceState(
+    history.pushState(
       null,
       "",
       hash || window.location.pathname + window.location.search,
     );
   } finally {
-    // Yield so any synchronous hashchange the browser may queue runs
-    // with the flag still set; clear on next microtask.
     queueMicrotask(() => {
       hashWriting = false;
     });
