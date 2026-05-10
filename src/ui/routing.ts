@@ -95,6 +95,7 @@ export function openChat(sessionId: string, load: boolean): void {
     inTurn: false,
     idleListeners: [],
     readyListeners: [],
+    currentPlanEntry: null,
   };
   state.current = initial;
   setState({ view: "chat" });

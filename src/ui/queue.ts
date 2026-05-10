@@ -7,6 +7,7 @@
 import { state } from "./state.js";
 import { render } from "./renderer.js";
 import { send } from "./bridge.js";
+import { ensureSpinner } from "./acp.js";
 import type { ChatState, QueueEntry } from "./types.js";
 
 export function sendPrompt(): void {
@@ -77,6 +78,10 @@ function scheduleSendPrompt(entry: QueueEntry): void {
         // before prompt_received arrives still sees us as busy and
         // queues correctly behind this one.
         c.inTurn = true;
+        // Surface the "thinking…" spinner immediately — gives the user
+        // visible feedback before any frame comes back from the agent.
+        // Same intent as acp-hydra-slack's ensureSpinner-on-send.
+        ensureSpinner();
         render();
         const promptId = send("session/prompt", {
           sessionId: c.sessionId,

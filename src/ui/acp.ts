@@ -4,7 +4,7 @@
 
 import { state } from "./state.js";
 import { contentToText } from "./markdown.js";
-import type { LogItem, ChatState, ToolCallState } from "./types.js";
+import type { LogItem, PlanLogItem, ToolCallState } from "./types.js";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -112,11 +112,30 @@ function extractToolContent(content: unknown): string {
   return "";
 }
 
-function ensureSpinner(c: ChatState): void {
+// Make sure a spinner item is present in the log AND positioned at
+// the end so it acts as a "still working" indicator beneath the latest
+// activity. Idempotent — call as often as you like; works whether the
+// spinner needs to be created or just re-positioned.
+export function ensureSpinner(): void {
+  if (!state.current) return;
+  const c = state.current;
   if (!c.spinner) {
     c.spinner = { toolCallIds: [], expanded: false };
     c.log.push({ kind: "spinner", spinner: c.spinner });
+    return;
   }
+  for (let i = 0; i < c.log.length; i++) {
+    if (c.log[i]!.kind === "spinner") {
+      if (i !== c.log.length - 1) {
+        const item = c.log.splice(i, 1)[0]!;
+        c.log.push(item);
+      }
+      return;
+    }
+  }
+  // We have c.spinner but no log entry referring to it (shouldn't
+  // happen in practice). Re-attach by pushing a fresh entry.
+  c.log.push({ kind: "spinner", spinner: c.spinner });
 }
 
 function onToolCall(update: AnyRecord): void {
@@ -133,7 +152,7 @@ function onToolCall(update: AnyRecord): void {
     content: extractToolContent(update.content),
   };
   state.current.toolCalls.set(tc.toolCallId, tc);
-  ensureSpinner(state.current);
+  ensureSpinner();
   state.current.spinner!.toolCallIds.push(tc.toolCallId);
 }
 
@@ -160,6 +179,9 @@ export function finalizeTurn(): void {
   // Close the streaming agent message so the next turn starts a
   // fresh bubble even if the agent immediately resumes streaming.
   closeOpenStream();
+  // Forget the active-turn plan card — the next plan update should
+  // push a fresh card rather than mutating last turn's into oblivion.
+  state.current.currentPlanEntry = null;
   // The agent is between turns now — wake any sendOurPrompt awaiting
   // a turn boundary, plus toggle the inTurn flag so the next
   // waitForIdle short-circuits if no turn comes back to life.
@@ -191,18 +213,19 @@ function onPlanUpdate(update: AnyRecord): void {
   if (!state.current) return;
   const entries = (update.entries ?? update.plan ?? null) as unknown;
   state.current.plan = entries;
-  // Update an existing plan log item if there is one in the active
-  // turn. Stop scanning past a spinner boundary so a fresh turn pushes
-  // a fresh plan card.
-  for (let i = state.current.log.length - 1; i >= 0; i--) {
-    const e = state.current.log[i]!;
-    if (e.kind === "plan") {
-      e.entries = entries;
-      return;
-    }
-    if (e.kind === "spinner") break;
+  // Track the active-turn plan card via a pointer so subsequent
+  // updates mutate it in place instead of pushing duplicates. The
+  // pointer is cleared at finalizeTurn so the next turn starts a
+  // fresh card. Scanning the log for a plan entry doesn't work here
+  // because the spinner moves around in the log and confuses the
+  // search — see the comment in ensureSpinner.
+  if (state.current.currentPlanEntry) {
+    state.current.currentPlanEntry.entries = entries;
+    return;
   }
-  state.current.log.push({ kind: "plan", entries });
+  const item: PlanLogItem = { kind: "plan", entries };
+  state.current.log.push(item);
+  state.current.currentPlanEntry = item;
 }
 
 // Sibling client (slack, editor, …) answered a permission request
@@ -323,6 +346,13 @@ export function handleNotification(frame: JsonRpcFrame): void {
     default:
       // Unknown but harmless; ignore.
       break;
+  }
+  // After per-case dispatch, surface a "still working" spinner if the
+  // turn is active. ensureSpinner pins it to the end of the log so it
+  // sits beneath whatever bubble we just added (user prompt mirror,
+  // agent stream, etc.). finalizeTurn drops it at the end of the turn.
+  if (state.current?.inTurn) {
+    ensureSpinner();
   }
 }
 

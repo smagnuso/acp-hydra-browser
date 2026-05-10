@@ -54,6 +54,11 @@ export interface PermissionEntry {
   options: Array<{ optionId: string; name?: string; kind?: string }>;
 }
 
+export interface PlanLogItem {
+  kind: "plan";
+  entries: unknown;
+}
+
 export type LogItem =
   | {
       kind: "stream";
@@ -66,7 +71,7 @@ export type LogItem =
   | { kind: "error"; text: string }
   | { kind: "spinner"; spinner: SpinnerState }
   | { kind: "perm"; requestId: string }
-  | { kind: "plan"; entries: unknown };
+  | PlanLogItem;
 
 export interface FileEntry {
   name: string;
@@ -113,6 +118,11 @@ export interface ChatState {
   inTurn: boolean;
   idleListeners: Array<() => void>;
   readyListeners: Array<() => void>;
+  // Pointer into log[] for the active turn's plan card. onPlanUpdate
+  // mutates this in place (so the same card grows / ticks off items
+  // as the agent revises). Cleared at turn end so the next turn pushes
+  // a fresh card.
+  currentPlanEntry: PlanLogItem | null;
   nextId?: number;
 }
 
