@@ -25,9 +25,16 @@ const log = logger("ws-bridge");
 
 const ALLOWED_BROWSER_REQUEST_METHODS = new Set<string>([
   "session/prompt",
+  // session/cancel is kept here for backward compat with older browser
+  // builds that frame it as a request. New builds send the notification
+  // form (see ALLOWED_BROWSER_NOTIFICATION_METHODS) per the ACP spec.
   "session/cancel",
   "session/set_mode",
   "session/set_model",
+]);
+
+const ALLOWED_BROWSER_NOTIFICATION_METHODS = new Set<string>([
+  "session/cancel",
 ]);
 
 const SHORT_CIRCUIT_AGENT_REQUEST_METHODS = new Set<string>([
@@ -233,8 +240,21 @@ function handleConnection(
       return;
     }
     if (isNotification(msg)) {
-      // No browser-originated notifications are forwarded in v1.
-      log.debug(`ignore browser notification method=${msg.method}`);
+      if (!ALLOWED_BROWSER_NOTIFICATION_METHODS.has(msg.method)) {
+        log.debug(`ignore browser notification method=${msg.method}`);
+        return;
+      }
+      // Same sessionId coercion as the request branch: a compromised tab
+      // shouldn't be able to send notifications targeting other sessions.
+      const params =
+        msg.params && typeof msg.params === "object"
+          ? { ...(msg.params as Record<string, unknown>), sessionId }
+          : { sessionId };
+      upstream.sendRaw({
+        jsonrpc: "2.0",
+        method: msg.method,
+        params,
+      });
       return;
     }
   }
@@ -314,6 +334,7 @@ function handleConnection(
 // Exported for tests.
 export const _internal = {
   ALLOWED_BROWSER_REQUEST_METHODS,
+  ALLOWED_BROWSER_NOTIFICATION_METHODS,
   SHORT_CIRCUIT_AGENT_REQUEST_METHODS,
 };
 

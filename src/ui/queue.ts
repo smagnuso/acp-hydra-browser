@@ -195,7 +195,9 @@ export function sendCancel(): void {
     }
   }
   if (c.inTurn) {
-    send("session/cancel", { sessionId: c.sessionId });
+    // session/cancel is a notification per the ACP spec — no id, no
+    // response expected. The bridge is allow-listed for it server-side.
+    notify("session/cancel", { sessionId: c.sessionId });
   }
   if (cancelledLocal > 0) {
     render();
