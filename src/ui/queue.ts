@@ -15,6 +15,19 @@ export function sendPrompt(): void {
   if (!c) return;
   const text = c.composerValue.trim();
   if (!text) return;
+  // Bail if the bridge isn't live — entering the chain here would just
+  // sit in waitForReadyOrCancel forever since bridge/ready can't
+  // arrive on a closed socket. Surface as an error in the log so the
+  // user knows the message wasn't sent.
+  if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
+    c.log.push({
+      kind: "error",
+      text: "Not connected to session — prompt not sent.",
+    });
+    c.composerValue = "";
+    render();
+    return;
+  }
   // Build a queue entry. Status starts "queued" if anything is ahead
   // of us — either another local prompt still working through the
   // chain, or the agent is mid-turn from a sibling client. Otherwise

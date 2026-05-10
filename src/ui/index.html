@@ -107,6 +107,7 @@ pre code { background: transparent; padding: 0; }
 /* Tool spinner / cards */
 .spinner { background: var(--tool-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem; cursor: pointer; align-self: stretch; }
 .spinner .head { display: flex; gap: 0.5rem; align-items: center; color: var(--muted); font-size: 0.9rem; }
+.spinner .head .queue-cancel { margin-left: auto; }
 .spinner .head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
 @keyframes pulse { 0%,100% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.4); opacity: 1; } }
 .spinner.expanded { background: var(--panel); }

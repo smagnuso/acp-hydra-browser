@@ -633,16 +633,12 @@ function renderLogItem(item: ChatState["log"][number]): Node {
         : "msg agent";
     const node = el("div", { class: cls });
     const qe = item.queueEntry;
-    // Show a chip while the prompt is queued, processing, or ended
-    // cancelled. Once "done", the bubble looks like a normal user
-    // message. The processing chip carries an × that cancels just
-    // this turn (next queued entry then runs normally).
-    if (
-      qe &&
-      (qe.status === "queued" ||
-        qe.status === "processing" ||
-        qe.status === "cancelled")
-    ) {
+    // Only show a chip while the prompt is still waiting locally
+    // (queued) or ended in cancellation. Once it's sent ("processing"
+    // or "done"), the bubble looks like a normal user message. The
+    // running turn's × lives on the spinner instead so it works for
+    // sibling-originated prompts too.
+    if (qe && (qe.status === "queued" || qe.status === "cancelled")) {
       node.appendChild(renderQueueChip(qe));
     }
     const body = el("div", { class: "body" });
@@ -703,15 +699,6 @@ function renderQueueChip(entry: QueueEntry): Node {
       { class: "queue-chip queue-processing" },
       el("span", { class: "dot" }),
       el("span", null, "processing"),
-      el(
-        "button",
-        {
-          class: "queue-cancel",
-          onclick: () => cancelProcessingPrompt(),
-          title: "Cancel this turn",
-        },
-        "×",
-      ),
     );
   }
   if (entry.status === "cancelled") {
@@ -725,6 +712,18 @@ function renderQueueChip(entry: QueueEntry): Node {
 }
 
 function renderSpinner(spinner: SpinnerState): HTMLElement {
+  const cancelBtn = el(
+    "button",
+    {
+      class: "queue-cancel",
+      onclick: (e: Event) => {
+        e.stopPropagation();
+        cancelProcessingPrompt();
+      },
+      title: "Cancel this turn",
+    },
+    "×",
+  );
   if (!spinner.expanded) {
     return el(
       "div",
@@ -748,6 +747,7 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
                 spinner.toolCallIds.length === 1 ? "" : "s"
               }`,
         ),
+        cancelBtn,
       ),
     );
   }
@@ -776,7 +776,13 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
         render();
       },
     },
-    el("div", { class: "head" }, el("span", { class: "dot" }), el("span", null, "working")),
+    el(
+      "div",
+      { class: "head" },
+      el("span", { class: "dot" }),
+      el("span", null, "working"),
+      cancelBtn,
+    ),
     el("ul", null, items),
   );
 }
