@@ -326,7 +326,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
       // prompt_received, so drop the compat copy. (Same handling
       // hydra-acp-slack uses.)
       const meta = (update._meta ?? {}) as AnyRecord;
-      const hydraMeta = (meta["hydra"] ?? {}) as AnyRecord;
+      const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
       if (hydraMeta.compatFor === "prompt_received") {
         break;
       }

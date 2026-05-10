@@ -67,7 +67,7 @@ interface PendingRequest {
 }
 
 // Thin wrapper around an outbound WSS connection to hydra's `/acp` endpoint.
-// Authenticates via the `hydra-token.<token>` subprotocol (alongside
+// Authenticates via the `hydra-acp-token.<token>` subprotocol (alongside
 // `acp.v1`), exposes JSON-RPC request/notify primitives and an event stream
 // for inbound traffic. Handshake (initialize + session/attach or session/new)
 // is the caller's responsibility — see ws-bridge.ts and routes-sessions.ts.
@@ -96,7 +96,7 @@ export class UpstreamConnection extends EventEmitter<UpstreamEvents> {
 
   start(): void {
     log.debug(`connecting ${this.opts.daemonWsUrl}`);
-    const subprotocols = ["acp.v1", `hydra-token.${this.opts.token}`];
+    const subprotocols = ["acp.v1", `hydra-acp-token.${this.opts.token}`];
     let ws: WebSocket;
     try {
       ws = new WebSocket(this.opts.daemonWsUrl, subprotocols);

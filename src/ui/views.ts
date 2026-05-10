@@ -192,11 +192,17 @@ interface SessionGroup {
   sessions: SessionInfo[];
 }
 
+function compareSessions(a: SessionInfo, b: SessionInfo): number {
+  const liveDiff = (b.status === "live" ? 1 : 0) - (a.status === "live" ? 1 : 0);
+  if (liveDiff !== 0) {
+    return liveDiff;
+  }
+  return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+}
+
 function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): SessionGroup[] {
   if (mode === "recent") {
-    const sorted = sessions.slice().sort((a, b) =>
-      String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")),
-    );
+    const sorted = sessions.slice().sort(compareSessions);
     return [{ label: null, sessions: sorted }];
   }
   const map = new Map<string, SessionInfo[]>();
@@ -208,9 +214,7 @@ function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): Ses
   const out: SessionGroup[] = [];
   for (const [cwd, items] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const last = cwd.split("/").filter(Boolean).pop() || cwd;
-    items.sort((a, b) =>
-      String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")),
-    );
+    items.sort(compareSessions);
     out.push({ label: `${last} — ${cwd}`, sessions: items });
   }
   return out;
