@@ -180,6 +180,15 @@ export function cancelQueuedPrompt(entry: QueueEntry): void {
   }
 }
 
+// Cancel just the in-flight turn without touching the queue. The
+// chain dispatcher will resume with the next queued entry once the
+// agent acknowledges the cancel.
+export function cancelProcessingPrompt(): void {
+  const c = state.current;
+  if (!c || !c.inTurn) return;
+  notify("session/cancel", { sessionId: c.sessionId });
+}
+
 // Stop button: cancel anything still queued locally (those don't
 // need a session/cancel since we never sent them to hydra) AND tell
 // the agent to abort the running turn (if any).

@@ -10,6 +10,7 @@ import { renderMarkdown, escapeHtml } from "./markdown.js";
 import { api, pollSessions } from "./api.js";
 import { respondPermission } from "./bridge.js";
 import {
+  cancelProcessingPrompt,
   cancelQueuedPrompt,
   sendCancel,
   sendPrompt,
@@ -632,10 +633,16 @@ function renderLogItem(item: ChatState["log"][number]): Node {
         : "msg agent";
     const node = el("div", { class: cls });
     const qe = item.queueEntry;
-    // Only show a chip while the prompt is still waiting locally
-    // (queued) or ended in cancellation. Once it's sent ("processing"
-    // or "done"), the bubble looks like a normal user message.
-    if (qe && (qe.status === "queued" || qe.status === "cancelled")) {
+    // Show a chip while the prompt is queued, processing, or ended
+    // cancelled. Once "done", the bubble looks like a normal user
+    // message. The processing chip carries an × that cancels just
+    // this turn (next queued entry then runs normally).
+    if (
+      qe &&
+      (qe.status === "queued" ||
+        qe.status === "processing" ||
+        qe.status === "cancelled")
+    ) {
       node.appendChild(renderQueueChip(qe));
     }
     const body = el("div", { class: "body" });
@@ -696,6 +703,15 @@ function renderQueueChip(entry: QueueEntry): Node {
       { class: "queue-chip queue-processing" },
       el("span", { class: "dot" }),
       el("span", null, "processing"),
+      el(
+        "button",
+        {
+          class: "queue-cancel",
+          onclick: () => cancelProcessingPrompt(),
+          title: "Cancel this turn",
+        },
+        "×",
+      ),
     );
   }
   if (entry.status === "cancelled") {
