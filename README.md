@@ -45,28 +45,47 @@ The extension exposes:
    npm run build
    ```
 
-2. **Run as a hydra extension (recommended).** Add an entry to
-   `~/.acp-hydra/config.json`:
+2. **Run as a hydra extension (recommended).** Register the extension
+   with hydra:
+
+   ```sh
+   acp-hydra extensions add acp-hydra-browser \
+     --command node \
+     --args ~/dev/acp-hydra-browser/dist/index.js
+   ```
+
+   That writes the equivalent entry into `~/.acp-hydra/config.json`:
 
    ```json
    {
      "extensions": {
        "acp-hydra-browser": {
-         "command": ["node", "/home/you/dev/acp-hydra-browser/dist/index.js"]
+         "command": ["node"],
+         "args": ["/home/you/dev/acp-hydra-browser/dist/index.js"],
+         "enabled": true
        }
      }
    }
    ```
 
-   On `acp-hydra daemon start`, hydra spawns the extension with
-   `ACP_HYDRA_DAEMON_URL`, `ACP_HYDRA_TOKEN`, `ACP_HYDRA_WS_URL` set.
-   The first launch generates `~/.acp-hydra-browser/authkey` and writes
-   the open URL (with `?authkey=…`) to `~/.acp-hydra-browser/link`.
-   Tail the log to see it:
+   `extensions add` is config-only — it doesn't spawn anything yet.
+   Either bounce the daemon, or, if the daemon is already running,
+   kick the extension into life:
 
    ```sh
-   acp-hydra extensions logs acp-hydra-browser --follow
+   acp-hydra extensions start acp-hydra-browser
    ```
+
+   On startup, hydra spawns acp-hydra-browser with these env vars set:
+   `ACP_HYDRA_DAEMON_URL`, `ACP_HYDRA_TOKEN`, `ACP_HYDRA_WS_URL`. The
+   first launch generates `~/.acp-hydra-browser/authkey` and writes
+   the open URL (with `?authkey=…`) to `~/.acp-hydra-browser/link`.
+   Stdout/stderr land in `~/.acp-hydra/extensions/acp-hydra-browser.log`.
+   Lifecycle is managed with
+   `acp-hydra extensions start|stop|restart acp-hydra-browser` —
+   `restart` is the right call after `npm run build`. Tail the log
+   with `acp-hydra extensions logs acp-hydra-browser -f` (the open URL
+   shows up there on first launch).
 
 3. **Run standalone (alternative).** Set `HYDRA_TOKEN` in
    `~/.acp-hydra-browser.conf` (or export `ACP_HYDRA_TOKEN`), then:
@@ -78,6 +97,84 @@ The extension exposes:
 4. **Open the browser** to the URL printed on stderr. The first request
    sets a cookie; subsequent requests are authenticated by the cookie
    alone. The URL is also at `~/.acp-hydra-browser/link` for convenience.
+
+## HTTPS
+
+Optional on `127.0.0.1`, **required** for any non-loopback bind (the server
+refuses otherwise — same rule as the hydra daemon). The simplest setup
+is a self-signed cert in `~/.acp-hydra-browser/tls/`.
+
+1. **Generate cert + key.** ECDSA P-256, 5-year validity, with a SAN
+   covering loopback. Add any extra hostnames you'll hit it from
+   (Tailscale name, LAN IP, etc.) to the SAN inline:
+
+   ```sh
+   mkdir -p ~/.acp-hydra-browser/tls && chmod 700 ~/.acp-hydra-browser/tls
+   cd ~/.acp-hydra-browser/tls
+
+   SAN='subjectAltName=DNS:localhost,DNS:'"$(hostname)"',IP:127.0.0.1,IP:::1'
+   #     ^ add ,DNS:my.tailnet.ts.net  or  ,IP:100.64.x.y  if needed.
+
+   openssl req -x509 \
+     -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+     -sha256 -days 1825 -nodes \
+     -keyout key.pem -out cert.pem \
+     -subj "/CN=acp-hydra-browser" \
+     -addext "$SAN" \
+     -addext "extendedKeyUsage=serverAuth"
+   chmod 600 key.pem cert.pem
+   ```
+
+   Verify the SAN landed:
+
+   ```sh
+   openssl x509 -in cert.pem -noout -text | grep -A1 'Subject Alternative Name'
+   ```
+
+   The cert's CN doesn't matter to modern browsers — only the SAN does.
+   Skipping `-addext "subjectAltName=…"` will make every browser reject
+   the cert with `NET::ERR_CERT_COMMON_NAME_INVALID`.
+
+2. **Wire into config.** Append to `~/.acp-hydra-browser.conf`:
+
+   ```sh
+   BROWSER_TLS_CERT=~/.acp-hydra-browser/tls/cert.pem
+   BROWSER_TLS_KEY=~/.acp-hydra-browser/tls/key.pem
+   ```
+
+   To expose beyond loopback, also set:
+
+   ```sh
+   BROWSER_HOST=0.0.0.0
+   BROWSER_ALLOWED_HOSTS=mybox,mybox.tailnet.ts.net,100.64.1.5
+   ```
+
+   Every entry in `BROWSER_ALLOWED_HOSTS` must also be in the cert's SAN.
+
+3. **Apply** with `acp-hydra extensions restart acp-hydra-browser`. The
+   log line should now read `listening on https://…` and the
+   `Open: https://…/?authkey=…` URL is what you load. The auth cookie
+   carries `Secure` automatically when serving HTTPS.
+
+4. **Trust the cert.** Self-signed certs trip browser warnings.
+   - **Click-through:** open the URL, accept the warning. Per-site only.
+   - **Linux Chrome/Chromium:**
+     `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n acp-hydra-browser -i ~/.acp-hydra-browser/tls/cert.pem`
+   - **macOS:** double-click `cert.pem`, add to System keychain, set
+     "Always Trust" in Get Info.
+   - **iOS:** AirDrop/email `cert.pem` to the device, install profile
+     (Settings → General → VPN & Device Management), then enable under
+     Settings → General → About → Certificate Trust Settings.
+
+If you're already on Tailscale, [`tailscale cert`](https://tailscale.com/kb/1153/enabling-https)
+issues a real Let's Encrypt cert for `<host>.tailnet.ts.net` — strictly
+better than self-signed (no trust prompts, ~30 s setup). Drop the
+output paths into `BROWSER_TLS_CERT` / `BROWSER_TLS_KEY` and skip
+step 4.
+
+If you flip-flop between HTTP and HTTPS, the `Secure` cookie set under
+HTTPS won't be sent over plain HTTP. Run
+`acp-hydra-browser --rotate-authkey` to start fresh.
 
 ## Configuration keys
 
