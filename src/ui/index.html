@@ -1078,6 +1078,8 @@ function onPlanUpdate(update) {
   }
   state.current.log.push({ kind: "plan", entries });
 }
+
+function onToolCall(update) {
   // Close any streaming agent message before this tool so the next
   // agent chunk after the tool starts a fresh bubble — same pattern
   // acp-hydra-slack uses with closeAgentMessage.
