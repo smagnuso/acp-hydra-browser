@@ -147,12 +147,13 @@ function renderTopbar(): HTMLElement {
       "span",
       {
         class: "pill clickable",
+        title: "Click to toggle showing disk-only sessions",
         onclick: () => {
           state.showCold = !state.showCold;
           void pollSessions();
         },
       },
-      state.showCold ? "hide cold" : "show cold",
+      state.showCold ? "all" : "live",
     ),
     el("span", { class: "spacer" }),
     el("button", { onclick: openSpawnModal, class: "primary" }, "+ Spawn"),
