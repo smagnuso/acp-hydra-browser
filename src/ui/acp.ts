@@ -51,7 +51,19 @@ export function pushChunk(role: "user" | "agent" | "thought", content: unknown):
   if (!state.current) return;
   const text = contentToText(content);
   if (!text) return;
-  const last = state.current.log[state.current.log.length - 1];
+  // Find the most recent non-spinner log entry. The spinner is a
+  // transient marker that sits between bubbles; it shouldn't break
+  // streaming-chunk merging into the open bubble below it. Without
+  // this skip, every chunk after the spinner created its own bubble
+  // (which split words at arbitrary chunk boundaries when copied).
+  let last: LogItem | undefined;
+  for (let i = state.current.log.length - 1; i >= 0; i--) {
+    const e = state.current.log[i]!;
+    if (e.kind !== "spinner") {
+      last = e;
+      break;
+    }
+  }
   if (last && last.kind === "stream" && last.role === role && !last.closed) {
     last.text += text;
     return;
@@ -112,29 +124,25 @@ function extractToolContent(content: unknown): string {
   return "";
 }
 
-// Make sure a spinner item is present in the log AND positioned at
-// the end so it acts as a "still working" indicator beneath the latest
-// activity. Idempotent — call as often as you like; works whether the
-// spinner needs to be created or just re-positioned.
+// Make sure a spinner item is present in the log. Doesn't move an
+// existing spinner — it stays where it was first posted, matching
+// slack's behavior of refreshing the same thread message in place.
+// Moving it broke streaming because pushChunk then saw the spinner as
+// the most recent entry and refused to merge new chunks into the
+// open agent bubble below it. (pushChunk now skips spinners when
+// looking for the merge target.)
 export function ensureSpinner(): void {
   if (!state.current) return;
   const c = state.current;
-  if (!c.spinner) {
-    c.spinner = { toolCallIds: [], expanded: false };
-    c.log.push({ kind: "spinner", spinner: c.spinner });
+  if (c.spinner) {
+    // Defensive: if the spinner state object exists but no log entry
+    // refers to it, re-push so renderLogItem can find it.
+    if (!c.log.some((e) => e.kind === "spinner")) {
+      c.log.push({ kind: "spinner", spinner: c.spinner });
+    }
     return;
   }
-  for (let i = 0; i < c.log.length; i++) {
-    if (c.log[i]!.kind === "spinner") {
-      if (i !== c.log.length - 1) {
-        const item = c.log.splice(i, 1)[0]!;
-        c.log.push(item);
-      }
-      return;
-    }
-  }
-  // We have c.spinner but no log entry referring to it (shouldn't
-  // happen in practice). Re-attach by pushing a fresh entry.
+  c.spinner = { toolCallIds: [], expanded: false };
   c.log.push({ kind: "spinner", spinner: c.spinner });
 }
 

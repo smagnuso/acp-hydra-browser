@@ -11,11 +11,10 @@ export const state: AppState = {
   sessions: [],
   agents: [],
   groupBy: "project",
-  // Default to listing cold (disk-only) sessions too. Clicking one
-  // attaches over WSS, which causes hydra to resurrect it from disk
-  // automatically — same flow acp-hydra-slack uses when a user types
-  // in a thread whose bridge has gone away.
-  showCold: true,
+  // Hide cold (disk-only) sessions by default. The "show cold"
+  // toggle in the topbar reveals them; clicking one attaches over
+  // WSS, which causes hydra to resurrect it from disk automatically.
+  showCold: false,
   banner: null,
   modal: null,
   current: null,

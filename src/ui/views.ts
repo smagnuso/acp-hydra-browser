@@ -95,7 +95,7 @@ function renderTopbar(): HTMLElement {
           void pollSessions();
         },
       },
-      state.showCold ? "incl. cold" : "live only",
+      state.showCold ? "hide cold" : "show cold",
     ),
     el("span", { class: "spacer" }),
     el("button", { onclick: openSpawnModal, class: "primary" }, "+ Spawn"),
@@ -459,7 +459,21 @@ function renderChat(c: ChatState): HTMLElement {
       ? el("span", { class: "pill clickable", onclick: openModelPicker }, "model: " + c.model)
       : null,
     c.contextUsed != null && c.contextSize
-      ? el("span", { class: "pill" }, `${c.contextUsed}/${c.contextSize} ctx`)
+      ? el(
+          "span",
+          {
+            class: "pill",
+            title: `${c.contextUsed.toLocaleString()} / ${c.contextSize.toLocaleString()} context tokens`,
+          },
+          `ctx ${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
+        )
+      : null,
+    fmtCost(c.cost)
+      ? el(
+          "span",
+          { class: "pill", title: "Session cost so far" },
+          fmtCost(c.cost) as string,
+        )
       : null,
     el("button", { onclick: openFiles }, "Files"),
   );
@@ -508,10 +522,11 @@ function renderChat(c: ChatState): HTMLElement {
     el("button", { class: "primary", onclick: sendPrompt }, "Send"),
   );
 
-  // Defer scroll-to-bottom so children are rendered first.
-  setTimeout(() => {
-    body.scrollTop = body.scrollHeight;
-  }, 0);
+  // Auto-scroll is owned by renderer.ts now (it captures the previous
+  // chat-body's scroll state and restores synchronously on the new
+  // one) so we don't get a one-frame "scroll-from-zero" flash. The
+  // renderer also respects the user's scrollTop when they're not at
+  // the bottom.
 
   return el("div", { class: "chat" }, header, body, composer);
 }
