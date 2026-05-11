@@ -290,7 +290,6 @@ function handleConnection(
     }
     await upstream.request("session/attach", {
       sessionId,
-      role: "controller",
       historyPolicy: "full",
       clientInfo: {
         name: upstream.clientName,

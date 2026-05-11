@@ -29,8 +29,8 @@ The extension exposes:
 - **HTTP routes** at `/api/sessions` (GET list, POST create), `/api/agents`,
   `/api/kill`, `/api/files/list`, `/api/files/read`, `/api/health`.
 - **A WebSocket bridge** at `/ws?session=<id>`. Each browser tab gets its
-  own attach to hydra's `/acp` as `controller`; ACP frames flow through
-  unchanged in the upstream→browser direction. Browser→upstream traffic is
+  own attach to hydra's `/acp`; ACP frames flow through unchanged in
+  the upstream→browser direction. Browser→upstream traffic is
   method-whitelisted (`session/prompt`, `session/cancel`, `session/set_mode`,
   `session/set_model`, plus permission responses) so a tab can't issue
   arbitrary admin calls.
