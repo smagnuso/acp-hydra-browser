@@ -1,8 +1,13 @@
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
 import { WebSocket } from "ws";
 import { logger } from "../util/log.js";
 
 const log = logger("hydra-ws");
+
+const pkg = JSON.parse(
+  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+) as { version: string };
 
 export type JsonRpcId = number | string;
 
@@ -91,7 +96,7 @@ export class UpstreamConnection extends EventEmitter<UpstreamEvents> {
   }
 
   get clientVersion(): string {
-    return this.opts.clientVersion ?? "0.1.0";
+    return this.opts.clientVersion ?? pkg.version;
   }
 
   start(): void {
