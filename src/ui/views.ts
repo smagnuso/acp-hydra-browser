@@ -150,8 +150,7 @@ function renderTopbar(): HTMLElement {
         class: "pill clickable",
         title: "Click to toggle showing disk-only sessions",
         onclick: () => {
-          state.showCold = !state.showCold;
-          void pollSessions();
+          setState({ showCold: !state.showCold });
         },
       },
       state.showCold ? "all" : "live",
@@ -164,16 +163,20 @@ function renderTopbar(): HTMLElement {
 // ---- Session list -----------------------------------------------
 
 function renderList(): HTMLElement {
-  const groups = groupSessions(state.sessions, state.groupBy);
+  // Daemon always returns everything now; the "show cold" toggle is
+  // a client-side filter — hide cold cards when the toggle is off.
+  const visible = state.showCold
+    ? state.sessions
+    : state.sessions.filter((s) => s.status !== "cold");
+  const hiddenCold = state.sessions.length - visible.length;
+  const groups = groupSessions(visible, state.groupBy);
   const list = el("div", { class: "list" });
-  if (state.sessions.length === 0) {
-    list.appendChild(
-      el(
-        "div",
-        { class: "empty" },
-        "No sessions. Use + to create one, or run `hydra-acp launch <agent>` from your editor.",
-      ),
-    );
+  if (visible.length === 0) {
+    const msg =
+      state.sessions.length === 0
+        ? "No sessions. Use + to create one, or run `hydra-acp launch <agent>` from your editor."
+        : `No live sessions. ${hiddenCold} cold session${hiddenCold === 1 ? "" : "s"} hidden — click "live" to switch to "all".`;
+    list.appendChild(el("div", { class: "empty" }, msg));
   }
   for (const g of groups) {
     const groupNode = el("div", { class: "group" });

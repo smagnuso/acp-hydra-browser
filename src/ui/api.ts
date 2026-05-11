@@ -40,8 +40,9 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function pollSessions(): Promise<void> {
   try {
-    const params = state.showCold ? "?all=true" : "";
-    const data = await api<{ sessions?: unknown[] }>("/api/sessions" + params);
+    // Daemon always returns everything; views.ts filters cold cards
+    // client-side when state.showCold is false.
+    const data = await api<{ sessions?: unknown[] }>("/api/sessions");
     const newSessions = (data.sessions as Array<Record<string, unknown>> ?? []) as never;
     const hadBanner = state.banner !== null;
     const sessionsChanged = !sameValue(state.sessions, newSessions);
