@@ -181,7 +181,7 @@ function renderList(): HTMLElement {
       groupNode.appendChild(el("h2", null, g.label));
     }
     for (const s of g.sessions) {
-      groupNode.appendChild(renderSessionCard(s));
+      groupNode.appendChild(renderSessionCard(s, g.label === null));
     }
     list.appendChild(groupNode);
   }
@@ -214,16 +214,19 @@ function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): Ses
   }
   const out: SessionGroup[] = [];
   for (const [cwd, items] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    const last = cwd.split("/").filter(Boolean).pop() || cwd;
     items.sort(compareSessions);
-    out.push({ label: `${last} — ${cwd}`, sessions: items });
+    out.push({ label: cwd, sessions: items });
   }
   return out;
 }
 
-function renderSessionCard(s: SessionInfo): HTMLElement {
+function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
   const title = s.title || fallbackTitle(s.sessionId);
-  const subtitle = `${shortSessionId(s.sessionId)} · ${s.agentId || "?"} · ${s.cwd || "?"}`;
+  const parts = [shortSessionId(s.sessionId), s.agentId || "?"];
+  if (showCwd) {
+    parts.push(s.cwd || "?");
+  }
+  const subtitle = parts.join(" · ");
   return el(
     "div",
     {
