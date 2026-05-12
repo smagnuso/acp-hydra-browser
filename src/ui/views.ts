@@ -39,12 +39,9 @@ function fallbackTitle(_sessionId: string): string {
 }
 
 // Short, copy-pasteable form of the session id for inline display in
-// subtitle rows. Strips the redundant "hydra_session_" prefix and
-// truncates to the first 10 chars of the unique suffix — long enough
-// to be distinct, short enough to leave room for agent + cwd.
+// subtitle rows. Strips the redundant "hydra_session_" prefix.
 function shortSessionId(sessionId: string): string {
-  const tail = sessionId.replace(/^hydra_session_/, "");
-  return tail.length > 10 ? tail.slice(0, 10) : tail;
+  return sessionId.replace(/^hydra_session_/, "");
 }
 
 // Compact-format a token count: <1k → "n", <1M → "n.nk", else "n.nM".
