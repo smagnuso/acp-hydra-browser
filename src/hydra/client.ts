@@ -73,10 +73,10 @@ export class HydraRestClient {
     return this.json("GET", `/v1/sessions${suffix}`);
   }
 
-  async deleteSession(sessionId: string): Promise<void> {
+  async killSession(sessionId: string): Promise<void> {
     await this.json(
-      "DELETE",
-      `/v1/sessions/${encodeURIComponent(sessionId)}`,
+      "POST",
+      `/v1/sessions/${encodeURIComponent(sessionId)}/kill`,
     );
   }
 

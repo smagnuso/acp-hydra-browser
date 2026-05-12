@@ -55,7 +55,7 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      await ctx.rest.deleteSession(body.sessionId);
+      await ctx.rest.killSession(body.sessionId);
       reply.code(204).send();
     } catch (err) {
       const status = err instanceof HydraRestError ? err.status : 502;
