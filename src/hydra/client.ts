@@ -32,14 +32,16 @@ export class HydraRestClient {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const init: RequestInit = {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.token}`,
     };
+    const init: RequestInit = { method, headers };
+    // Only set Content-Type when there's a body. Fastify v5 rejects
+    // POST with Content-Type: application/json and an empty body
+    // (FST_ERR_CTP_EMPTY_JSON_BODY), which broke bodyless POSTs like
+    // /v1/sessions/:id/kill.
     if (body !== undefined) {
+      headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body);
     }
     const r = await fetch(`${this.baseUrl}${path}`, init);
