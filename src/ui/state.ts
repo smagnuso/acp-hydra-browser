@@ -10,6 +10,8 @@ export const state: AppState = {
   view: "list",
   sessions: [],
   agents: [],
+  defaultAgent: null,
+  defaultCwd: null,
   groupBy: "project",
   // Hide cold (disk-only) sessions by default. The "show cold"
   // toggle in the topbar reveals them; clicking one attaches over

@@ -56,6 +56,12 @@ export async function pollSessions(): Promise<void> {
     if (!hadBanner && hasActiveSelection()) {
       return;
     }
+    // While a modal is open the list is hidden behind a backdrop and
+    // the user is focused on the form. Re-rendering blows away native
+    // <select> popups (and any other transient UI the browser owns).
+    if (!hadBanner && state.modal) {
+      return;
+    }
     // While the user is typing in chat view, re-rendering blows away
     // the textarea (and focus). Render the list view normally; render
     // chat view only when a banner was just cleared, or when the
@@ -100,5 +106,20 @@ export async function loadAgents(): Promise<void> {
     setState({
       banner: { kind: "warn", text: "agents unavailable: " + (err as Error).message },
     });
+  }
+}
+
+export async function loadConfig(): Promise<void> {
+  try {
+    const data = await api<{ defaultAgent?: string; defaultCwd?: string }>(
+      "/api/config",
+    );
+    setState({
+      defaultAgent: data.defaultAgent ?? null,
+      defaultCwd: data.defaultCwd ?? null,
+    });
+  } catch {
+    // Older daemons don't expose /v1/config; fall through silently and
+    // the modal uses its existing fallbacks.
   }
 }

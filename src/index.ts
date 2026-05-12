@@ -9,6 +9,7 @@ import { registerSessionRoutes } from "./server/routes-sessions.js";
 import { registerAgentRoutes } from "./server/routes-agents.js";
 import { registerFileRoutes } from "./server/routes-files.js";
 import { registerRootRoutes } from "./server/routes-root.js";
+import { registerConfigRoutes } from "./server/routes-config.js";
 import { attachWsBridge } from "./server/ws-bridge.js";
 import { logger, setDebug } from "./util/log.js";
 
@@ -51,6 +52,7 @@ async function main(argv: string[]): Promise<void> {
   registerSessionRoutes(app, ctx);
   registerAgentRoutes(app, ctx);
   registerFileRoutes(app, ctx);
+  registerConfigRoutes(app, ctx);
 
   await app.listen({ host: config.browserHost, port: config.browserPort });
 

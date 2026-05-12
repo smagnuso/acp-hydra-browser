@@ -327,11 +327,16 @@ async function killSession(s: SessionInfo): Promise<void> {
 // ---- New-session modal -------------------------------------------
 
 function openSessionModal(): void {
+  const hasDefault =
+    state.defaultAgent &&
+    state.agents.some((a) => a.id === state.defaultAgent);
   setState({
     modal: {
       kind: "session",
-      cwd: "",
-      agentId: state.agents[0]?.id ?? "",
+      cwd: state.defaultCwd ?? "",
+      agentId: hasDefault
+        ? state.defaultAgent!
+        : (state.agents[0]?.id ?? ""),
       name: "",
       prompt: "",
       err: null,
@@ -359,6 +364,7 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
         el("label", { for: "f-cwd" }, "cwd"),
         el("input", {
           id: "f-cwd",
+          "data-focus-key": "session-modal-cwd",
           value: m.cwd,
           placeholder: "/home/you/dev/project",
           oninput: (e: Event) => {
@@ -378,6 +384,7 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
         el("label", { for: "f-name" }, "name (optional)"),
         el("input", {
           id: "f-name",
+          "data-focus-key": "session-modal-name",
           value: m.name,
           placeholder: "feature-x",
           oninput: (e: Event) => {
@@ -393,6 +400,7 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
           "textarea",
           {
             id: "f-prompt",
+            "data-focus-key": "session-modal-prompt",
             rows: "4",
             placeholder: "What should the agent do first?",
             oninput: (e: Event) => {
@@ -420,6 +428,7 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
 function renderAgentSelect(m: SessionModalData): HTMLElement {
   const sel = el("select", {
     id: "f-agent",
+    "data-focus-key": "session-modal-agent",
     onchange: (e: Event) => {
       m.agentId = (e.target as HTMLSelectElement).value;
     },

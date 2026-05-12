@@ -85,6 +85,10 @@ export class HydraRestClient {
   async listAgents(): Promise<{ agents: HydraAgentInfo[] }> {
     return this.json("GET", "/v1/agents");
   }
+
+  async getConfig(): Promise<{ defaultAgent: string; defaultCwd: string }> {
+    return this.json("GET", "/v1/config");
+  }
 }
 
 export class HydraRestError extends Error {

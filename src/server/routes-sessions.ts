@@ -1,8 +1,15 @@
+import { homedir } from "node:os";
 import type { FastifyInstance } from "fastify";
 import { HydraRestError } from "../hydra/client.js";
 import { UpstreamConnection, runInitialize } from "../hydra/ws.js";
 import { logger } from "../util/log.js";
 import type { ServerContext } from "./http.js";
+
+function expandHome(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/")) return homedir() + p.slice(1);
+  return p;
+}
 
 const log = logger("routes-sessions");
 
@@ -105,10 +112,11 @@ async function createSession(
   conn.start();
   await opened;
 
+  const cwd = expandHome(body.cwd!);
   try {
     await runInitialize(conn);
     const newParams: Record<string, unknown> = {
-      cwd: body.cwd,
+      cwd,
       mcpServers: [],
     };
     if (body.agentId) {
@@ -130,7 +138,7 @@ async function createSession(
     return {
       sessionId: newResult.sessionId,
       agentId: body.agentId,
-      cwd: body.cwd!,
+      cwd,
     };
   } finally {
     conn.stop();
