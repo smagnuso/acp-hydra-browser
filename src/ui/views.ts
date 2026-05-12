@@ -44,6 +44,29 @@ function shortSessionId(sessionId: string): string {
   return sessionId.replace(/^hydra_session_/, "");
 }
 
+// Abbreviated "time since" hint for the subtitle row. Matches the
+// CLI/TUI style: "<1m", "12m", "3h", "2d", "5w", "11mo", "2y".
+function formatRelativeAge(iso: string | undefined, now: number = Date.now()): string {
+  if (!iso) return "?";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "?";
+  const diff = Math.max(0, now - t);
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return "<1m";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 14) return `${day}d`;
+  const week = Math.floor(day / 7);
+  if (week < 9) return `${week}w`;
+  const month = Math.floor(day / 30);
+  if (month < 12) return `${month}mo`;
+  const year = Math.floor(day / 365);
+  return `${year}y`;
+}
+
 // Compact-format a token count: <1k → "n", <1M → "n.nk", else "n.nM".
 // Used in the chat header where horizontal space is scarce.
 function fmtTokens(n: number): string {
@@ -222,7 +245,11 @@ function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): Ses
 
 function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
   const title = s.title || fallbackTitle(s.sessionId);
-  const parts = [shortSessionId(s.sessionId), s.agentId || "?"];
+  const parts = [
+    shortSessionId(s.sessionId),
+    s.agentId || "?",
+    `age ${formatRelativeAge(s.updatedAt)}`,
+  ];
   if (showCwd) {
     parts.push(s.cwd || "?");
   }
