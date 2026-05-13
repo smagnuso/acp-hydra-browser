@@ -74,7 +74,9 @@ export async function pollSessions(): Promise<void> {
       const live = state.sessions.find(
         (s) => s.sessionId === state.current!.sessionId,
       );
-      const fp = live ? `${live.title}|${live.cwd}|${live.agentId}` : "";
+      const fp = live
+        ? `${live.title}|${live.cwd}|${live.agentId}|${live.currentModel}`
+        : "";
       if (fp !== state.current._lastMetaFp) {
         state.current._lastMetaFp = fp;
         render();

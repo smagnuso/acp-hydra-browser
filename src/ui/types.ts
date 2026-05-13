@@ -6,6 +6,9 @@ export interface SessionInfo {
   sessionId: string;
   cwd: string;
   agentId?: string;
+  // Last-known model id from the daemon's session list. Lets the card
+  // subtitle render `agent(model)` without needing the session to be hot.
+  currentModel?: string;
   title?: string;
   attachedClients?: number;
   updatedAt?: string;

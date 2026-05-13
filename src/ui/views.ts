@@ -49,6 +49,24 @@ function shortSessionId(sessionId: string): string {
   return sessionId.replace(/^hydra_session_/, "");
 }
 
+// Drop the provider prefix on a model id ("openai/gpt-4o-mini" →
+// "gpt-4o-mini") so subtitle rows stay narrow.
+function shortenModel(model: string | undefined): string | undefined {
+  if (!model) return undefined;
+  const idx = model.lastIndexOf("/");
+  return idx === -1 ? model : model.slice(idx + 1);
+}
+
+// "agent(model)" when both are known, just the agent (or "?") otherwise.
+function agentWithModel(
+  agent: string | undefined,
+  model: string | undefined,
+): string {
+  const a = agent || "?";
+  const m = shortenModel(model);
+  return m ? `${a}(${m})` : a;
+}
+
 // Abbreviated "time since" hint for the subtitle row. Matches the
 // CLI/TUI style: "<1m", "12m", "3h", "2d", "5w", "11mo", "2y".
 function formatRelativeAge(iso: string | undefined, now: number = Date.now()): string {
@@ -260,7 +278,7 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
   const title = s.title || fallbackTitle(s.sessionId);
   const parts = [
     shortSessionId(s.sessionId),
-    s.agentId || "?",
+    agentWithModel(s.agentId, s.currentModel),
     `age ${formatRelativeAge(s.updatedAt)}`,
   ];
   if (showCwd) {
@@ -674,6 +692,10 @@ function renderChat(c: ChatState): HTMLElement {
   const title = live?.title || c.title || fallbackTitle(c.sessionId);
   const cwd = live?.cwd || c.cwd;
   const agentId = live?.agentId || c.agentId;
+  // The chat's `c.model` is the live, WS-updated value (more current than
+  // any session-list poll); fall back to the polled record so the row
+  // isn't empty before the first current_model_update lands.
+  const model = c.model || live?.currentModel;
   const header = el(
     "div",
     { class: "chat-header" },
@@ -685,7 +707,7 @@ function renderChat(c: ChatState): HTMLElement {
       el(
         "div",
         { class: "row2" },
-        `${shortSessionId(c.sessionId)} · ${agentId || "?"} · ${cwd || "?"}`,
+        `${shortSessionId(c.sessionId)} · ${agentWithModel(agentId, model)} · ${cwd || "?"}`,
       ),
     ),
     !c.ready
