@@ -89,6 +89,42 @@ export class HydraRestClient {
   async getConfig(): Promise<{ defaultAgent: string; defaultCwd: string }> {
     return this.json("GET", "/v1/config");
   }
+
+  // Fetch the raw response so the proxy can stream the JSON body straight
+  // to the client and forward the daemon's Content-Disposition filename.
+  // Throws HydraRestError on non-2xx. Caller is responsible for consuming
+  // (or piping) response.body.
+  async fetchExport(sessionId: string): Promise<Response> {
+    const r = await fetch(
+      `${this.baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}/export`,
+      { headers: { Authorization: `Bearer ${this.token}` } },
+    );
+    if (!r.ok) {
+      const text = await r.text().catch(() => "");
+      log.warn(
+        `GET /v1/sessions/${sessionId}/export → ${r.status} ${text.slice(0, 200)}`,
+      );
+      throw new HydraRestError(
+        r.status,
+        `GET /v1/sessions/:id/export: ${r.status}`,
+      );
+    }
+    return r;
+  }
+
+  async importBundle(
+    bundle: unknown,
+    opts: { replace?: boolean } = {},
+  ): Promise<{
+    sessionId: string;
+    importedFromSessionId: string;
+    replaced: boolean;
+  }> {
+    return this.json("POST", "/v1/sessions/import", {
+      bundle,
+      replace: opts.replace === true,
+    });
+  }
 }
 
 export class HydraRestError extends Error {

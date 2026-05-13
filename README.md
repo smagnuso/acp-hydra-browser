@@ -27,7 +27,9 @@ with a separate per-host authkey instead.
 The extension exposes:
 
 - **HTTP routes** at `/api/sessions` (GET list, POST create), `/api/agents`,
-  `/api/kill`, `/api/files/list`, `/api/files/read`, `/api/health`.
+  `/api/kill`, `/api/files/list`, `/api/files/read`,
+  `/api/sessions/:id/export` (GET — download a `*.hydra` bundle),
+  `/api/sessions/import` (POST — accept a bundle), `/api/health`.
 - **A WebSocket bridge** at `/ws?session=<id>`. Each browser tab gets its
   own attach to hydra's `/acp`; ACP frames flow through unchanged in
   the upstream→browser direction. Browser→upstream traffic is
@@ -249,9 +251,10 @@ under the built-in Node test runner.
 ## Status
 
 Experimental. v1 covers list / chat / tool calls / permissions /
-session create / kill / file browse / mode + model picker. Out of scope:
-multi-user UI, image upload from the browser into the agent,
-transcript search.
+session create / kill / file browse / mode + model picker /
+session export + import (download a `*.hydra` bundle from any session,
+re-import a bundle from disk). Out of scope: multi-user UI, image
+upload from the browser into the agent, transcript search.
 
 ## License
 

@@ -17,6 +17,12 @@ export interface Config {
   hydraDaemonUrl: string;
   hydraWsUrl: string;
   hydraToken: string;
+  // Delay (ms) between receiving session/request_permission from hydra
+  // and forwarding it to the browser tab. If session/permission_resolved
+  // fires within this window — e.g. the auto-approver answers — the
+  // request is never forwarded and the UI never sees the prompt. 0
+  // disables (forward immediately, today's behavior).
+  permissionDisplayDelayMs: number;
   debug: boolean;
 }
 
@@ -143,6 +149,7 @@ export function loadConfig(path: string = paths.configFile()): Config {
     hydraDaemonUrl,
     hydraWsUrl,
     hydraToken,
+    permissionDisplayDelayMs: intVal(map, "PERMISSION_DELAY_MS", 500),
     debug: bool(map, "DEBUG", false),
   };
 }

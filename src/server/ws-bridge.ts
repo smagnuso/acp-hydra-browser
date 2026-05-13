@@ -109,6 +109,16 @@ function handleConnection(
   // permission outcomes).
   const outstandingFromUpstream = new Set<string>();
 
+  // Permission requests held back while session/permission_resolved
+  // might still arrive from a sibling controller (e.g. the auto-
+  // approver). If a resolved notification comes in for one of these
+  // before the timer fires, we drop the request entirely — the UI
+  // never sees it, no prompt card flashes on screen. Keyed by
+  // stringified request id, matching how hydra emits requestId in
+  // session/permission_resolved params.
+  const pendingPermissionFrames = new Map<string, NodeJS.Timeout>();
+  const permissionDelayMs = ctx.config.permissionDisplayDelayMs;
+
   let upstreamReady = false;
   // While the upstream handshake is running we can't yet forward browser
   // frames. Buffer them and flush once attach completes.
@@ -125,6 +135,26 @@ function handleConnection(
   });
 
   upstream.on("notification", (n) => {
+    // Permission resolution during the display-delay window cancels
+    // the pending forward. The UI never saw the request so dropping
+    // the resolved notification too is correct — there's nothing for
+    // the UI to tear down.
+    if (n.method === "session/permission_resolved") {
+      const params = (n.params ?? {}) as Record<string, unknown>;
+      const requestId = params.requestId;
+      if (requestId !== undefined) {
+        const idKey = String(requestId);
+        const timer = pendingPermissionFrames.get(idKey);
+        if (timer) {
+          clearTimeout(timer);
+          pendingPermissionFrames.delete(idKey);
+          log.debug(
+            `permission suppressed-by-delay session=${sessionId} requestId=${idKey}`,
+          );
+          return;
+        }
+      }
+    }
     sendBrowserFrame(n);
   });
 
@@ -137,6 +167,21 @@ function handleConnection(
         -32601,
         `method not supported: ${r.method}`,
       );
+      return;
+    }
+    if (r.method === "session/request_permission" && permissionDelayMs > 0) {
+      // Buffer the request for permissionDelayMs. Sibling controllers
+      // (the auto-approver) often answer within a handful of ms; if
+      // session/permission_resolved arrives before the timer fires,
+      // the notification handler above clears this entry and the
+      // request never reaches the browser tab (no flash).
+      const idKey = String(r.id);
+      const timer = setTimeout(() => {
+        pendingPermissionFrames.delete(idKey);
+        outstandingFromUpstream.add(idKey);
+        sendBrowserFrame(r);
+      }, permissionDelayMs);
+      pendingPermissionFrames.set(idKey, timer);
       return;
     }
     outstandingFromUpstream.add(String(r.id));
@@ -310,6 +355,10 @@ function handleConnection(
 
   function cleanup(): void {
     upstream.stop();
+    for (const timer of pendingPermissionFrames.values()) {
+      clearTimeout(timer);
+    }
+    pendingPermissionFrames.clear();
     if (browserWs.readyState === WebSocket.OPEN) {
       try {
         browserWs.close();

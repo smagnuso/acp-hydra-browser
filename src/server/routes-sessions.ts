@@ -84,6 +84,57 @@ export function registerSessionRoutes(
       reply.code(502).send({ error: (err as Error).message });
     }
   });
+
+  // Forward the daemon's bundle download verbatim, including its
+  // Content-Disposition filename. The session cookie auth carries
+  // naturally over a plain <a download> tag in the SPA, so no blob/CSP
+  // dance is needed on the client side.
+  app.get(
+    "/api/sessions/:id/export",
+    { config: { skipCsrf: true } },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      try {
+        const upstream = await ctx.rest.fetchExport(id);
+        const disposition = upstream.headers.get("content-disposition");
+        if (disposition) {
+          reply.header("Content-Disposition", disposition);
+        }
+        const contentType =
+          upstream.headers.get("content-type") ?? "application/json";
+        reply.header("Content-Type", contentType);
+        const bytes = Buffer.from(await upstream.arrayBuffer());
+        reply.code(200).send(bytes);
+      } catch (err) {
+        const status = err instanceof HydraRestError ? err.status : 502;
+        reply.code(status).send({ error: (err as Error).message });
+      }
+    },
+  );
+
+  // Accept a bundle the browser parsed locally; forward to the daemon
+  // for the actual import work. Returns daemon's payload verbatim, with
+  // 409 (BundleAlreadyImported) propagated unchanged so the SPA can
+  // surface the existing local id.
+  app.post("/api/sessions/import", async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      bundle?: unknown;
+      replace?: boolean;
+    };
+    if (body.bundle === undefined) {
+      reply.code(400).send({ error: "bundle required" });
+      return;
+    }
+    try {
+      const result = await ctx.rest.importBundle(body.bundle, {
+        replace: body.replace === true,
+      });
+      reply.code(201).send(result);
+    } catch (err) {
+      const status = err instanceof HydraRestError ? err.status : 502;
+      reply.code(status).send({ error: (err as Error).message });
+    }
+  });
 }
 
 interface CreateSessionResult {

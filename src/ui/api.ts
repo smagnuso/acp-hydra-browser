@@ -123,3 +123,52 @@ export async function loadConfig(): Promise<void> {
     // the modal uses its existing fallbacks.
   }
 }
+
+// Post a parsed bundle to the proxy, which forwards to the daemon's
+// /v1/sessions/import. Returns the new local sessionId (or the
+// preserved one on replace). On 409 the error message carries the
+// existing local id so the caller can offer "replace?".
+export interface ImportResult {
+  sessionId: string;
+  importedFromSessionId: string;
+  replaced: boolean;
+}
+
+export async function importBundle(
+  bundle: unknown,
+  opts: { replace?: boolean } = {},
+): Promise<ImportResult> {
+  return api<ImportResult>("/api/sessions/import", {
+    method: "POST",
+    body: JSON.stringify({ bundle, replace: opts.replace === true }),
+  });
+}
+
+// Detect the 409 (BundleAlreadyImported) response and pull the
+// existing-local-id out of the JSON body, so views.ts can offer a
+// "replace?" prompt instead of forcing the user to retry blindly.
+// Returns undefined if the response was not a 409. The api() helper
+// throws on any non-2xx, so this is a parallel low-level path.
+export async function tryImportBundleWith409(
+  bundle: unknown,
+): Promise<{ ok: true; result: ImportResult } | { ok: false; existingSessionId?: string; status: number; message: string }> {
+  const r = await fetch("/api/sessions/import", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bundle }),
+  });
+  if (r.ok) {
+    return { ok: true, result: (await r.json()) as ImportResult };
+  }
+  let existingSessionId: string | undefined;
+  let message = `${r.status} ${r.statusText}`;
+  try {
+    const j = (await r.json()) as { error?: string; existingSessionId?: string };
+    if (j.existingSessionId) existingSessionId = j.existingSessionId;
+    if (j.error) message = j.error;
+  } catch {
+    // Non-JSON error body; surface status text.
+  }
+  return { ok: false, status: r.status, message, existingSessionId };
+}

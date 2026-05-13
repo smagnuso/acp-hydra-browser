@@ -7,7 +7,12 @@ import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { el } from "./dom.js";
 import { renderMarkdown, escapeHtml } from "./markdown.js";
-import { api, pollSessions } from "./api.js";
+import {
+  api,
+  importBundle,
+  pollSessions,
+  tryImportBundleWith409,
+} from "./api.js";
 import { respondPermission } from "./bridge.js";
 import {
   cancelProcessingPrompt,
@@ -176,6 +181,14 @@ function renderTopbar(): HTMLElement {
       state.showCold ? "all" : "live",
     ),
     el("span", { class: "spacer" }),
+    el(
+      "button",
+      {
+        onclick: openImportPicker,
+        title: "Import a *.hydra bundle from disk",
+      },
+      "Import",
+    ),
     el("button", { onclick: openSessionModal, class: "primary" }, "+ Session"),
   );
 }
@@ -292,6 +305,18 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
       el(
         "button",
         {
+          class: "ghost",
+          title: "Export session as *.hydra bundle",
+          onclick: (e: Event) => {
+            e.stopPropagation();
+            triggerExportDownload(s.sessionId);
+          },
+        },
+        "↓",
+      ),
+      el(
+        "button",
+        {
           class: "danger",
           onclick: (e: Event) => {
             e.stopPropagation();
@@ -322,6 +347,107 @@ async function killSession(s: SessionInfo): Promise<void> {
       banner: { kind: "bad", text: "kill failed: " + (err as Error).message },
     });
   }
+}
+
+// Navigate to the export endpoint to trigger the browser's native
+// download flow. The proxy forwards the daemon's Content-Disposition
+// header so the file lands with the right filename; the session
+// cookie carries auth automatically. We use an off-screen anchor
+// instead of window.location to avoid blowing away SPA state if the
+// download is interrupted or rejected.
+function triggerExportDownload(sessionId: string): void {
+  const a = document.createElement("a");
+  a.href = `/api/sessions/${encodeURIComponent(sessionId)}/export`;
+  // Hint the browser that this is a download — the server-supplied
+  // Content-Disposition filename still wins, but the empty string
+  // is enough to suppress the "navigate away" fallback in some
+  // browsers when the server is slow to respond.
+  a.download = "";
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// Open a hidden file picker; on selection, parse the JSON, POST it
+// to the import endpoint. Handle 409 (lineageId clash) by asking
+// the user whether to retry with replace.
+function openImportPicker(): void {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".hydra,application/json";
+  input.style.display = "none";
+  input.onchange = () => {
+    const file = input.files && input.files[0];
+    document.body.removeChild(input);
+    if (!file) return;
+    void importBundleFromFile(file);
+  };
+  document.body.appendChild(input);
+  input.click();
+}
+
+async function importBundleFromFile(file: File): Promise<void> {
+  let bundle: unknown;
+  try {
+    const text = await file.text();
+    bundle = JSON.parse(text);
+  } catch (err) {
+    setState({
+      banner: {
+        kind: "bad",
+        text: "import: bundle is not valid JSON: " + (err as Error).message,
+      },
+    });
+    return;
+  }
+  const first = await tryImportBundleWith409(bundle);
+  if (first.ok) {
+    const r = first.result;
+    setState({
+      banner: {
+        kind: "good",
+        text: r.replaced
+          ? `Replaced ${shortSessionId(r.sessionId)} from bundle`
+          : `Imported as ${shortSessionId(r.sessionId)}`,
+      },
+    });
+    void pollSessions();
+    return;
+  }
+  if (first.status === 409 && first.existingSessionId) {
+    const existing = first.existingSessionId;
+    const ok = confirm(
+      `This session is already imported locally as ${shortSessionId(existing)}.\n\nReplace it? (Any live attach will be closed.)`,
+    );
+    if (!ok) {
+      setState({
+        banner: { kind: "warn", text: "Import cancelled." },
+      });
+      return;
+    }
+    try {
+      const result = await importBundle(bundle, { replace: true });
+      setState({
+        banner: {
+          kind: "good",
+          text: `Replaced ${shortSessionId(result.sessionId)} from bundle`,
+        },
+      });
+      void pollSessions();
+    } catch (err) {
+      setState({
+        banner: {
+          kind: "bad",
+          text: "import failed: " + (err as Error).message,
+        },
+      });
+    }
+    return;
+  }
+  setState({
+    banner: { kind: "bad", text: "import failed: " + first.message },
+  });
 }
 
 // ---- New-session modal -------------------------------------------
@@ -601,6 +727,14 @@ function renderChat(c: ChatState): HTMLElement {
         )
       : null,
     el("button", { onclick: openFiles }, "Files"),
+    el(
+      "button",
+      {
+        title: "Export this session as a *.hydra bundle",
+        onclick: () => triggerExportDownload(c.sessionId),
+      },
+      "Export",
+    ),
   );
 
   const body = el("div", { class: "chat-body" });
