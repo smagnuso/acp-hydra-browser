@@ -4,7 +4,12 @@
 
 import { state } from "./state.js";
 import { contentToText } from "./markdown.js";
-import type { LogItem, PlanLogItem, ToolCallState } from "./types.js";
+import type {
+  LogItem,
+  PermissionEntry,
+  PlanLogItem,
+  ToolCallState,
+} from "./types.js";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -241,28 +246,28 @@ function onPlanUpdate(update: AnyRecord): void {
 }
 
 // Sibling client (slack, editor, …) answered a permission request
-// first. Tear down our (now-stale) prompt card. Idempotent: if we
-// don't have an entry for the requestId, no-op.
-function onPermissionResolved(params: AnyRecord | undefined): void {
+// first. Tear down our (now-stale) prompt card. Keyed by toolCallId
+// per RFD #533. Idempotent: if we don't have an entry, no-op.
+function onPermissionResolved(update: AnyRecord | undefined): void {
   if (!state.current) return;
-  const requestId = params?.requestId;
-  if (requestId === undefined) return;
-  resolvePermissionByRequestId(String(requestId));
+  const toolCallId =
+    typeof update?.toolCallId === "string" ? update.toolCallId : undefined;
+  if (!toolCallId) return;
+  resolvePermissionByToolCallId(toolCallId);
 }
 
-function resolvePermissionByRequestId(idKey: string): void {
+function resolvePermissionByToolCallId(toolCallId: string): void {
   if (!state.current) return;
-  state.current.pendingPermissions.delete(idKey);
+  state.current.pendingPermissions.delete(toolCallId);
   state.current.log = state.current.log.filter(
-    (e) => !(e.kind === "perm" && String(e.requestId) === idKey),
+    (e) => !(e.kind === "perm" && e.toolCallId === toolCallId),
   );
 }
 
-// Fallback for the case where session/permission_resolved didn't arrive
-// (or arrived without a matching requestId): if the agent emits a
-// tool_call_update for our pending permission's toolCallId in any
-// non-pending state, the decision was clearly made elsewhere — clear
-// our prompt card the same way.
+// Fallback for when the daemon's permission_resolved didn't arrive:
+// if the agent emits a tool_call_update for our pending permission's
+// toolCallId in any non-pending state, the decision was clearly made
+// elsewhere — clear our prompt card the same way.
 function maybeResolvePermissionByToolCall(
   toolCallId: string | undefined,
   status: string | undefined,
@@ -270,14 +275,8 @@ function maybeResolvePermissionByToolCall(
   if (!state.current || !toolCallId || !status || status === "pending") {
     return;
   }
-  for (const [idKey, entry] of state.current.pendingPermissions) {
-    const entryToolCallId = (entry.toolCall as AnyRecord | undefined)?.toolCallId as
-      | string
-      | undefined;
-    if (entryToolCallId === toolCallId) {
-      resolvePermissionByRequestId(idKey);
-      return;
-    }
+  if (state.current.pendingPermissions.has(toolCallId)) {
+    resolvePermissionByToolCallId(toolCallId);
   }
 }
 
@@ -292,17 +291,17 @@ interface JsonRpcFrame {
 }
 
 export function handleNotification(frame: JsonRpcFrame): void {
-  // Sibling-resolved permission tear-down. Lives outside the
-  // session/update gate because it's a transient signal, not session
-  // activity.
-  if (frame.method === "session/permission_resolved") {
-    onPermissionResolved(frame.params);
-    return;
-  }
   if (frame.method !== "session/update") return;
   const update = (frame.params?.update ?? null) as AnyRecord | null;
   if (!update || typeof update !== "object") return;
   const kind = String(update.sessionUpdate ?? "");
+  // Sibling-resolved permission tear-down. Doesn't flip inTurn or
+  // route through the per-case switch — it's a transient correlation
+  // signal, not session activity.
+  if (kind === "permission_resolved") {
+    onPermissionResolved(update);
+    return;
+  }
   // Most update kinds indicate the agent is mid-turn. Mode/model/usage
   // updates can fire outside of a turn (e.g. at attach), so we don't
   // flip inTurn for those.
@@ -417,17 +416,29 @@ export function handleAgentRequest(req: JsonRpcFrame): void {
   if (!state.current) return;
   if (req.method === "session/request_permission") {
     const params = (req.params ?? {}) as AnyRecord;
-    // Key by stringified id since hydra forwards permission_resolved
-    // with requestId as a string (and our id may be a number). Storing
-    // here under String() means the resolved-by-sibling cleanup matches
-    // reliably.
-    const idKey = String(req.id);
-    state.current.pendingPermissions.set(idKey, {
+    // Key by toolCallId so RFD #533 sibling-resolved tear-down can find
+    // the right entry without per-recipient JSON-RPC id correlation.
+    const toolCall = (params.toolCall as AnyRecord | undefined) ?? {};
+    const toolCallId =
+      typeof toolCall.toolCallId === "string" ? toolCall.toolCallId : "";
+    if (!toolCallId) {
+      // Malformed request — refuse rather than pin orphaned UI state.
+      state.current.ws?.send(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: req.id,
+          error: { code: -32602, message: "missing toolCall.toolCallId" },
+        }),
+      );
+      return;
+    }
+    state.current.pendingPermissions.set(toolCallId, {
       requestId: req.id as string | number,
-      toolCall: (params.toolCall as never) ?? {},
+      toolCallId,
+      toolCall: toolCall as PermissionEntry["toolCall"],
       options: (params.options as never) ?? [],
     });
-    pushLog({ kind: "perm", requestId: idKey });
+    pushLog({ kind: "perm", toolCallId });
     return;
   }
   // Unknown agent request — reply with method-not-found so we don't

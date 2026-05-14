@@ -52,7 +52,11 @@ export interface SpinnerState {
 }
 
 export interface PermissionEntry {
+  // Original JSON-RPC request id from the agent — kept so reply() can echo it
+  // verbatim. Correlation across hydra (sibling-resolve, fan-out cleanup) is by
+  // toolCallId per RFD #533.
   requestId: string | number;
+  toolCallId: string;
   toolCall: { title?: string; name?: string; [k: string]: unknown };
   options: Array<{ optionId: string; name?: string; kind?: string }>;
 }
@@ -73,7 +77,7 @@ export type LogItem =
   | { kind: "system"; text: string }
   | { kind: "error"; text: string }
   | { kind: "spinner"; spinner: SpinnerState }
-  | { kind: "perm"; requestId: string }
+  | { kind: "perm"; toolCallId: string }
   | PlanLogItem;
 
 export interface FileEntry {

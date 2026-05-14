@@ -112,19 +112,18 @@ export function handleFrame(frame: JsonRpcFrame): void {
 // through this module's reply(). Defining respondPermission here so
 // views.ts can import a single button-click handler without touching
 // acp.ts internals.
-export function respondPermission(idKey: string, optionId: string): void {
+export function respondPermission(toolCallId: string, optionId: string): void {
   if (!state.current) return;
-  const entry = state.current.pendingPermissions.get(idKey) as
+  const entry = state.current.pendingPermissions.get(toolCallId) as
     | PermissionEntry
     | undefined;
   if (!entry) return;
-  state.current.pendingPermissions.delete(idKey);
+  state.current.pendingPermissions.delete(toolCallId);
   state.current.log = state.current.log.filter(
-    (e) => !(e.kind === "perm" && String(e.requestId) === String(idKey)),
+    (e) => !(e.kind === "perm" && e.toolCallId === toolCallId),
   );
-  // Reply with the original request id (not the string key) so JSON-RPC
-  // type matches what hydra sent us. respondPermission is only called
-  // for entries we've registered, so entry.requestId is the right value.
+  // Reply with the original JSON-RPC request id so the agent's pending
+  // promise resolves; toolCallId is only the UI correlation key.
   reply(entry.requestId, {
     outcome:
       optionId === "__cancel__"

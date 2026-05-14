@@ -109,13 +109,11 @@ function handleConnection(
   // permission outcomes).
   const outstandingFromUpstream = new Set<string>();
 
-  // Permission requests held back while session/permission_resolved
-  // might still arrive from a sibling controller (e.g. the auto-
-  // approver). If a resolved notification comes in for one of these
-  // before the timer fires, we drop the request entirely — the UI
-  // never sees it, no prompt card flashes on screen. Keyed by
-  // stringified request id, matching how hydra emits requestId in
-  // session/permission_resolved params.
+  // Permission requests held back while session/update permission_resolved
+  // might still arrive from a sibling controller (e.g. the auto-approver).
+  // If a resolved notification comes in for one of these before the timer
+  // fires, we drop the request entirely — the UI never sees it, no prompt
+  // card flashes on screen. Keyed by toolCallId per RFD #533.
   const pendingPermissionFrames = new Map<string, NodeJS.Timeout>();
   const permissionDelayMs = ctx.config.permissionDisplayDelayMs;
 
@@ -139,17 +137,21 @@ function handleConnection(
     // the pending forward. The UI never saw the request so dropping
     // the resolved notification too is correct — there's nothing for
     // the UI to tear down.
-    if (n.method === "session/permission_resolved") {
-      const params = (n.params ?? {}) as Record<string, unknown>;
-      const requestId = params.requestId;
-      if (requestId !== undefined) {
-        const idKey = String(requestId);
-        const timer = pendingPermissionFrames.get(idKey);
+    if (n.method === "session/update") {
+      const params = (n.params ?? {}) as { update?: unknown };
+      const update = params.update as
+        | { sessionUpdate?: unknown; toolCallId?: unknown }
+        | undefined;
+      if (
+        update?.sessionUpdate === "permission_resolved" &&
+        typeof update.toolCallId === "string"
+      ) {
+        const timer = pendingPermissionFrames.get(update.toolCallId);
         if (timer) {
           clearTimeout(timer);
-          pendingPermissionFrames.delete(idKey);
+          pendingPermissionFrames.delete(update.toolCallId);
           log.debug(
-            `permission suppressed-by-delay session=${sessionId} requestId=${idKey}`,
+            `permission suppressed-by-delay session=${sessionId} toolCallId=${update.toolCallId}`,
           );
           return;
         }
@@ -172,17 +174,26 @@ function handleConnection(
     if (r.method === "session/request_permission" && permissionDelayMs > 0) {
       // Buffer the request for permissionDelayMs. Sibling controllers
       // (the auto-approver) often answer within a handful of ms; if
-      // session/permission_resolved arrives before the timer fires,
-      // the notification handler above clears this entry and the
-      // request never reaches the browser tab (no flash).
-      const idKey = String(r.id);
-      const timer = setTimeout(() => {
-        pendingPermissionFrames.delete(idKey);
-        outstandingFromUpstream.add(idKey);
-        sendBrowserFrame(r);
-      }, permissionDelayMs);
-      pendingPermissionFrames.set(idKey, timer);
-      return;
+      // session/update permission_resolved arrives before the timer
+      // fires, the notification handler above clears this entry and
+      // the request never reaches the browser tab (no flash). Keyed
+      // by toolCallId per RFD #533.
+      const params = (r.params ?? {}) as {
+        toolCall?: { toolCallId?: unknown };
+      };
+      const toolCallId =
+        typeof params.toolCall?.toolCallId === "string"
+          ? params.toolCall.toolCallId
+          : undefined;
+      if (toolCallId) {
+        const timer = setTimeout(() => {
+          pendingPermissionFrames.delete(toolCallId);
+          outstandingFromUpstream.add(String(r.id));
+          sendBrowserFrame(r);
+        }, permissionDelayMs);
+        pendingPermissionFrames.set(toolCallId, timer);
+        return;
+      }
     }
     outstandingFromUpstream.add(String(r.id));
     sendBrowserFrame(r);

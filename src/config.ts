@@ -18,10 +18,11 @@ export interface Config {
   hydraWsUrl: string;
   hydraToken: string;
   // Delay (ms) between receiving session/request_permission from hydra
-  // and forwarding it to the browser tab. If session/permission_resolved
-  // fires within this window — e.g. the auto-approver answers — the
-  // request is never forwarded and the UI never sees the prompt. 0
-  // disables (forward immediately, today's behavior).
+  // and forwarding it to the browser tab. If session/update
+  // permission_resolved (RFD #533) fires within this window — e.g. the
+  // auto-approver answers — the request is never forwarded and the UI
+  // never sees the prompt. 0 disables (forward immediately, today's
+  // behavior).
   permissionDisplayDelayMs: number;
   debug: boolean;
 }

@@ -856,7 +856,7 @@ function renderLogItem(item: ChatState["log"][number]): Node {
   }
   if (item.kind === "perm") {
     if (!state.current) return document.createTextNode("");
-    const entry = state.current.pendingPermissions.get(item.requestId);
+    const entry = state.current.pendingPermissions.get(item.toolCallId);
     if (!entry) return document.createTextNode("");
     return renderPermission(entry);
   }
@@ -1001,14 +1001,14 @@ function renderPermission(entry: PermissionEntry): HTMLElement {
               : o.kind?.startsWith("reject")
               ? "danger"
               : "",
-            onclick: () => respondPermission(String(entry.requestId), o.optionId),
+            onclick: () => respondPermission(entry.toolCallId, o.optionId),
           },
           o.name || o.optionId,
         ),
       ),
       el(
         "button",
-        { onclick: () => respondPermission(String(entry.requestId), "__cancel__") },
+        { onclick: () => respondPermission(entry.toolCallId, "__cancel__") },
         "Cancel",
       ),
     ),
