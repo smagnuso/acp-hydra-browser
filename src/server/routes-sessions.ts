@@ -24,6 +24,20 @@ interface KillBody {
   sessionId?: string;
 }
 
+// Drop the redundant "hydra_session_" prefix from the daemon's
+// Content-Disposition filename so downloads show the short session id.
+// Falls back to a synthesized name if parsing fails.
+function rewriteExportDisposition(disposition: string, id: string): string {
+  const shortId = id.replace(/^hydra_session_/, "");
+  const fallback = `attachment; filename="${shortId}.hydra"`;
+  const match = disposition.match(/filename\*?=("[^"]+"|[^;]+)/i);
+  if (!match || !match[1]) return fallback;
+  const raw = match[1].replace(/^"|"$/g, "");
+  const stripped = raw.replace(/hydra_session_/, "");
+  if (stripped === raw) return disposition;
+  return `attachment; filename="${stripped}"`;
+}
+
 export function registerSessionRoutes(
   app: FastifyInstance,
   ctx: ServerContext,
@@ -85,10 +99,10 @@ export function registerSessionRoutes(
     }
   });
 
-  // Forward the daemon's bundle download verbatim, including its
-  // Content-Disposition filename. The session cookie auth carries
-  // naturally over a plain <a download> tag in the SPA, so no blob/CSP
-  // dance is needed on the client side.
+  // Forward the daemon's bundle download, but strip the "hydra_session_"
+  // prefix from the filename so users see a short session id locally.
+  // Session cookie auth carries naturally over a plain <a download> tag
+  // in the SPA, so no blob/CSP dance is needed on the client side.
   app.get(
     "/api/sessions/:id/export",
     { config: { skipCsrf: true } },
@@ -98,7 +112,10 @@ export function registerSessionRoutes(
         const upstream = await ctx.rest.fetchExport(id);
         const disposition = upstream.headers.get("content-disposition");
         if (disposition) {
-          reply.header("Content-Disposition", disposition);
+          reply.header(
+            "Content-Disposition",
+            rewriteExportDisposition(disposition, id),
+          );
         }
         const contentType =
           upstream.headers.get("content-type") ?? "application/json";
