@@ -9,6 +9,10 @@ const pkg = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
 ) as { version: string };
 
+// ACP wire protocol version this extension speaks. Single source of
+// truth for the initialize handshake; never a literal at the callsite.
+export const ACP_PROTOCOL_VERSION = 1;
+
 export type JsonRpcId = number | string;
 
 export interface JsonRpcRequest<P = unknown> {
@@ -244,7 +248,7 @@ export async function runInitialize(
   opts: HandshakeOptions = {},
 ): Promise<void> {
   await conn.request("initialize", {
-    protocolVersion: opts.protocolVersion ?? 1,
+    protocolVersion: opts.protocolVersion ?? ACP_PROTOCOL_VERSION,
     clientCapabilities: opts.clientCapabilities ?? {
       fs: { readTextFile: false, writeTextFile: false },
       terminal: false,
