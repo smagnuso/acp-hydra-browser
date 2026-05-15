@@ -207,7 +207,7 @@ function renderTopbar(): HTMLElement {
       },
       "Import",
     ),
-    el("button", { onclick: openSessionModal, class: "primary" }, "+ Session"),
+    el("button", { onclick: openSessionModal }, "New Session"),
   );
 }
 

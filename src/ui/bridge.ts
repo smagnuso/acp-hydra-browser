@@ -11,6 +11,7 @@ import {
   handleNotification,
   pushLog,
 } from "./acp.js";
+import { cancelAllQueued } from "./queue.js";
 import type { PermissionEntry } from "./types.js";
 
 interface JsonRpcFrame {
@@ -78,6 +79,23 @@ export function handleFrame(frame: JsonRpcFrame): void {
       kind: "error",
       text: `Bridge error: ${(frame.params?.["message"] as string | undefined) ?? "?"}`,
     });
+    render();
+    return;
+  }
+  // Daemon closed our session (user typed /hydra kill, idle-close fired,
+  // record was deleted, etc.). The WS itself is still up — only the
+  // session is gone — so we mirror the WS-close cleanup (ready=false,
+  // drop the queue chain) and tell the user. The list view's "cold"
+  // badge updates on its own next refresh via session/list.
+  if (frame.method === "hydra-acp/session_closed") {
+    if (state.current) {
+      state.current.ready = false;
+      cancelAllQueued(state.current);
+    }
+    state.banner = {
+      kind: "warn",
+      text: "Session is now cold — opening a new prompt will resurrect it.",
+    };
     render();
     return;
   }
