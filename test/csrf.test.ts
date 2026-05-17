@@ -7,25 +7,26 @@ import {
   checkSecFetchSite,
   checkStateChanging,
 } from "../src/util/csrf.js";
+import { DEFAULT_BROWSER_PORT } from "../src/config.js";
 
-const ctx = buildSecurityContext("127.0.0.1", 9099, "http", ["my-tailscale.ts"]);
+const ctx = buildSecurityContext("127.0.0.1", DEFAULT_BROWSER_PORT, "http", ["my-tailscale.ts"]);
 
 test("checkHost allows loopback", () => {
-  assert.equal(checkHost(ctx, { host: "127.0.0.1:9099" }), true);
-  assert.equal(checkHost(ctx, { host: "localhost:9099" }), true);
+  assert.equal(checkHost(ctx, { host: `127.0.0.1:${DEFAULT_BROWSER_PORT}` }), true);
+  assert.equal(checkHost(ctx, { host: `localhost:${DEFAULT_BROWSER_PORT}` }), true);
 });
 
 test("checkHost rejects unknown host", () => {
-  assert.equal(checkHost(ctx, { host: "evil.example.com:9099" }), false);
+  assert.equal(checkHost(ctx, { host: `evil.example.com:${DEFAULT_BROWSER_PORT}` }), false);
 });
 
 test("checkHost allows extra allowlisted host", () => {
-  assert.equal(checkHost(ctx, { host: "my-tailscale.ts:9099" }), true);
+  assert.equal(checkHost(ctx, { host: `my-tailscale.ts:${DEFAULT_BROWSER_PORT}` }), true);
 });
 
 test("checkOrigin allows loopback origin", () => {
   assert.equal(
-    checkOrigin(ctx, { origin: "http://127.0.0.1:9099" }),
+    checkOrigin(ctx, { origin: `http://127.0.0.1:${DEFAULT_BROWSER_PORT}` }),
     true,
   );
 });
@@ -59,8 +60,8 @@ test("checkSecFetchSite rejects cross-site", () => {
 
 test("checkStateChanging composite OK", () => {
   const r = checkStateChanging(ctx, {
-    host: "127.0.0.1:9099",
-    origin: "http://127.0.0.1:9099",
+    host: `127.0.0.1:${DEFAULT_BROWSER_PORT}`,
+    origin: `http://127.0.0.1:${DEFAULT_BROWSER_PORT}`,
     "sec-fetch-site": "same-origin",
   });
   assert.equal(r.ok, true);
@@ -69,7 +70,7 @@ test("checkStateChanging composite OK", () => {
 test("checkStateChanging rejects bad host", () => {
   const r = checkStateChanging(ctx, {
     host: "evil:80",
-    origin: "http://127.0.0.1:9099",
+    origin: `http://127.0.0.1:${DEFAULT_BROWSER_PORT}`,
     "sec-fetch-site": "same-origin",
   });
   assert.equal(r.ok, false);
@@ -80,8 +81,8 @@ test("checkStateChanging rejects bad host", () => {
 
 test("checkStateChanging rejects cross-site fetch", () => {
   const r = checkStateChanging(ctx, {
-    host: "127.0.0.1:9099",
-    origin: "http://127.0.0.1:9099",
+    host: `127.0.0.1:${DEFAULT_BROWSER_PORT}`,
+    origin: `http://127.0.0.1:${DEFAULT_BROWSER_PORT}`,
     "sec-fetch-site": "cross-site",
   });
   assert.equal(r.ok, false);

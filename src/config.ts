@@ -104,6 +104,9 @@ function commaList(map: Map<string, string>, key: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+export const DEFAULT_DAEMON_PORT = 55514;
+export const DEFAULT_BROWSER_PORT = 5514;
+
 export function loadConfig(path: string = paths.configFile()): Config {
   let text = "";
   try {
@@ -116,7 +119,7 @@ export function loadConfig(path: string = paths.configFile()): Config {
   const hydraDaemonUrl =
     process.env.HYDRA_ACP_DAEMON_URL ??
     map.get("HYDRA_DAEMON_URL") ??
-    "http://127.0.0.1:8765";
+    `http://127.0.0.1:${DEFAULT_DAEMON_PORT}`;
   const hydraToken =
     process.env.HYDRA_ACP_TOKEN ?? map.get("HYDRA_TOKEN") ?? "";
   if (!hydraToken) {
@@ -142,7 +145,7 @@ export function loadConfig(path: string = paths.configFile()): Config {
 
   return {
     browserHost: map.get("BROWSER_HOST") ?? "127.0.0.1",
-    browserPort: intVal(map, "BROWSER_PORT", 9099),
+    browserPort: intVal(map, "BROWSER_PORT", DEFAULT_BROWSER_PORT),
     tls,
     linkFile: expandHome(map.get("BROWSER_LINK_FILE") ?? paths.linkFile()),
     allowedHosts: commaList(map, "BROWSER_ALLOWED_HOSTS"),
