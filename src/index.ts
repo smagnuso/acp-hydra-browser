@@ -57,7 +57,7 @@ async function main(argv: string[]): Promise<void> {
   log.info(`listening on ${scheme}://${config.browserHost}:${config.browserPort}`);
   log.info(`Open: ${url}`);
   log.info(
-    `Sign in with the password set via \`hydra-acp auth password set\` on the daemon host.`,
+    `Sign in with the password set via \`hydra-acp auth password\` on the daemon host.`,
   );
 
   const shutdown = async (signal: string) => {
@@ -99,7 +99,7 @@ Usage:
   hydra-acp-browser --help         Show this message.
 
 Set the master password on the daemon host:
-  hydra-acp auth password set
+  hydra-acp auth password
 
 Sign in by opening the printed URL in your browser and entering the
 password.

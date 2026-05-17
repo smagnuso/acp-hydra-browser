@@ -223,7 +223,7 @@ ${errorHtml}
   <input type="password" id="password" name="password" autofocus required>
   <button type="submit">Sign in</button>
 </form>
-<p class="note">Set the password on the daemon host with <code>hydra-acp auth password set</code>.</p>
+<p class="note">Set the password on the daemon host with <code>hydra-acp auth password</code>.</p>
 </body>
 </html>`;
 }
