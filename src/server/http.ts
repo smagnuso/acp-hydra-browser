@@ -2,14 +2,11 @@ import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { Config } from "../config.js";
-import type { HydraRestClient } from "../hydra/client.js";
 import { logger } from "../util/log.js";
 import { buildSecurityContext, checkStateChanging, type SecurityContext } from "../util/csrf.js";
 import {
   AuthRateLimiter,
   COOKIE_NAME,
-  buildSetCookie,
-  constantTimeKeyMatch,
   parseCookies,
 } from "./auth.js";
 
@@ -17,8 +14,6 @@ const log = logger("http");
 
 export interface ServerContext {
   config: Config;
-  rest: HydraRestClient;
-  authkey: string;
   security: SecurityContext;
   rateLimiter: AuthRateLimiter;
   scheme: "http" | "https";
@@ -34,6 +29,11 @@ declare module "fastify" {
 declare module "fastify" {
   interface FastifyRequest {
     cspNonce?: string;
+    // The user's daemon-issued session token, extracted from the cookie.
+    // Set by the auth middleware; undefined when the route was skipAuth
+    // or no cookie was present. Used by daemon-calling routes as the
+    // bearer credential.
+    sessionToken?: string;
   }
 }
 
@@ -70,6 +70,13 @@ export function createServer(ctx: ServerContext): FastifyInstance {
 
   app.addHook("onRequest", async (request, reply) => {
     if (request.routeOptions.config?.skipAuth) {
+      // Still surface the cookie value for skipAuth routes that might
+      // want to read it (e.g. the root handler decides login vs SPA).
+      const cookies = parseCookies(request.headers.cookie);
+      const provided = cookies.get(COOKIE_NAME);
+      if (provided && provided.length > 0) {
+        request.sessionToken = provided;
+      }
       return;
     }
     if (!authenticate(request, reply, ctx)) {
@@ -108,8 +115,11 @@ function setSecurityHeaders(
   }
 }
 
-// Returns true if the request is authenticated; otherwise it has already
-// written a response and the caller should stop.
+// Returns true if the request carries an hb_session cookie. The actual
+// validity of the token is enforced by the daemon when this server
+// proxies the cookie value as a bearer — a forged/expired cookie will
+// hit a 403 on the very next daemon call and propagate to the user as a
+// 401 here, prompting a re-login.
 function authenticate(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -123,66 +133,17 @@ function authenticate(
   const cookies = parseCookies(request.headers.cookie);
   const provided = cookies.get(COOKIE_NAME);
   if (!provided) {
-    ctx.rateLimiter.recordFailure(ip);
     reply.code(401).send({ error: "unauthorized" });
     return false;
   }
-  if (!constantTimeKeyMatch(provided, ctx.authkey)) {
-    ctx.rateLimiter.recordFailure(ip);
-    reply.code(401).send({ error: "unauthorized" });
-    return false;
-  }
-  ctx.rateLimiter.recordSuccess(ip);
+  request.sessionToken = provided;
   return true;
 }
 
-// Check + set cookie for a `?authkey=…` query against the root path. Returns
-// "redirect" (cookie set, caller should 302), "ok" (already authenticated,
-// caller serves the SPA), or "deny" (caller serves the login instructions).
-export function processRootAuth(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  ctx: ServerContext,
-): "redirect" | "ok" | "deny" {
-  const ip = request.ip ?? "unknown";
-  if (ctx.rateLimiter.isBlocked(ip)) {
-    reply.code(429).send({ error: "rate limited" });
-    return "deny";
-  }
-  const query = (request.query ?? {}) as { authkey?: string };
-  if (typeof query.authkey === "string") {
-    if (constantTimeKeyMatch(query.authkey, ctx.authkey)) {
-      ctx.rateLimiter.recordSuccess(ip);
-      reply.header(
-        "Set-Cookie",
-        buildSetCookie(ctx.authkey, {
-          secure: ctx.scheme === "https",
-          maxAgeSeconds: 60 * 60 * 24 * 30,
-        }),
-      );
-      return "redirect";
-    }
-    ctx.rateLimiter.recordFailure(ip);
-    return "deny";
-  }
-  const cookies = parseCookies(request.headers.cookie);
-  const provided = cookies.get(COOKIE_NAME);
-  if (provided && constantTimeKeyMatch(provided, ctx.authkey)) {
-    return "ok";
-  }
-  return "deny";
-}
-
-export function buildContext(
-  config: Config,
-  rest: HydraRestClient,
-  authkey: string,
-): ServerContext {
+export function buildContext(config: Config): ServerContext {
   const scheme: "http" | "https" = config.tls ? "https" : "http";
   return {
     config,
-    rest,
-    authkey,
     security: buildSecurityContext(
       config.browserHost,
       config.browserPort,

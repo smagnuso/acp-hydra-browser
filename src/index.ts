@@ -2,8 +2,6 @@
 import { writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { loadConfig } from "./config.js";
-import { HydraRestClient } from "./hydra/client.js";
-import { ensureAuthkey, rotateAuthkey } from "./server/auth.js";
 import { buildContext, createServer } from "./server/http.js";
 import { registerSessionRoutes } from "./server/routes-sessions.js";
 import { registerAgentRoutes } from "./server/routes-agents.js";
@@ -33,19 +31,13 @@ async function main(argv: string[]): Promise<void> {
     printHelp();
     return;
   }
-  const rotate = argv.includes("--rotate-authkey");
 
   const config = loadConfig();
   setDebug(config.debug);
 
   ensureLoopbackOrTls(config.browserHost, !!config.tls);
 
-  const authkey = rotate
-    ? rotateAuthkey(config.authkeyFile)
-    : ensureAuthkey(config.authkeyFile);
-
-  const rest = new HydraRestClient(config.hydraDaemonUrl, config.hydraToken);
-  const ctx = buildContext(config, rest, authkey);
+  const ctx = buildContext(config);
   const app = createServer(ctx);
 
   registerRootRoutes(app, ctx);
@@ -59,11 +51,14 @@ async function main(argv: string[]): Promise<void> {
   attachWsBridge(app.server, ctx);
 
   const scheme = config.tls ? "https" : "http";
-  const url = `${scheme}://${displayHost(config.browserHost)}:${config.browserPort}/?authkey=${authkey}`;
+  const url = `${scheme}://${displayHost(config.browserHost)}:${config.browserPort}/`;
   writeLinkFile(config.linkFile, url);
   log.info(`hydra daemon: ${config.hydraDaemonUrl}`);
   log.info(`listening on ${scheme}://${config.browserHost}:${config.browserPort}`);
   log.info(`Open: ${url}`);
+  log.info(
+    `Sign in with the password set via \`hydra-acp auth password set\` on the daemon host.`,
+  );
 
   const shutdown = async (signal: string) => {
     log.info(`received ${signal}, shutting down`);
@@ -101,13 +96,16 @@ function printHelp(): void {
 
 Usage:
   hydra-acp-browser                Start the server.
-  hydra-acp-browser --rotate-authkey
-                                   Generate a fresh authkey, kicking existing
-                                   browsers, and exit after starting.
   hydra-acp-browser --help         Show this message.
 
+Set the master password on the daemon host:
+  hydra-acp auth password set
+
+Sign in by opening the printed URL in your browser and entering the
+password.
+
 Config: ~/.hydra-acp-browser.conf (KEY=VALUE).
-When run as an hydra-acp extension, HYDRA_ACP_DAEMON_URL / HYDRA_ACP_TOKEN /
+When run as a hydra-acp extension, HYDRA_ACP_DAEMON_URL / HYDRA_ACP_TOKEN /
 HYDRA_ACP_WS_URL are injected automatically.
 `,
   );

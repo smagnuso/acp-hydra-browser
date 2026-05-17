@@ -10,12 +10,15 @@ export interface Config {
   browserHost: string;
   browserPort: number;
   tls: TlsConfig | undefined;
-  authkeyFile: string;
   linkFile: string;
   allowedHosts: string[];
   fileMaxBytes: number;
   hydraDaemonUrl: string;
   hydraWsUrl: string;
+  // Service token (the long-lived daemon master bearer, injected by hydra
+  // as HYDRA_ACP_TOKEN when this runs as an extension). Used only for
+  // background/privileged daemon calls — user-attributed traffic carries
+  // the per-user session token extracted from the hb_session cookie.
   hydraToken: string;
   // Delay (ms) between receiving session/request_permission from hydra
   // and forwarding it to the browser tab. If session/update
@@ -141,9 +144,6 @@ export function loadConfig(path: string = paths.configFile()): Config {
     browserHost: map.get("BROWSER_HOST") ?? "127.0.0.1",
     browserPort: intVal(map, "BROWSER_PORT", 9099),
     tls,
-    authkeyFile: expandHome(
-      map.get("BROWSER_AUTHKEY_FILE") ?? paths.authkeyFile(),
-    ),
     linkFile: expandHome(map.get("BROWSER_LINK_FILE") ?? paths.linkFile()),
     allowedHosts: commaList(map, "BROWSER_ALLOWED_HOSTS"),
     fileMaxBytes: intVal(map, "BROWSER_FILE_MAX_BYTES", 256 * 1024),

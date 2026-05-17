@@ -48,7 +48,7 @@ test("rate limiter clears on success", () => {
 
 test("buildSetCookie produces HttpOnly+SameSite", () => {
   const c = buildSetCookie("xyz", { secure: false, maxAgeSeconds: 60 });
-  assert.match(c, /^hb_authkey=xyz/);
+  assert.match(c, /^hb_session=xyz/);
   assert.match(c, /HttpOnly/);
   assert.match(c, /SameSite=Strict/);
   assert.match(c, /Max-Age=60/);
