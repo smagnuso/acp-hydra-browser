@@ -14,9 +14,6 @@ export const paths = {
   home(): string {
     return HOME_DIR;
   },
-  authkeyFile(): string {
-    return `${HOME_DIR}/authkey`;
-  },
   linkFile(): string {
     return `${HOME_DIR}/link`;
   },

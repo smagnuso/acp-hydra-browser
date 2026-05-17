@@ -1,9 +1,18 @@
 import { homedir } from "node:os";
-import type { FastifyInstance } from "fastify";
-import { HydraRestError } from "../hydra/client.js";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import { HydraRestClient, HydraRestError } from "../hydra/client.js";
 import { UpstreamConnection, runInitialize } from "../hydra/ws.js";
 import { logger } from "../util/log.js";
 import type { ServerContext } from "./http.js";
+
+function clientFor(ctx: ServerContext, request: FastifyRequest): HydraRestClient {
+  // Prefer the per-user session token from the hb_session cookie. Fall
+  // back to the service token (env-injected by hydra) for paths that
+  // skip auth — currently just /api/health, which the SPA polls before
+  // it has a session.
+  const token = request.sessionToken ?? ctx.config.hydraToken;
+  return HydraRestClient.forRequest(ctx.config.hydraDaemonUrl, token);
+}
 
 function expandHome(p: string): string {
   if (p === "~") return homedir();
@@ -45,9 +54,9 @@ export function registerSessionRoutes(
   app.get(
     "/api/health",
     { config: { skipAuth: true } },
-    async (_request, reply) => {
+    async (request, reply) => {
       try {
-        const upstream = await ctx.rest.health();
+        const upstream = await clientFor(ctx, request).health();
         reply.send({ status: "ok", upstream });
       } catch (err) {
         reply
@@ -61,7 +70,10 @@ export function registerSessionRoutes(
     const query = request.query as { cwd?: string; all?: string } | undefined;
     const all = query?.all === "true" || query?.all === "1";
     try {
-      const result = await ctx.rest.listSessions({ cwd: query?.cwd, all });
+      const result = await clientFor(ctx, request).listSessions({
+        cwd: query?.cwd,
+        all,
+      });
       reply.send(result);
     } catch (err) {
       const status = err instanceof HydraRestError ? err.status : 502;
@@ -76,7 +88,7 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      await ctx.rest.killSession(body.sessionId);
+      await clientFor(ctx, request).killSession(body.sessionId);
       reply.code(204).send();
     } catch (err) {
       const status = err instanceof HydraRestError ? err.status : 502;
@@ -91,7 +103,7 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      const result = await createSession(ctx, body);
+      const result = await createSession(ctx, request, body);
       reply.code(201).send(result);
     } catch (err) {
       log.warn(`session creation failed: ${(err as Error).message}`);
@@ -109,7 +121,7 @@ export function registerSessionRoutes(
     async (request, reply) => {
       const { id } = request.params as { id: string };
       try {
-        const upstream = await ctx.rest.fetchExport(id);
+        const upstream = await clientFor(ctx, request).fetchExport(id);
         const disposition = upstream.headers.get("content-disposition");
         if (disposition) {
           reply.header(
@@ -143,7 +155,7 @@ export function registerSessionRoutes(
       return;
     }
     try {
-      const result = await ctx.rest.importBundle(body.bundle, {
+      const result = await clientFor(ctx, request).importBundle(body.bundle, {
         replace: body.replace === true,
       });
       reply.code(201).send(result);
@@ -164,11 +176,13 @@ interface CreateSessionResult {
 // _meta), optionally session/prompt, close. Returns the new sessionId.
 async function createSession(
   ctx: ServerContext,
+  request: FastifyRequest,
   body: CreateSessionBody,
 ): Promise<CreateSessionResult> {
+  const token = request.sessionToken ?? ctx.config.hydraToken;
   const conn = new UpstreamConnection({
     daemonWsUrl: ctx.config.hydraWsUrl,
-    token: ctx.config.hydraToken,
+    token,
     clientName: "hydra-acp-browser-session",
   });
 

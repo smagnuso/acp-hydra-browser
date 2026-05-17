@@ -1,6 +1,7 @@
 import { promises as fsp } from "node:fs";
 import { resolve, sep } from "node:path";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
+import { HydraRestClient } from "../hydra/client.js";
 import type { ServerContext } from "./http.js";
 
 interface ListBody {
@@ -55,9 +56,12 @@ export class PathScopeError extends Error {
 
 async function lookupSessionCwd(
   ctx: ServerContext,
+  request: FastifyRequest,
   sessionId: string,
 ): Promise<string | undefined> {
-  const result = await ctx.rest.listSessions({ all: true });
+  const token = request.sessionToken ?? ctx.config.hydraToken;
+  const client = HydraRestClient.forRequest(ctx.config.hydraDaemonUrl, token);
+  const result = await client.listSessions({ all: true });
   const match = result.sessions.find((s) => s.sessionId === sessionId);
   return match?.cwd;
 }
@@ -72,7 +76,7 @@ export function registerFileRoutes(
       reply.code(400).send({ error: "sessionId required" });
       return;
     }
-    const cwd = await lookupSessionCwd(ctx, body.sessionId);
+    const cwd = await lookupSessionCwd(ctx, request, body.sessionId);
     if (!cwd) {
       reply.code(404).send({ error: "session not found" });
       return;
@@ -141,7 +145,7 @@ export function registerFileRoutes(
       reply.code(400).send({ error: "path required" });
       return;
     }
-    const cwd = await lookupSessionCwd(ctx, body.sessionId);
+    const cwd = await lookupSessionCwd(ctx, request, body.sessionId);
     if (!cwd) {
       reply.code(404).send({ error: "session not found" });
       return;

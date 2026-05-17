@@ -27,6 +27,14 @@ export class HydraRestClient {
     private readonly token: string,
   ) {}
 
+  static forRequest(baseUrl: string, token: string): HydraRestClient {
+    return new HydraRestClient(baseUrl, token);
+  }
+
+  get bearerToken(): string {
+    return this.token;
+  }
+
   private async json<T>(
     method: string,
     path: string,

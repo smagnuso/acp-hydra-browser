@@ -14,7 +14,6 @@ import {
 } from "../hydra/ws.js";
 import {
   COOKIE_NAME,
-  constantTimeKeyMatch,
   parseCookies,
 } from "./auth.js";
 import { checkStateChanging } from "../util/csrf.js";
@@ -66,14 +65,13 @@ export function attachWsBridge(
       return;
     }
     const cookies = parseCookies(request.headers.cookie);
-    const provided = cookies.get(COOKIE_NAME);
-    if (!provided || !constantTimeKeyMatch(provided, ctx.authkey)) {
+    const sessionToken = cookies.get(COOKIE_NAME);
+    if (!sessionToken || sessionToken.length === 0) {
       ctx.rateLimiter.recordFailure(ip);
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
       return;
     }
-    ctx.rateLimiter.recordSuccess(ip);
     const sessionId = url.searchParams.get("session");
     const load = url.searchParams.get("load") === "true";
     if (!sessionId) {
@@ -82,7 +80,7 @@ export function attachWsBridge(
       return;
     }
     wss.handleUpgrade(request, socket, head, (browserWs) => {
-      handleConnection(browserWs, request, ctx, sessionId, load);
+      handleConnection(browserWs, request, ctx, sessionId, sessionToken, load);
     });
   });
 
@@ -94,13 +92,14 @@ function handleConnection(
   _req: IncomingMessage,
   ctx: ServerContext,
   sessionId: string,
+  sessionToken: string,
   load: boolean,
 ): void {
   log.info(`bridge open session=${sessionId} load=${load}`);
 
   const upstream = new UpstreamConnection({
     daemonWsUrl: ctx.config.hydraWsUrl,
-    token: ctx.config.hydraToken,
+    token: sessionToken,
   });
 
   // Track ids of outstanding upstream→browser requests so we can validate

@@ -1,34 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
-import { dirname } from "node:path";
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { logger } from "../util/log.js";
+import { timingSafeEqual } from "node:crypto";
 
-const log = logger("auth");
-
-export const COOKIE_NAME = "hb_authkey";
+export const COOKIE_NAME = "hb_session";
 export const COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
-
-export function ensureAuthkey(path: string): string {
-  try {
-    const existing = readFileSync(path, "utf8").trim();
-    if (existing.length >= 32) {
-      return existing;
-    }
-    log.warn(`existing authkey at ${path} too short; rotating`);
-  } catch {
-    // Doesn't exist yet or unreadable; we'll create it.
-  }
-  return rotateAuthkey(path);
-}
-
-export function rotateAuthkey(path: string): string {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const key = randomBytes(32).toString("hex");
-  writeFileSync(path, key + "\n", { mode: 0o600 });
-  chmodSync(path, 0o600);
-  log.info(`authkey written to ${path}`);
-  return key;
-}
 
 export function constantTimeKeyMatch(a: string, b: string): boolean {
   if (typeof a !== "string" || typeof b !== "string") {
@@ -47,8 +20,10 @@ interface RateEntry {
   windowStart: number;
 }
 
-// Simple per-IP rate limiter for failed auth attempts. 10 failures in 15 min
-// triggers a temporary block.
+// Per-IP rate limiter for failed auth attempts on the browser's own
+// /login path. 10 failures in 15 min triggers a temporary block. The
+// daemon has its own rate limiter for /v1/auth/login — this one is
+// defense in depth for the browser-facing surface.
 export class AuthRateLimiter {
   private entries = new Map<string, RateEntry>();
   private readonly maxFails = 10;
