@@ -99,6 +99,10 @@ function actuallyRender(): void {
   }
   const oldList = root.querySelector<HTMLElement>(".list");
   const oldListScrollTop = oldList ? oldList.scrollTop : null;
+  const oldFilesBody = root.querySelector<HTMLElement>(".files .body");
+  const oldFilesBodyScrollTop = oldFilesBody ? oldFilesBody.scrollTop : null;
+  const oldFilesPreview = root.querySelector<HTMLElement>(".files .preview");
+  const oldFilesPreviewScrollTop = oldFilesPreview ? oldFilesPreview.scrollTop : null;
 
   root.replaceChildren();
   renderApp(root, state);
@@ -114,6 +118,14 @@ function actuallyRender(): void {
   const newList = root.querySelector<HTMLElement>(".list");
   if (newList && oldListScrollTop !== null) {
     newList.scrollTop = oldListScrollTop;
+  }
+  const newFilesBody = root.querySelector<HTMLElement>(".files .body");
+  if (newFilesBody && oldFilesBodyScrollTop !== null) {
+    newFilesBody.scrollTop = oldFilesBodyScrollTop;
+  }
+  const newFilesPreview = root.querySelector<HTMLElement>(".files .preview");
+  if (newFilesPreview && oldFilesPreviewScrollTop !== null) {
+    newFilesPreview.scrollTop = oldFilesPreviewScrollTop;
   }
 
   if (focusKey) {

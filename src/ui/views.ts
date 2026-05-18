@@ -1203,6 +1203,18 @@ function renderFileOverlay(c: ChatState): Node {
         "div",
         { class: "body" },
         fo.err ? el("div", { class: "msg error" }, fo.err) : null,
+        fo.path
+          ? el(
+              "div",
+              {
+                class: "entry",
+                onclick: () => listFiles(fo.path.split("/").slice(0, -1).join("/")),
+              },
+              el("span", { class: "icon" }, "▸"),
+              el("span", { class: "name" }, ".."),
+              el("span", { class: "size" }, ""),
+            )
+          : null,
         ...fo.entries.map((e) =>
           el(
             "div",
@@ -1224,8 +1236,7 @@ function renderFileOverlay(c: ChatState): Node {
     el(
       "div",
       {
-        class: "modal",
-        style: "width:42rem;height:80vh;display:flex;flex-direction:column;padding:0",
+        class: "modal file-modal",
       },
       el(
         "div",
@@ -1240,7 +1251,6 @@ function renderFileOverlay(c: ChatState): Node {
         "div",
         {
           class: "files",
-          style: "flex:1;overflow:hidden;display:flex;flex-direction:column",
         },
         body,
       ),
