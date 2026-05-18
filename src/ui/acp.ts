@@ -3,6 +3,7 @@
 // plumbing — that lives in bridge.ts.
 
 import { state } from "./state.js";
+import { render } from "./renderer.js";
 import { contentToText } from "./markdown.js";
 import type {
   LogItem,
@@ -354,6 +355,13 @@ export function handleNotification(frame: JsonRpcFrame): void {
         if (Array.isArray(update.availableModes)) {
           state.current.modes = update.availableModes as never;
         }
+        render();
+      }
+      break;
+    case "available_modes_update":
+      if (state.current && Array.isArray(update.availableModes)) {
+        state.current.modes = update.availableModes as never;
+        render();
       }
       break;
     case "current_model_update":
@@ -362,6 +370,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
         if (Array.isArray(update.availableModels)) {
           state.current.models = update.availableModels as never;
         }
+        render();
       }
       break;
     case "usage_update":

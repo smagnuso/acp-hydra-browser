@@ -626,9 +626,14 @@ function closeModal(): void {
 
 // ---- Mode / model picker -----------------------------------------
 
-function openModePicker(): void {
-  if (!state.current?.modes || state.current.modes.length === 0) return;
-  setState({ modal: { kind: "modes" } });
+function cycleMode(): void {
+  const c = state.current;
+  if (!c?.modes || c.modes.length === 0) return;
+  const idx = c.modes.findIndex((m) => m.id === c.mode);
+  const next = c.modes[(idx + 1) % c.modes.length];
+  c.mode = next.id;
+  render();
+  sendSetMode(next.id);
 }
 
 function openModelPicker(): void {
@@ -726,7 +731,7 @@ function renderChat(c: ChatState): HTMLElement {
           "ready",
         ),
     c.mode
-      ? el("span", { class: "pill clickable", onclick: openModePicker }, "mode: " + c.mode)
+      ? el("span", { class: "pill clickable", onclick: cycleMode }, "mode: " + c.mode)
       : null,
     c.model
       ? el("span", { class: "pill clickable", onclick: openModelPicker }, "model: " + c.model)
