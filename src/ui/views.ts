@@ -7,6 +7,7 @@ import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { el } from "./dom.js";
 import { renderMarkdown, escapeHtml } from "./markdown.js";
+import { highlightCode } from "./hljs.js";
 import {
   api,
   importBundle,
@@ -1197,7 +1198,12 @@ function renderFileOverlay(c: ChatState): Node {
           el("span", { class: "crumb", onclick: () => closeFilePreview() }, "← back to listing"),
           document.createTextNode(`  ${fo.preview.path}`),
         ),
-        el("pre", { html: escapeHtml(fo.preview.content) }),
+        el("pre", {},
+          el("code", {
+            class: "hljs",
+            html: highlightCode(fo.preview.content, fo.preview.path) ?? escapeHtml(fo.preview.content),
+          }),
+        ),
       )
     : el(
         "div",
