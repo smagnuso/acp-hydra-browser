@@ -89,7 +89,8 @@ pre code { background: transparent; padding: 0; }
 .msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }
 .msg.user { background: var(--user-bg); border: 1px solid var(--border); align-self: flex-end; max-width: 70%; }
 .msg.agent { background: var(--agent-bg); border: 1px solid var(--border); align-self: flex-start; max-width: 90%; }
-.msg.system { background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; align-self: flex-start; max-width: 70%; }
+.msg.system { background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; align-self: flex-start; max-width: 70%; cursor: pointer; }
+.msg.system.collapsed .body { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .msg.error { background: rgba(249,117,131,0.1); border: 1px solid var(--bad); color: var(--bad); }
 .msg .body { margin: 0; }
 .msg .body p:first-child { margin-top: 0; }

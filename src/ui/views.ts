@@ -34,6 +34,10 @@ import type {
   SpinnerState,
 } from "./types.js";
 
+// Tracks which thought bubbles the user has collapsed. Keyed by log item
+// object reference, which is stable across re-renders (mutated in place).
+const collapsedThoughts = new WeakSet<object>();
+
 // ---- Format helpers ---------------------------------------------
 
 // Title fallback when neither hydra nor the title-cache has a real
@@ -825,13 +829,46 @@ function renderChat(c: ChatState): HTMLElement {
 
 function renderLogItem(item: ChatState["log"][number]): Node {
   if (item.kind === "stream") {
+    const isThought = item.role === "thought";
     const cls =
       item.role === "user"
         ? "msg user"
-        : item.role === "thought"
+        : isThought
         ? "msg system"
         : "msg agent";
-    const node = el("div", { class: cls });
+    const isCollapsed = isThought && collapsedThoughts.has(item);
+    const node = el("div", { class: isCollapsed ? cls + " collapsed" : cls });
+    if (isThought) {
+      node.addEventListener("click", () => {
+        const collapsing = !collapsedThoughts.has(item);
+        if (!collapsing) {
+          collapsedThoughts.delete(item);
+          render();
+          return;
+        }
+
+        const chatBody = document.querySelector<HTMLElement>(".chat-body");
+        const bodyRect = chatBody?.getBoundingClientRect();
+        const bubbleRect = node.getBoundingClientRect();
+        // bubbleAbsoluteTop: distance from scroll container's top edge to bubble top
+        const bubbleAbsoluteTop = bubbleRect.top - (bodyRect?.top ?? 0) + (chatBody?.scrollTop ?? 0);
+        const bubbleTopInView = !bodyRect ||
+          (bubbleRect.top >= bodyRect.top && bubbleRect.top < bodyRect.bottom);
+        // Keep bubble top at same visual position if it was visible; otherwise
+        // scroll so the collapsed bubble appears at the top of the chat area.
+        const desiredScrollTop = bubbleTopInView
+          ? (chatBody?.scrollTop ?? 0)
+          : bubbleAbsoluteTop;
+
+        collapsedThoughts.add(item);
+        render();
+        // Override renderer's scroll after its rAF completes.
+        requestAnimationFrame(() => {
+          const newBody = document.querySelector<HTMLElement>(".chat-body");
+          if (newBody) newBody.scrollTop = desiredScrollTop;
+        });
+      });
+    }
     const qe = item.queueEntry;
     // Only show a chip while the prompt is still waiting locally
     // (queued) or ended in cancellation. Once it's sent ("processing"
