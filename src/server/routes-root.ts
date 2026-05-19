@@ -218,12 +218,32 @@ code { background: #1c2230; padding: 0.1rem 0.4rem; border-radius: 4px; }
 <body>
 <h1>hydra-acp-browser</h1>
 ${errorHtml}
-<form method="POST" action="/login" autocomplete="off">
+<form id="loginForm" method="POST" action="/login" autocomplete="off">
   <label for="password">Password</label>
-  <input type="password" id="password" name="password" autofocus required>
+  <input type="password" id="password" name="password" autofocus required autocomplete="off">
   <button type="submit">Sign in</button>
 </form>
 <p class="note">Set the password on the daemon host with <code>hydra-acp auth password</code>.</p>
+<script nonce="${nonce}">
+// Disarm macOS Secure Event Input before the redirect navigation
+// fires. Browsers hold the kernel-level keyboard lock as long as
+// they think a password field is focused / present; same-origin
+// navigation alone isn't enough to release it (Synergy + similar
+// KVMs can't intercept keystrokes until the tab closes otherwise).
+// Blurring + flipping the type to "text" tells the browser this is
+// no longer a password input, which releases the lock immediately.
+// Name attribute is unchanged so the POST body still carries the
+// password.
+(() => {
+  const form = document.getElementById("loginForm");
+  const pw = document.getElementById("password");
+  if (!form || !(pw instanceof HTMLInputElement)) return;
+  form.addEventListener("submit", () => {
+    pw.blur();
+    pw.type = "text";
+  });
+})();
+</script>
 </body>
 </html>`;
 }
