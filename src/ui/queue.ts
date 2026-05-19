@@ -1,8 +1,16 @@
-// Client-side prompt queue. Mirrors what hydra-acp-slack does:
-// serialize our own session/prompt requests so they don't all pile
-// into hydra's per-session queue at once. Lets us cancel a queued
-// prompt locally (without sending session/cancel) and show
-// queued/cancelled chips on each user bubble.
+// Server-driven prompt queue. Hydra owns the per-session FIFO; the
+// browser fires session/prompt eagerly and reacts to
+// hydra-acp/prompt_queue_added / _updated / _removed notifications
+// (handled in acp.ts) to drive each bubble's queue chip state.
+//
+// What stays browser-side:
+//   - The optimistic user bubble + chip rendering (each prompt gets its
+//     own LogItem with a QueueEntry; the chip shows queued / processing
+//     / cancelled based on entry.status).
+//   - A FIFO over unbound entries so we can bind hydra's messageId to
+//     the right local entry when prompt_queue_added arrives — hydra
+//     serializes session/prompt arrivals so the Nth added-with-our-
+//     originator event corresponds to the Nth still-unbound entry.
 
 import { state } from "./state.js";
 import { render } from "./renderer.js";
@@ -15,10 +23,6 @@ export function sendPrompt(): void {
   if (!c) return;
   const text = c.composerValue.trim();
   if (!text) return;
-  // Bail if the bridge isn't live — entering the chain here would just
-  // sit in waitForReadyOrCancel forever since bridge/ready can't
-  // arrive on a closed socket. Surface as an error in the log so the
-  // user knows the message wasn't sent.
   if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
     c.log.push({
       kind: "error",
@@ -28,25 +32,23 @@ export function sendPrompt(): void {
     render();
     return;
   }
-  // Build a queue entry. Status starts "queued" if anything is ahead
-  // of us — either another local prompt still working through the
-  // chain, or the agent is mid-turn from a sibling client. Otherwise
-  // it'll flip to "processing" the moment its chain.then fires.
-  const ahead = c.promptQueue.length;
-  const aheadActive = c.inTurn ? 1 : 0;
-  const totalAhead = ahead + aheadActive;
+  // aheadAtEnqueue is an UX hint — number of entries already in flight
+  // when this one was submitted. Captured at submit time so the chip
+  // doesn't tick down distractingly. Counts any sibling-originated turn
+  // via inTurn since hydra-acp/prompt_queue_added for that hasn't fired
+  // yet (or we may not be tracking peer entries here).
+  const ahead = c.promptQueue.length + (c.inTurn ? 1 : 0);
   const entry: QueueEntry = {
     id: "p_" + Math.random().toString(36).slice(2, 10),
     text,
-    status: totalAhead > 0 ? "queued" : "pending",
-    aheadAtEnqueue: totalAhead,
-    cancelled: false,
-    started: false,
-    waitResolver: null,
+    // Optimistic status — overwritten by prompt_queue_added (queued or
+    // processing depending on position). If hydra rejects the prompt
+    // outright the entry stays "pending" and we'll surface the error
+    // from the session/prompt response.
+    status: ahead > 0 ? "queued" : "pending",
+    aheadAtEnqueue: ahead,
   };
   c.promptQueue.push(entry);
-  // Optimistic local rendering: push a fresh user bubble (no merging
-  // with prior user bubble) so each prompt has its own queue chip.
   c.log.push({
     kind: "stream",
     role: "user",
@@ -57,144 +59,71 @@ export function sendPrompt(): void {
   c.recentOwnPrompts.push({ text, at: Date.now() });
   const cutoff = Date.now() - 60_000;
   c.recentOwnPrompts = c.recentOwnPrompts.filter((p) => p.at >= cutoff).slice(-16);
-  scheduleSendPrompt(entry);
+  // Fire eagerly. Hydra serializes upstream — if there's an in-flight
+  // turn this prompt sits at the daemon-side queue until it advances,
+  // and prompt_queue_added arrives back with our messageId. We don't
+  // need a local chain.
+  const promptId = send("session/prompt", {
+    sessionId: c.sessionId,
+    prompt: [{ type: "text", text }],
+  });
+  if (promptId !== undefined) {
+    c.ownPromptIds.add(String(promptId));
+  }
+  ensureSpinner();
   c.composerValue = "";
   render();
 }
 
-// Serialize own-prompt sends through state.current.promptChain so
-// each one waits for the agent to be idle before its session/prompt
-// fires. Cancellation is purely local while status is "queued"/
-// "pending"; once the chain has actually sent the prompt, cancel
-// falls through to the running turn (handled by the Stop button).
-function scheduleSendPrompt(entry: QueueEntry): void {
-  const c = state.current!;
-  const previous = c.promptChain ?? Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(async () => {
-      if (entry.cancelled) {
-        return;
-      }
-      try {
-        // Wait for the WS bridge handshake before doing anything else
-        // — this is what makes "click a cold session and start typing"
-        // work (the prompt waits for resurrection to finish, then
-        // proceeds normally).
-        await waitForReadyOrCancel(entry);
-        if (entry.cancelled) return;
-        await waitForIdleOrCancel(entry);
-        if (entry.cancelled) return;
-        entry.started = true;
-        entry.status = "processing";
-        // Optimistic: mark inTurn so a subsequent prompt enqueued
-        // before prompt_received arrives still sees us as busy and
-        // queues correctly behind this one.
-        c.inTurn = true;
-        // Pull the queued user bubble down to the end of the log so
-        // it anchors the new turn — regardless of what got appended
-        // below it while it was waiting (e.g. the tail of the prior
-        // turn's tool output or agent text). Without this, the bubble
-        // can end up wedged in the middle of the prior turn's
-        // content and look like it stayed where the user typed it.
-        const idx = c.log.findIndex(
-          (e) => e.kind === "stream" && e.role === "user" && e.queueEntry === entry,
-        );
-        if (idx >= 0 && idx < c.log.length - 1) {
-          const item = c.log.splice(idx, 1)[0];
-          if (item) c.log.push(item);
-        }
-        // Surface the "thinking…" spinner immediately — gives the user
-        // visible feedback before any frame comes back from the agent.
-        // Same intent as hydra-acp-slack's ensureSpinner-on-send.
-        ensureSpinner();
-        render();
-        const promptId = send("session/prompt", {
-          sessionId: c.sessionId,
-          prompt: [{ type: "text", text: entry.text }],
-        });
-        // Hydra omits the originator from turn_complete fan-out, so
-        // the JSON-RPC response to *this* request is our turn-end
-        // signal. handleFrame's response branch sees the id, calls
-        // finalizeTurn (which drains idle listeners), and the next
-        // wait below resolves.
-        if (promptId !== undefined) {
-          c.ownPromptIds.add(String(promptId));
-        }
-        // Wait for the next idle transition. This keeps the chain
-        // head reserved until our turn wraps so the next queued
-        // entry doesn't overlap.
-        await waitForIdleOrCancel(entry);
-      } finally {
-        const idx = c.promptQueue.indexOf(entry);
-        if (idx >= 0) {
-          c.promptQueue.splice(idx, 1);
-        }
-        if (entry.cancelled && !entry.started) {
-          entry.status = "cancelled";
-        } else {
-          entry.status = "done";
-        }
-        render();
-      }
+// Drop a queued prompt. If the entry has been bound to a server
+// messageId (the common case once prompt_queue_added has arrived), fire
+// hydra-acp/cancel_prompt and let the daemon's prompt_queue_removed
+// echo drive the local state transition. If the entry isn't bound yet
+// (sub-millisecond race between submit and prompt_queue_added),
+// optimistically mark cancelled so the chip reflects the user's intent
+// immediately — the eventual prompt_queue_added will still bind, and
+// the entry will pick up the daemon's authoritative status from
+// prompt_queue_removed shortly after.
+export function cancelQueuedPrompt(entry: QueueEntry): void {
+  const c = state.current;
+  if (!c) return;
+  if (entry.messageId !== undefined) {
+    send("hydra-acp/cancel_prompt", {
+      sessionId: c.sessionId,
+      messageId: entry.messageId,
     });
-  c.promptChain = next;
-}
-
-// Wait for either the next idle transition OR for this entry to be
-// cancelled. cancelQueuedPrompt invokes entry.waitResolver to wake
-// the awaiter immediately, regardless of agent state.
-function waitForIdleOrCancel(entry: QueueEntry): Promise<void> {
-  return waitOnListOrCancel(entry, state.current!.idleListeners, () => state.current!.inTurn);
-}
-
-// Same shape, but waits for the WS bridge to finish its handshake
-// (so session/prompt actually reaches hydra). Lets a user click a
-// cold-session card and start typing immediately; the prompt sits
-// in the chain until bridge/ready arrives.
-function waitForReadyOrCancel(entry: QueueEntry): Promise<void> {
-  return waitOnListOrCancel(entry, state.current!.readyListeners, () => !state.current!.ready);
-}
-
-function waitOnListOrCancel(
-  entry: QueueEntry,
-  list: Array<() => void>,
-  shouldWait: () => boolean,
-): Promise<void> {
-  if (entry.cancelled) {
-    return Promise.resolve();
+    return;
   }
-  if (!shouldWait()) {
-    return Promise.resolve();
+  entry.status = "cancelled";
+  render();
+}
+
+// Rewrite a queued prompt's text. Same binding gate as cancel — only
+// possible once the entry has a messageId. If hydra returns
+// already_running, the entry is past the head and the edit won't take;
+// the eventual prompt_queue_updated echo (which won't fire in the
+// rejected case) is what locks in the change.
+export function updateQueuedPrompt(entry: QueueEntry, text: string): void {
+  const c = state.current;
+  if (!c) return;
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  if (entry.messageId === undefined) {
+    // Not bound yet — apply locally and let the eventual bound state
+    // pick up the new text. The user already sees the edit immediately.
+    entry.text = trimmed;
+    render();
+    return;
   }
-  return new Promise<void>((resolve) => {
-    const listener = (): void => {
-      entry.waitResolver = null;
-      resolve();
-    };
-    list.push(listener);
-    entry.waitResolver = (): void => {
-      const idx = list.indexOf(listener);
-      if (idx >= 0) list.splice(idx, 1);
-      entry.waitResolver = null;
-      resolve();
-    };
+  send("hydra-acp/update_prompt", {
+    sessionId: c.sessionId,
+    messageId: entry.messageId,
+    prompt: [{ type: "text", text: trimmed }],
   });
 }
 
-// Cancel a prompt that's still in our queue. If it hasn't started
-// yet, the chain will see the cancelled flag and bail before sending
-// to hydra. If it's already running, the caller should also send
-// session/cancel via the Stop button.
-export function cancelQueuedPrompt(entry: QueueEntry): void {
-  entry.cancelled = true;
-  if (entry.waitResolver) {
-    entry.waitResolver();
-  }
-}
-
 // Cancel just the in-flight turn without touching the queue. The
-// chain dispatcher will resume with the next queued entry once the
+// daemon's drainQueue will resume with the next queued entry once the
 // agent acknowledges the cancel.
 export function cancelProcessingPrompt(): void {
   const c = state.current;
@@ -202,26 +131,24 @@ export function cancelProcessingPrompt(): void {
   notify("session/cancel", { sessionId: c.sessionId });
 }
 
-// Stop button: cancel anything still queued locally (those don't
-// need a session/cancel since we never sent them to hydra) AND tell
-// the agent to abort the running turn (if any).
+// Stop button: drop everything queued AND tell the agent to abort the
+// running turn. Cancels go through hydra-acp/cancel_prompt for bound
+// entries (so peers see the right prompt_queue_removed events) and
+// fall back to a local mark for unbound ones.
 export function sendCancel(): void {
   const c = state.current;
   if (!c) return;
-  let cancelledLocal = 0;
+  let touched = false;
   for (const entry of c.promptQueue) {
-    if (!entry.started && !entry.cancelled) {
-      entry.cancelled = true;
-      if (entry.waitResolver) entry.waitResolver();
-      cancelledLocal += 1;
+    if (entry.status === "queued" || entry.status === "pending") {
+      cancelQueuedPrompt(entry);
+      touched = true;
     }
   }
   if (c.inTurn) {
-    // session/cancel is a notification per the ACP spec — no id, no
-    // response expected. The bridge is allow-listed for it server-side.
     notify("session/cancel", { sessionId: c.sessionId });
   }
-  if (cancelledLocal > 0) {
+  if (touched) {
     render();
   }
 }
@@ -236,11 +163,17 @@ export function sendSetModel(modelId: string): void {
   send("session/set_model", { sessionId: state.current.sessionId, modelId });
 }
 
-// Cancel every still-pending entry in the queue. Used when the WS
-// closes mid-flight — without this, the chain would hang waiting for
-// ready/idle that won't arrive.
+// Drop any locally-tracked own entries on WS close. The daemon's
+// prompt_queue_removed(abandoned) would normally arrive for these, but
+// if the WS is gone we'll never see it — clear the chips locally so
+// they don't stay pinned as "queued" forever.
 export function cancelAllQueued(c: ChatState): void {
   for (const entry of c.promptQueue) {
-    if (!entry.cancelled) cancelQueuedPrompt(entry);
+    if (entry.status !== "done" && entry.status !== "cancelled") {
+      entry.status = "cancelled";
+      if (entry.messageId !== undefined) {
+        c.queueByMessageId.delete(entry.messageId);
+      }
+    }
   }
 }

@@ -95,7 +95,7 @@ export function openChat(sessionId: string, load: boolean): void {
       ? `${session.title}|${session.cwd}|${session.agentId}`
       : "",
     promptQueue: [],
-    promptChain: null,
+    queueByMessageId: new Map(),
     ownPromptIds: new Set(),
     inTurn: false,
     idleListeners: [],

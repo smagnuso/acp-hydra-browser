@@ -22,6 +22,7 @@ import {
   sendPrompt,
   sendSetMode,
   sendSetModel,
+  updateQueuedPrompt,
 } from "./queue.js";
 import { closeChat, openChat } from "./routing.js";
 import type {
@@ -872,20 +873,38 @@ function renderLogItem(item: ChatState["log"][number]): Node {
     }
     const qe = item.queueEntry;
     // Only show a chip while the prompt is still waiting locally
-    // (queued) or ended in cancellation. Once it's sent ("processing"
-    // or "done"), the bubble looks like a normal user message. The
-    // running turn's × lives on the spinner instead so it works for
-    // sibling-originated prompts too.
-    if (qe && (qe.status === "queued" || qe.status === "cancelled")) {
+    // (queued / editing) or ended in cancellation. Once it's sent
+    // ("processing" or "done"), the bubble looks like a normal user
+    // message. The running turn's × lives on the spinner instead so it
+    // works for sibling-originated prompts too.
+    if (
+      qe &&
+      (qe.status === "queued" ||
+        qe.status === "pending" ||
+        qe.status === "cancelled" ||
+        qe.status === "editing")
+    ) {
       node.appendChild(renderQueueChip(qe));
     }
-    const body = el("div", { class: "body" });
-    body.innerHTML = renderMarkdown(item.text);
-    if (qe && qe.status === "cancelled") {
-      body.style.textDecoration = "line-through";
-      body.style.opacity = "0.6";
+    if (qe && qe.status === "editing") {
+      // Inline editor over the queued bubble. Pre-fills with the
+      // current text; Enter commits via hydra-acp/update_prompt,
+      // Escape reverts. Disabled (and the entry returns to queued)
+      // once the prompt actually starts processing.
+      node.appendChild(
+        renderQueueEditor(qe, (next) => {
+          item.text = next;
+        }),
+      );
+    } else {
+      const body = el("div", { class: "body" });
+      body.innerHTML = renderMarkdown(item.text);
+      if (qe && qe.status === "cancelled") {
+        body.style.textDecoration = "line-through";
+        body.style.opacity = "0.6";
+      }
+      node.appendChild(body);
     }
-    node.appendChild(body);
     return node;
   }
   if (item.kind === "system") {
@@ -910,7 +929,7 @@ function renderLogItem(item: ChatState["log"][number]): Node {
 }
 
 function renderQueueChip(entry: QueueEntry): Node {
-  if (entry.status === "queued") {
+  if (entry.status === "queued" || entry.status === "pending") {
     const ahead = Math.max(1, entry.aheadAtEnqueue);
     return el(
       "div",
@@ -923,12 +942,31 @@ function renderQueueChip(entry: QueueEntry): Node {
       el(
         "button",
         {
+          class: "queue-edit",
+          onclick: () => {
+            entry.status = "editing";
+            render();
+          },
+          title: "Edit before sending",
+        },
+        "✎",
+      ),
+      el(
+        "button",
+        {
           class: "queue-cancel",
           onclick: () => cancelQueuedPrompt(entry),
           title: "Cancel before sending",
         },
         "×",
       ),
+    );
+  }
+  if (entry.status === "editing") {
+    return el(
+      "div",
+      { class: "queue-chip queue-editing" },
+      el("span", null, "editing · enter to save · esc to cancel edit"),
     );
   }
   if (entry.status === "processing") {
@@ -947,6 +985,49 @@ function renderQueueChip(entry: QueueEntry): Node {
     );
   }
   return document.createTextNode("");
+}
+
+// Inline edit-while-queued textarea. Enter (without shift) commits via
+// hydra-acp/update_prompt and reverts the chip to "queued"; Escape
+// reverts without sending. The commit may be rejected by hydra if the
+// prompt has already started — the chip status will get overwritten
+// shortly after by the daemon's broadcasts in either case.
+//
+// onCommit lets the caller patch the surrounding LogItem's text so the
+// bubble reflects the edit optimistically (the same value lands again
+// when the daemon's prompt_queue_updated echo arrives, but applying it
+// here avoids a visible round-trip flicker).
+function renderQueueEditor(
+  entry: QueueEntry,
+  onCommit: (next: string) => void,
+): HTMLElement {
+  const textarea = el("textarea", {
+    class: "queue-edit-area",
+    rows: "3",
+  }) as HTMLTextAreaElement;
+  textarea.value = entry.text;
+  textarea.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey) {
+      ev.preventDefault();
+      const next = textarea.value;
+      entry.text = next;
+      onCommit(next);
+      entry.status = "queued";
+      updateQueuedPrompt(entry, next);
+      render();
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      entry.status = "queued";
+      render();
+    }
+  });
+  // Autofocus + place caret at end. Done in a microtask so the
+  // textarea is in the DOM by the time we touch it.
+  queueMicrotask(() => {
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  });
+  return el("div", { class: "queue-editor" }, textarea);
 }
 
 function renderSpinner(spinner: SpinnerState): HTMLElement {
