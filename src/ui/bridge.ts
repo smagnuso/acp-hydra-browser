@@ -9,6 +9,7 @@ import {
   finalizeTurn,
   handleAgentRequest,
   handleNotification,
+  hydrateQueueFromSnapshot,
   pushLog,
 } from "./acp.js";
 import { cancelAllQueued } from "./queue.js";
@@ -67,6 +68,17 @@ export function handleFrame(frame: JsonRpcFrame): void {
     const params = (frame.params ?? {}) as Record<string, unknown>;
     if (typeof params.clientId === "string") {
       state.current.ownClientId = params.clientId;
+    }
+    // Hydrate from the attach-response queue snapshot so a fresh
+    // attach paints existing queued/running prompts immediately
+    // instead of waiting for new prompt_queue_added events to arrive.
+    // The bridge forwards _meta from session/attach verbatim, so the
+    // snapshot lives at params._meta["hydra-acp"].queue.
+    const meta = params._meta as Record<string, unknown> | undefined;
+    const hydraMeta = meta?.["hydra-acp"] as Record<string, unknown> | undefined;
+    const snapshot = hydraMeta?.queue;
+    if (Array.isArray(snapshot)) {
+      hydrateQueueFromSnapshot(snapshot);
     }
     // Wake any queued prompt that was waiting for the bridge handshake.
     const listeners = state.current.readyListeners;
