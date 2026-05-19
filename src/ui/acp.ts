@@ -213,6 +213,15 @@ function onPromptReceived(update: AnyRecord): void {
   const blocks = Array.isArray(update.prompt) ? update.prompt : [];
   const text = blocks.map((b) => contentToText(b)).join("");
   if (!text) return;
+  // If we already rendered this peer prompt via prompt_queue_added
+  // (browser shows peer-queued bubbles with chips), skip the second
+  // render — the bubble is already in the log, and the chip's
+  // queued→processing transition is driven by prompt_queue_removed.
+  const messageId =
+    typeof update.messageId === "string" ? update.messageId : undefined;
+  if (messageId && state.current.queueByMessageId.has(messageId)) {
+    return;
+  }
   if (consumeOwnPromptEcho({ text })) {
     return;
   }
@@ -229,11 +238,16 @@ function onPromptReceived(update: AnyRecord): void {
 
 // ---- Server-driven prompt queue handlers -------------------------
 
-// Bind hydra's server-assigned messageId to a local queue entry.
-// Drains FIFO order over still-unbound entries since hydra serializes
-// session/prompt arrivals per session. For peer-originated added
-// events, there's no local entry waiting, so nothing happens here —
-// the peer's user bubble will arrive separately via prompt_received.
+// React to a new entry landing on hydra's per-session queue. For own
+// prompts: bind hydra's server-assigned messageId to the FIFO head
+// unbound local entry (hydra serializes session/prompt arrivals so
+// FIFO order matches our submit order). For peer prompts: push a
+// fresh user bubble with a queueEntry so we get the same chip
+// treatment our own queued prompts get — that's how a second
+// attached client (browser + TUI on the same session) sees what the
+// other client typed *while* it's still queued. The peer's eventual
+// prompt_received notification is de-duped against this bubble via
+// messageId (see onPromptReceived).
 function onPromptQueueAdded(params: AnyRecord): void {
   if (!state.current) return;
   const messageId = typeof params.messageId === "string" ? params.messageId : "";
@@ -241,32 +255,69 @@ function onPromptQueueAdded(params: AnyRecord): void {
   const originator = (params.originator ?? {}) as AnyRecord;
   const originatorClientId =
     typeof originator.clientId === "string" ? originator.clientId : "";
-  if (
-    !state.current.ownClientId ||
-    originatorClientId !== state.current.ownClientId
-  ) {
-    // Peer-originated. Nothing to bind locally.
+  const isOwn =
+    !!state.current.ownClientId &&
+    originatorClientId === state.current.ownClientId;
+  if (isOwn) {
+    const unbound = state.current.promptQueue.find(
+      (e) => e.messageId === undefined && e.status !== "cancelled",
+    );
+    if (!unbound) {
+      // Out-of-band added event we can't correlate (e.g. resumed after
+      // a refresh, no local FIFO entry waiting). Drop on the floor —
+      // there's no chip to update.
+      return;
+    }
+    unbound.messageId = messageId;
+    state.current.queueByMessageId.set(messageId, unbound);
+    // Promote to "processing" if hydra says position 0 (we're at the
+    // head and about to run). Otherwise leave as "queued" — chip text
+    // already reflects aheadAtEnqueue captured at submit.
+    const position = typeof params.position === "number" ? params.position : 1;
+    if (position === 0) {
+      unbound.status = "processing";
+    } else if (unbound.status === "pending") {
+      unbound.status = "queued";
+    }
     return;
   }
-  const unbound = state.current.promptQueue.find(
-    (e) => e.messageId === undefined && e.status !== "cancelled",
-  );
-  if (!unbound) {
-    // Out-of-band added event we can't correlate (e.g. resumed after a
-    // refresh). Drop on the floor — there's no chip to update.
-    return;
+  // Peer-originated. Render a fresh user bubble for it now — same
+  // chip-on-bubble treatment as own queued prompts, so the user sees
+  // the peer's queued prompt instead of waiting for it to start.
+  const blocks = Array.isArray(params.prompt) ? params.prompt : [];
+  let text = "";
+  for (const block of blocks) {
+    if (block && typeof block === "object") {
+      const b = block as AnyRecord;
+      if (b.type === "text" && typeof b.text === "string") {
+        text += b.text;
+      }
+    }
   }
-  unbound.messageId = messageId;
-  state.current.queueByMessageId.set(messageId, unbound);
-  // Promote to "processing" if hydra says position 0 (we're at the
-  // head and about to run). Otherwise leave as "queued" — chip text
-  // already reflects aheadAtEnqueue captured at submit.
-  const position = typeof params.position === "number" ? params.position : 1;
-  if (position === 0) {
-    unbound.status = "processing";
-  } else if (unbound.status === "pending") {
-    unbound.status = "queued";
-  }
+  if (!text) return;
+  const position = typeof params.position === "number" ? params.position : 0;
+  const queueDepth =
+    typeof params.queueDepth === "number" ? params.queueDepth : 1;
+  const entry = {
+    id: "peer_" + Math.random().toString(36).slice(2, 10),
+    text,
+    // position 0 = head, already running; >0 = waiting in line. Mirror
+    // own-prompt status semantics.
+    status: position === 0 ? ("processing" as const) : ("queued" as const),
+    aheadAtEnqueue: Math.max(0, position),
+    messageId,
+  };
+  state.current.queueByMessageId.set(messageId, entry);
+  // closeOpenStream so any in-flight agent stream above is broken;
+  // the peer's bubble lands cleanly at the bottom.
+  closeOpenStream();
+  state.current.log.push({
+    kind: "stream",
+    role: "user",
+    text,
+    closed: true,
+    queueEntry: entry,
+  });
 }
 
 // Server says a queued entry's prompt content changed (someone called
