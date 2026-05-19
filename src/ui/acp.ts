@@ -238,6 +238,52 @@ function onPromptReceived(update: AnyRecord): void {
 
 // ---- Server-driven prompt queue handlers -------------------------
 
+// Apply the daemon's queue snapshot delivered via the attach-response
+// _meta["hydra-acp"].queue. Each entry becomes a user bubble with a
+// queueEntry whose status reflects position (0 = head/processing,
+// >0 = waiting). Treated like peer-originated entries — the freshly-
+// attached client has a new clientId, so even prompts our previous
+// session originated read as foreign now (which is what we want; the
+// originator's local FIFO is gone, can't bind anything to them).
+export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
+  if (!state.current) return;
+  for (const raw of snapshot) {
+    if (!raw || typeof raw !== "object") continue;
+    const e = raw as AnyRecord;
+    const messageId = typeof e.messageId === "string" ? e.messageId : "";
+    if (!messageId) continue;
+    if (state.current.queueByMessageId.has(messageId)) continue;
+    const blocks = Array.isArray(e.prompt) ? e.prompt : [];
+    let text = "";
+    for (const block of blocks) {
+      if (block && typeof block === "object") {
+        const b = block as AnyRecord;
+        if (b.type === "text" && typeof b.text === "string") {
+          text += b.text;
+        }
+      }
+    }
+    if (!text) continue;
+    const position = typeof e.position === "number" ? e.position : 0;
+    const entry = {
+      id: "snap_" + Math.random().toString(36).slice(2, 10),
+      text,
+      status: position === 0 ? ("processing" as const) : ("queued" as const),
+      aheadAtEnqueue: Math.max(0, position),
+      messageId,
+    };
+    state.current.queueByMessageId.set(messageId, entry);
+    state.current.log.push({
+      kind: "stream",
+      role: "user",
+      text,
+      closed: true,
+      queueEntry: entry,
+    });
+  }
+}
+
+
 // React to a new entry landing on hydra's per-session queue. For own
 // prompts: bind hydra's server-assigned messageId to the FIFO head
 // unbound local entry (hydra serializes session/prompt arrivals so
