@@ -1179,6 +1179,14 @@ function fileBreadcrumb(path: string): HTMLElement {
   return el("div", { class: "crumbs" }, crumbs);
 }
 
+function addLineRef(path: string, line: number): void {
+  if (!state.current) return;
+  const ref = `${path}:${line}`;
+  const cur = state.current.composerValue;
+  state.current.composerValue = cur ? `${cur} ${ref}` : ref;
+  render();
+}
+
 function closeFilePreview(): void {
   if (!state.current?.fileOverlay) return;
   state.current.fileOverlay.preview = null;
@@ -1188,24 +1196,36 @@ function closeFilePreview(): void {
 function renderFileOverlay(c: ChatState): Node {
   const fo = c.fileOverlay;
   if (!fo) return document.createTextNode("");
-  const body = fo.preview
-    ? el(
+  let body: HTMLElement;
+  if (fo.preview) {
+    const { path, content } = fo.preview;
+    const highlighted = highlightCode(content, path) ?? escapeHtml(content);
+    const lineCount = content.split("\n").length;
+    const gutter = el("div", { class: "code-gutter" });
+    for (let i = 1; i <= lineCount; i++) {
+      const ln = i;
+      gutter.appendChild(
+        el("div", { class: "ln", onclick: () => addLineRef(path, ln) }, String(ln)),
+      );
+    }
+    body = el(
+      "div",
+      { class: "preview" },
+      el(
         "div",
-        { class: "preview" },
-        el(
-          "div",
-          { class: "crumbs" },
-          el("span", { class: "crumb", onclick: () => closeFilePreview() }, "← back to listing"),
-          document.createTextNode(`  ${fo.preview.path}`),
-        ),
-        el("pre", {},
-          el("code", {
-            class: "hljs",
-            html: highlightCode(fo.preview.content, fo.preview.path) ?? escapeHtml(fo.preview.content),
-          }),
-        ),
-      )
-    : el(
+        { class: "crumbs" },
+        el("span", { class: "crumb", onclick: () => closeFilePreview() }, "← back to listing"),
+        document.createTextNode(`  ${path}`),
+      ),
+      el(
+        "div",
+        { class: "code-view" },
+        gutter,
+        el("pre", {}, el("code", { class: "hljs", html: highlighted })),
+      ),
+    );
+  } else {
+    body = el(
         "div",
         { class: "body" },
         fo.err ? el("div", { class: "msg error" }, fo.err) : null,
@@ -1231,6 +1251,7 @@ function renderFileOverlay(c: ChatState): Node {
           ),
         ),
       );
+  }
   return el(
     "div",
     {
