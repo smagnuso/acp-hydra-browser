@@ -1,0 +1,7 @@
+npm install -g @hydra-acp/cli @hydra-acp/browser @hydra-acp/slack @hydra-acp/notifier @hydra-acp/approver
+
+
+
+
+
+

@@ -227,6 +227,106 @@ function onPromptReceived(update: AnyRecord): void {
   });
 }
 
+// ---- Server-driven prompt queue handlers -------------------------
+
+// Bind hydra's server-assigned messageId to a local queue entry.
+// Drains FIFO order over still-unbound entries since hydra serializes
+// session/prompt arrivals per session. For peer-originated added
+// events, there's no local entry waiting, so nothing happens here —
+// the peer's user bubble will arrive separately via prompt_received.
+function onPromptQueueAdded(params: AnyRecord): void {
+  if (!state.current) return;
+  const messageId = typeof params.messageId === "string" ? params.messageId : "";
+  if (!messageId) return;
+  const originator = (params.originator ?? {}) as AnyRecord;
+  const originatorClientId =
+    typeof originator.clientId === "string" ? originator.clientId : "";
+  if (
+    !state.current.ownClientId ||
+    originatorClientId !== state.current.ownClientId
+  ) {
+    // Peer-originated. Nothing to bind locally.
+    return;
+  }
+  const unbound = state.current.promptQueue.find(
+    (e) => e.messageId === undefined && e.status !== "cancelled",
+  );
+  if (!unbound) {
+    // Out-of-band added event we can't correlate (e.g. resumed after a
+    // refresh). Drop on the floor — there's no chip to update.
+    return;
+  }
+  unbound.messageId = messageId;
+  state.current.queueByMessageId.set(messageId, unbound);
+  // Promote to "processing" if hydra says position 0 (we're at the
+  // head and about to run). Otherwise leave as "queued" — chip text
+  // already reflects aheadAtEnqueue captured at submit.
+  const position = typeof params.position === "number" ? params.position : 1;
+  if (position === 0) {
+    unbound.status = "processing";
+  } else if (unbound.status === "pending") {
+    unbound.status = "queued";
+  }
+}
+
+// Server says a queued entry's prompt content changed (someone called
+// hydra-acp/update_prompt). Apply to our local entry so the bubble's
+// text reflects the latest payload — works for both edits we made
+// ourselves and edits other clients made to our queued prompt.
+function onPromptQueueUpdated(params: AnyRecord): void {
+  if (!state.current) return;
+  const messageId = typeof params.messageId === "string" ? params.messageId : "";
+  if (!messageId) return;
+  const entry = state.current.queueByMessageId.get(messageId);
+  if (!entry) return;
+  const blocks = Array.isArray(params.prompt) ? params.prompt : [];
+  let text = "";
+  for (const block of blocks) {
+    if (block && typeof block === "object") {
+      const b = block as AnyRecord;
+      if (b.type === "text" && typeof b.text === "string") {
+        text += b.text;
+      }
+    }
+  }
+  if (!text) return;
+  entry.text = text;
+  // Also update the LogItem's text so the bubble re-renders with the
+  // new content. Match by reference — the entry is the same object the
+  // log item holds in queueEntry.
+  for (const item of state.current.log) {
+    if (
+      item.kind === "stream" &&
+      item.role === "user" &&
+      item.queueEntry === entry
+    ) {
+      item.text = text;
+      break;
+    }
+  }
+}
+
+// Server says the entry left the queue. reason: started → it's now
+// running (chip transitions to processing then disappears once
+// turn_complete arrives); cancelled → mark cancelled, the bubble
+// stays with a struck-through body and a "cancelled" chip; abandoned
+// → similar to cancelled but indicates session teardown rather than
+// explicit user cancel.
+function onPromptQueueRemoved(params: AnyRecord): void {
+  if (!state.current) return;
+  const messageId = typeof params.messageId === "string" ? params.messageId : "";
+  if (!messageId) return;
+  const entry = state.current.queueByMessageId.get(messageId);
+  if (!entry) return;
+  const reason = typeof params.reason === "string" ? params.reason : "";
+  if (reason === "started") {
+    entry.status = "processing";
+  } else if (reason === "cancelled" || reason === "abandoned") {
+    entry.status = "cancelled";
+    state.current.queueByMessageId.delete(messageId);
+  }
+}
+
 function onPlanUpdate(update: AnyRecord): void {
   if (!state.current) return;
   const entries = (update.entries ?? update.plan ?? null) as unknown;
@@ -292,6 +392,21 @@ interface JsonRpcFrame {
 }
 
 export function handleNotification(frame: JsonRpcFrame): void {
+  // Hydra-side prompt queue notifications. These don't fit the
+  // session/update shape (they're top-level hydra-acp/* methods) so
+  // they're dispatched separately, before the session/update guard.
+  if (frame.method === "hydra-acp/prompt_queue_added") {
+    onPromptQueueAdded((frame.params ?? {}) as AnyRecord);
+    return;
+  }
+  if (frame.method === "hydra-acp/prompt_queue_updated") {
+    onPromptQueueUpdated((frame.params ?? {}) as AnyRecord);
+    return;
+  }
+  if (frame.method === "hydra-acp/prompt_queue_removed") {
+    onPromptQueueRemoved((frame.params ?? {}) as AnyRecord);
+    return;
+  }
   if (frame.method !== "session/update") return;
   const update = (frame.params?.update ?? null) as AnyRecord | null;
   if (!update || typeof update !== "object") return;

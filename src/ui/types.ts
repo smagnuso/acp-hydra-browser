@@ -26,16 +26,24 @@ export type QueueStatus =
   | "pending"
   | "processing"
   | "done"
-  | "cancelled";
+  | "cancelled"
+  | "editing";
 
 export interface QueueEntry {
+  // Local id assigned at submit time. Stable for the lifetime of the
+  // bubble; used as a UI key (e.g. to scope an inline editor).
   id: string;
   text: string;
   status: QueueStatus;
+  // Snapshot of how many entries were ahead of us when this one was
+  // submitted. Kept stable after enqueue so the "waiting on N turns"
+  // chip doesn't tick down distractingly as the queue drains.
   aheadAtEnqueue: number;
-  cancelled: boolean;
-  started: boolean;
-  waitResolver: (() => void) | null;
+  // Server-assigned id from hydra-acp/prompt_queue_added. Undefined
+  // briefly between the user's submit and the daemon's accept; once
+  // bound, used to target hydra-acp/cancel_prompt and update_prompt
+  // for this entry.
+  messageId?: string;
 }
 
 export interface ToolCallState {
@@ -119,8 +127,18 @@ export interface ChatState {
   busy: boolean;
   recentOwnPrompts: Array<{ text: string; at: number }>;
   _lastMetaFp: string;
+  // Own queue entries in submit order (FIFO). Unbound entries — those
+  // whose messageId is still undefined — are the front-of-FIFO waiting
+  // for hydra-acp/prompt_queue_added to bind them. Bound entries have
+  // their messageId set and are findable via queueByMessageId.
   promptQueue: QueueEntry[];
-  promptChain: Promise<void> | null;
+  // messageId → entry for O(1) lookup when prompt_queue_updated /
+  // prompt_queue_removed arrives for a specific messageId.
+  queueByMessageId: Map<string, QueueEntry>;
+  // Captured from the bridge/ready notification (passed through from
+  // the upstream session/attach response). Used to recognize our own
+  // prompt_queue_added events.
+  ownClientId?: string;
   ownPromptIds: Set<string>;
   inTurn: boolean;
   idleListeners: Array<() => void>;

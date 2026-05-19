@@ -8,6 +8,11 @@ test("browser request whitelist matches plan", () => {
     "session/cancel",
     "session/set_mode",
     "session/set_model",
+    // Hydra-side queue control: drop or rewrite a queued prompt by
+    // messageId. Safe to allow — hydra structurally rejects invalid /
+    // already-running ids with a typed result, never crashes.
+    "hydra-acp/cancel_prompt",
+    "hydra-acp/update_prompt",
   ];
   for (const m of allowed) {
     assert.equal(

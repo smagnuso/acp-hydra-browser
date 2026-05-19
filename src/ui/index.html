@@ -136,8 +136,11 @@ pre code { background: transparent; padding: 0; }
 .queue-queued { color: var(--warn); border: 1px solid var(--warn); background: rgba(212,161,126,0.1); }
 .queue-processing { color: var(--accent); border: 1px solid var(--accent); background: rgba(110,168,254,0.1); }
 .queue-cancelled { color: var(--muted); border: 1px solid var(--border); background: var(--panel-2); }
-.queue-cancel { padding: 0; border: none; color: inherit; font-size: 0.95rem; line-height: 1; cursor: pointer; background: transparent; opacity: 0.7; }
-.queue-cancel:hover { opacity: 1; background: transparent; }
+.queue-editing { color: var(--accent); border: 1px solid var(--accent); background: rgba(110,168,254,0.1); }
+.queue-cancel, .queue-edit { padding: 0; border: none; color: inherit; font-size: 0.95rem; line-height: 1; cursor: pointer; background: transparent; opacity: 0.7; }
+.queue-cancel:hover, .queue-edit:hover { opacity: 1; background: transparent; }
+.queue-editor { margin-bottom: 0.3rem; }
+.queue-editor textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 0.4rem 0.5rem; box-sizing: border-box; }
 
 /* Composer */
 .composer { display: flex; gap: 0.5rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)); border-top: 1px solid var(--border); background: var(--panel); align-items: flex-end; }

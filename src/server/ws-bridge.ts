@@ -29,6 +29,13 @@ const ALLOWED_BROWSER_REQUEST_METHODS = new Set<string>([
   "session/cancel",
   "session/set_mode",
   "session/set_model",
+  // Hydra-side queue control. cancel_prompt drops a queued entry
+  // before it runs; update_prompt rewrites a queued entry's content.
+  // Both target a specific messageId so they're harmless to forward
+  // — hydra rejects unknown / already-running ids with a structured
+  // result.
+  "hydra-acp/cancel_prompt",
+  "hydra-acp/update_prompt",
 ]);
 
 const ALLOWED_BROWSER_NOTIFICATION_METHODS = new Set<string>([
@@ -343,18 +350,33 @@ function handleConnection(
         );
       }
     }
-    await upstream.request("session/attach", {
+    const attachResp = (await upstream.request("session/attach", {
       sessionId,
       historyPolicy: "full",
       clientInfo: {
         name: upstream.clientName,
         version: upstream.clientVersion,
       },
-    });
+    })) as {
+      sessionId?: string;
+      clientId?: string;
+      _meta?: Record<string, unknown>;
+    };
+    // Pass through clientId and _meta from the attach response so the
+    // browser can recognize its own prompt_queue_added broadcasts (by
+    // matching originator.clientId) and hydrate any queue snapshot
+    // hydra delivers in _meta["hydra-acp"].queue.
+    const readyParams: Record<string, unknown> = { sessionId };
+    if (typeof attachResp?.clientId === "string") {
+      readyParams.clientId = attachResp.clientId;
+    }
+    if (attachResp?._meta && typeof attachResp._meta === "object") {
+      readyParams._meta = attachResp._meta;
+    }
     sendBrowserFrame({
       jsonrpc: "2.0",
       method: "bridge/ready",
-      params: { sessionId },
+      params: readyParams,
     });
     upstreamReady = true;
     while (browserBuffer.length > 0) {
