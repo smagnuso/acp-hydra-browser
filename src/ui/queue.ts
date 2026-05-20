@@ -79,8 +79,25 @@ export function sendPrompt(): void {
     c.ownPromptIds.add(String(promptId));
   }
   ensureSpinner();
+  pushHistory(c, text);
   c.composerValue = "";
   render();
+}
+
+// Append a submitted prompt to the up/down recall history. Most-recent
+// first; dedup consecutive duplicates so spamming the same prompt
+// doesn't fill the buffer with copies. Resets the nav cursor — sending
+// always implies "I'm done browsing history."
+const HISTORY_MAX = 100;
+function pushHistory(c: ChatState, text: string): void {
+  if (c.history[0] !== text) {
+    c.history.unshift(text);
+    if (c.history.length > HISTORY_MAX) {
+      c.history.length = HISTORY_MAX;
+    }
+  }
+  c.historyIndex = null;
+  c.historyDraft = null;
 }
 
 // Drop a queued prompt. If the entry has been bound to a server

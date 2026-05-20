@@ -775,23 +775,79 @@ function renderChat(c: ChatState): HTMLElement {
     body.appendChild(renderLogItem(item));
   }
 
+  const autosize = (t: HTMLTextAreaElement): void => {
+    t.style.height = "auto";
+    t.style.height = t.scrollHeight + "px";
+  };
+  const setComposer = (t: HTMLTextAreaElement, text: string): void => {
+    t.value = text;
+    c.composerValue = text;
+    autosize(t);
+    t.setSelectionRange(text.length, text.length);
+  };
   const composerOnKey = (e: KeyboardEvent): void => {
-    if (e.key !== "Enter" || e.isComposing) return;
+    if (e.isComposing) return;
+    const t = e.target as HTMLTextAreaElement;
+    // Up/Down history recall. Trigger only at the boundaries so caret
+    // navigation inside multi-line drafts still works normally. Plain
+    // arrow only — modifiers (shift/alt/ctrl/meta) fall through so the
+    // browser handles selection extension, jump-to-end, etc.
+    if (
+      e.key === "ArrowUp" &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      t.selectionStart === 0 &&
+      t.selectionEnd === 0 &&
+      c.history.length > 0
+    ) {
+      const nextIdx =
+        c.historyIndex === null
+          ? 0
+          : Math.min(c.history.length - 1, c.historyIndex + 1);
+      if (c.historyIndex === null) {
+        c.historyDraft = c.composerValue;
+      }
+      c.historyIndex = nextIdx;
+      e.preventDefault();
+      setComposer(t, c.history[nextIdx]!);
+      return;
+    }
+    if (
+      e.key === "ArrowDown" &&
+      !e.shiftKey &&
+      !e.altKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      t.selectionStart === t.value.length &&
+      t.selectionEnd === t.value.length &&
+      c.historyIndex !== null
+    ) {
+      e.preventDefault();
+      if (c.historyIndex > 0) {
+        c.historyIndex -= 1;
+        setComposer(t, c.history[c.historyIndex]!);
+      } else {
+        const draft = c.historyDraft ?? "";
+        c.historyIndex = null;
+        c.historyDraft = null;
+        setComposer(t, draft);
+      }
+      return;
+    }
+    if (e.key !== "Enter") return;
     // Shift+Enter — let the browser insert \n natively.
     if (e.shiftKey) return;
     // Alt/Ctrl/Cmd + Enter — manually insert \n at the caret because
     // browsers don't do that by default for those modifiers.
     if (e.altKey || e.ctrlKey || e.metaKey) {
       e.preventDefault();
-      insertAtCaret(e.target as HTMLTextAreaElement, "\n");
+      insertAtCaret(t, "\n");
       return;
     }
     e.preventDefault();
     sendPrompt();
-  };
-  const autosize = (t: HTMLTextAreaElement): void => {
-    t.style.height = "auto";
-    t.style.height = t.scrollHeight + "px";
   };
   const textarea = el(
     "textarea",
@@ -803,6 +859,13 @@ function renderChat(c: ChatState): HTMLElement {
       oninput: (e: Event) => {
         const t = e.target as HTMLTextAreaElement;
         c.composerValue = t.value;
+        // User typed — they're off the history rail. Drop the nav
+        // cursor so the next Up starts a fresh walk and Down doesn't
+        // surprise them by restoring an old draft.
+        if (c.historyIndex !== null) {
+          c.historyIndex = null;
+          c.historyDraft = null;
+        }
         autosize(t);
       },
     },

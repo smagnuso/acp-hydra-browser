@@ -91,6 +91,9 @@ export function openChat(sessionId: string, load: boolean): void {
     composerValue: "",
     busy: false,
     recentOwnPrompts: [],
+    history: [],
+    historyIndex: null,
+    historyDraft: null,
     _lastMetaFp: session
       ? `${session.title}|${session.cwd}|${session.agentId}`
       : "",

@@ -126,6 +126,14 @@ export interface ChatState {
   composerValue: string;
   busy: boolean;
   recentOwnPrompts: Array<{ text: string; at: number }>;
+  // Shell-style up/down history. `history` is most-recent-first and
+  // capped at a small N. `historyIndex` is the current nav position
+  // (0 = newest), or null when the composer isn't being walked.
+  // `historyDraft` snapshots whatever was in the composer when nav
+  // started so Down-past-newest can restore the user's draft.
+  history: string[];
+  historyIndex: number | null;
+  historyDraft: string | null;
   _lastMetaFp: string;
   // Own queue entries in submit order (FIFO). Unbound entries — those
   // whose messageId is still undefined — are the front-of-FIFO waiting
