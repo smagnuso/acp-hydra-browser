@@ -19,6 +19,38 @@ export function pushLog(item: LogItem): void {
   state.current.log.push(item);
 }
 
+// True for bubbles representing a prompt still waiting in the queue.
+// "pending" is intentionally NOT included — that's the brief
+// "submitted, not yet bound to a daemon position" state for the head
+// of the queue; the bubble is about to become the active turn, so
+// active-turn content should NOT be inserted above it.
+function isWaitingQueuedBubble(item: LogItem): boolean {
+  if (item.kind !== "stream" || item.role !== "user" || !item.queueEntry) {
+    return false;
+  }
+  const s = item.queueEntry.status;
+  return s === "queued" || s === "editing";
+}
+
+// Index of the first waiting-queued bubble, or log.length if none.
+// Active-turn content (agent chunks, spinner, plan card, peer
+// prompt_received bubbles) splices in at this index so the previous
+// turn's response stays attached to its prompt and queued prompts
+// trail at the bottom.
+function queuedBoundary(): number {
+  if (!state.current) return 0;
+  const log = state.current.log;
+  for (let i = 0; i < log.length; i++) {
+    if (isWaitingQueuedBubble(log[i]!)) return i;
+  }
+  return log.length;
+}
+
+function insertAboveQueued(item: LogItem): void {
+  if (!state.current) return;
+  state.current.log.splice(queuedBoundary(), 0, item);
+}
+
 // ---- inTurn signal ------------------------------------------------
 
 export function markActive(): void {
@@ -57,14 +89,17 @@ export function pushChunk(role: "user" | "agent" | "thought", content: unknown):
   if (!state.current) return;
   const text = contentToText(content);
   if (!text) return;
-  // Find the most recent non-spinner log entry. The spinner is a
-  // transient marker that sits between bubbles; it shouldn't break
-  // streaming-chunk merging into the open bubble below it. Without
-  // this skip, every chunk after the spinner created its own bubble
-  // (which split words at arbitrary chunk boundaries when copied).
+  const log = state.current.log;
+  // Active-turn content has to land above any waiting-queued bubbles
+  // (so the previous turn's response stays attached to its prompt
+  // instead of sliding below the queued ones). Scan backward from the
+  // queued boundary, skipping spinners — the spinner is a transient
+  // marker that shouldn't break streaming-chunk merging into the open
+  // bubble below it.
+  const boundary = queuedBoundary();
   let last: LogItem | undefined;
-  for (let i = state.current.log.length - 1; i >= 0; i--) {
-    const e = state.current.log[i]!;
+  for (let i = boundary - 1; i >= 0; i--) {
+    const e = log[i]!;
     if (e.kind !== "spinner") {
       last = e;
       break;
@@ -74,18 +109,22 @@ export function pushChunk(role: "user" | "agent" | "thought", content: unknown):
     last.text += text;
     return;
   }
-  state.current.log.push({ kind: "stream", role, text });
+  log.splice(boundary, 0, { kind: "stream", role, text });
 }
 
-// Mark the most recent stream entry as closed so a subsequent chunk
-// of the same role starts a fresh bubble rather than appending. Called
-// at every natural boundary: a tool call begins, a turn ends, etc. —
-// the same places hydra-acp-slack calls closeAgentMessage().
+// Mark the most recent OPEN stream entry as closed so a subsequent
+// chunk of the same role starts a fresh bubble rather than appending.
+// Called at every natural boundary: a tool call begins, a turn ends,
+// etc. — same places hydra-acp-slack calls closeAgentMessage().
+// Skipping already-closed streams matters now that queued user bubbles
+// (always pushed with closed: true) can sit at the tail of the log: a
+// naive "find last stream" would land on the queued bubble and leave
+// any open agent stream above it untouched.
 export function closeOpenStream(): void {
   if (!state.current) return;
   for (let i = state.current.log.length - 1; i >= 0; i--) {
     const e = state.current.log[i]!;
-    if (e.kind === "stream") {
+    if (e.kind === "stream" && !e.closed) {
       e.closed = true;
       return;
     }
@@ -142,14 +181,14 @@ export function ensureSpinner(): void {
   const c = state.current;
   if (c.spinner) {
     // Defensive: if the spinner state object exists but no log entry
-    // refers to it, re-push so renderLogItem can find it.
+    // refers to it, re-insert so renderLogItem can find it.
     if (!c.log.some((e) => e.kind === "spinner")) {
-      c.log.push({ kind: "spinner", spinner: c.spinner });
+      insertAboveQueued({ kind: "spinner", spinner: c.spinner });
     }
     return;
   }
   c.spinner = { toolCallIds: [], expanded: false };
-  c.log.push({ kind: "spinner", spinner: c.spinner });
+  insertAboveQueued({ kind: "spinner", spinner: c.spinner });
 }
 
 function onToolCall(update: AnyRecord): void {
@@ -197,6 +236,16 @@ export function finalizeTurn(): void {
   // Close the streaming agent message so the next turn starts a
   // fresh bubble even if the agent immediately resumes streaming.
   closeOpenStream();
+  // Mark any own entry that was processing as done. The daemon doesn't
+  // emit a prompt_queue_removed for natural turn completion (only for
+  // started/cancelled/abandoned), so without this our promptQueue keeps
+  // counting the just-finished prompt as "active" and ahead-of-queue
+  // for the next prompt's chip math.
+  for (const entry of state.current.promptQueue) {
+    if (entry.status === "processing") {
+      entry.status = "done";
+    }
+  }
   // Forget the active-turn plan card — the next plan update should
   // push a fresh card rather than mutating last turn's into oblivion.
   state.current.currentPlanEntry = null;
@@ -225,10 +274,11 @@ function onPromptReceived(update: AnyRecord): void {
   if (consumeOwnPromptEcho({ text })) {
     return;
   }
-  // Sibling prompt — push as a fresh closed bubble. closeOpenStream
-  // first so any in-flight agent stream is broken.
+  // Sibling prompt — insert above any waiting-queued bubbles so it
+  // joins the live conversation flow, not the trailing queue.
+  // closeOpenStream first so any in-flight agent stream is broken.
   closeOpenStream();
-  state.current.log.push({
+  insertAboveQueued({
     kind: "stream",
     role: "user",
     text,
@@ -316,10 +366,15 @@ function onPromptQueueAdded(params: AnyRecord): void {
     }
     unbound.messageId = messageId;
     state.current.queueByMessageId.set(messageId, unbound);
-    // Promote to "processing" if hydra says position 0 (we're at the
-    // head and about to run). Otherwise leave as "queued" — chip text
-    // already reflects aheadAtEnqueue captured at submit.
+    // Adopt the daemon's authoritative position. Optimistic
+    // aheadAtEnqueue at submit can undercount when peer entries we
+    // weren't tracking are already queued — a one-shot correction on
+    // bind is fine (it only goes up, never down, so it doesn't tick
+    // distractingly).
     const position = typeof params.position === "number" ? params.position : 1;
+    unbound.aheadAtEnqueue = Math.max(0, position);
+    // Promote to "processing" if hydra says position 0 (we're at the
+    // head and about to run). Otherwise leave as "queued".
     if (position === 0) {
       unbound.status = "processing";
     } else if (unbound.status === "pending") {
@@ -354,16 +409,23 @@ function onPromptQueueAdded(params: AnyRecord): void {
     messageId,
   };
   state.current.queueByMessageId.set(messageId, entry);
-  // closeOpenStream so any in-flight agent stream above is broken;
-  // the peer's bubble lands cleanly at the bottom.
+  // closeOpenStream so any in-flight agent stream above is broken.
   closeOpenStream();
-  state.current.log.push({
+  const peerBubble: LogItem = {
     kind: "stream",
     role: "user",
     text,
     closed: true,
     queueEntry: entry,
-  });
+  };
+  if (position === 0) {
+    // Peer is the new active turn — slot above any waiting-queued
+    // bubbles so it sits inline with the conversation.
+    insertAboveQueued(peerBubble);
+  } else {
+    // Peer joins the trailing queue cluster.
+    state.current.log.push(peerBubble);
+  }
 }
 
 // Server says a queued entry's prompt content changed (someone called
@@ -439,7 +501,7 @@ function onPlanUpdate(update: AnyRecord): void {
     return;
   }
   const item: PlanLogItem = { kind: "plan", entries };
-  state.current.log.push(item);
+  insertAboveQueued(item);
   state.current.currentPlanEntry = item;
 }
 

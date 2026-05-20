@@ -32,12 +32,20 @@ export function sendPrompt(): void {
     render();
     return;
   }
-  // aheadAtEnqueue is an UX hint — number of entries already in flight
-  // when this one was submitted. Captured at submit time so the chip
-  // doesn't tick down distractingly. Counts any sibling-originated turn
-  // via inTurn since hydra-acp/prompt_queue_added for that hasn't fired
-  // yet (or we may not be tracking peer entries here).
-  const ahead = c.promptQueue.length + (c.inTurn ? 1 : 0);
+  // aheadAtEnqueue is an UX hint — number of entries the user has to
+  // wait through before theirs runs. Captured at submit time so the
+  // chip doesn't tick down distractingly. The in-flight own entry, if
+  // any, is already in c.promptQueue with status "processing", so we
+  // only add 1 for inTurn when the active turn is a peer's (nothing in
+  // our own queue is processing yet — otherwise we'd double-count).
+  // onPromptQueueAdded corrects this against the daemon's authoritative
+  // position once the entry is bound.
+  const ownActive = c.promptQueue.filter(
+    (e) => e.status === "queued" || e.status === "pending" || e.status === "processing",
+  ).length;
+  const peerInFlight =
+    c.inTurn && !c.promptQueue.some((e) => e.status === "processing");
+  const ahead = ownActive + (peerInFlight ? 1 : 0);
   const entry: QueueEntry = {
     id: "p_" + Math.random().toString(36).slice(2, 10),
     text,
