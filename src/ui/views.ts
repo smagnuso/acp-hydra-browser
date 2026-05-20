@@ -16,6 +16,7 @@ import {
 } from "./api.js";
 import { respondPermission } from "./bridge.js";
 import {
+  amendPrompt,
   cancelProcessingPrompt,
   cancelQueuedPrompt,
   sendCancel,
@@ -875,12 +876,48 @@ function renderChat(c: ChatState): HTMLElement {
     queueMicrotask(() => autosize(textarea));
   }
 
+  // While a turn is in flight, split the lone Send button into two:
+  //   - Amend: cancel the in-flight head and submit the typed text as
+  //     its replacement (only when the daemon advertises promptAmending).
+  //   - Enqueue: behave like the idle-case Send — sit in the FIFO until
+  //     the agent finishes.
+  // When idle, a single Send button covers both behaviors.
+  const sendButtons: Node[] = [];
+  if (c.inTurn) {
+    if (c.daemonSupportsAmend && c.currentHeadMessageId !== undefined) {
+      sendButtons.push(
+        el(
+          "button",
+          {
+            onclick: amendPrompt,
+            title: "Cancel the current turn and replace its prompt",
+          },
+          "Amend",
+        ),
+      );
+    }
+    sendButtons.push(
+      el(
+        "button",
+        {
+          class: "primary",
+          onclick: sendPrompt,
+          title: "Queue this prompt to run after the current turn",
+        },
+        "Enqueue",
+      ),
+    );
+  } else {
+    sendButtons.push(
+      el("button", { class: "primary", onclick: sendPrompt }, "Send"),
+    );
+  }
   const composer = el(
     "div",
     { class: "composer" },
     textarea,
     el("button", { class: "stop", onclick: sendCancel, title: "Cancel current turn" }, "Stop"),
-    el("button", { class: "primary", onclick: sendPrompt }, "Send"),
+    ...sendButtons,
   );
 
   // Auto-scroll is owned by renderer.ts now (it captures the previous
@@ -935,19 +972,42 @@ function renderLogItem(item: ChatState["log"][number]): Node {
       });
     }
     const qe = item.queueEntry;
+    // Dim the M1 bubble of an amend pair so the eye lands on the M2.
+    // The dim is purely visual — the bubble body and chip both stay
+    // readable. We only mark "amended-target" once the cancellation
+    // actually landed so an in-flight amend doesn't pre-emptively dim
+    // the live response above it.
+    if (qe && qe.amendedByMessageId !== undefined && qe.status === "amended") {
+      node.classList.add("amended-target");
+    }
     // Only show a chip while the prompt is still waiting locally
-    // (queued / editing) or ended in cancellation. Once it's sent
-    // ("processing" or "done"), the bubble looks like a normal user
-    // message. The running turn's × lives on the spinner instead so it
-    // works for sibling-originated prompts too.
+    // (queued / editing) or ended in cancellation / amend. Once it's
+    // sent ("processing" or "done"), the bubble looks like a normal
+    // user message. The running turn's × lives on the spinner instead
+    // so it works for sibling-originated prompts too.
     if (
       qe &&
       (qe.status === "queued" ||
         qe.status === "pending" ||
         qe.status === "cancelled" ||
-        qe.status === "editing")
+        qe.status === "editing" ||
+        qe.status === "amended")
     ) {
       node.appendChild(renderQueueChip(qe));
+    }
+    // "+" badge on the M2 bubble. Tooltip nods at the M1's role so a
+    // user new to the marker can hover to discover what it means.
+    if (qe && qe.amendsMessageId !== undefined) {
+      node.appendChild(
+        el(
+          "span",
+          {
+            class: "amend-badge",
+            title: "Merged amend — replaces the previous, cancelled prompt",
+          },
+          "+",
+        ),
+      );
     }
     if (qe && qe.status === "editing") {
       // Inline editor over the queued bubble. Pre-fills with the
@@ -966,6 +1026,10 @@ function renderLogItem(item: ChatState["log"][number]): Node {
         body.style.textDecoration = "line-through";
         body.style.opacity = "0.6";
       }
+      // Amended bubbles dim via the .amended-target class on the
+      // wrapper — we deliberately don't strike them through. The
+      // user's intent carried forward into the M2; the M1 was just a
+      // draft that got superseded, not an abandoned thought.
       node.appendChild(body);
     }
     return node;
@@ -1045,6 +1109,13 @@ function renderQueueChip(entry: QueueEntry): Node {
       "div",
       { class: "queue-chip queue-cancelled" },
       el("span", null, "cancelled"),
+    );
+  }
+  if (entry.status === "amended") {
+    return el(
+      "div",
+      { class: "queue-chip queue-amended" },
+      el("span", null, "amended — merged into the next prompt"),
     );
   }
   return document.createTextNode("");

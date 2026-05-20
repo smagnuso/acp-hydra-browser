@@ -80,6 +80,12 @@ export function handleFrame(frame: JsonRpcFrame): void {
     if (Array.isArray(snapshot)) {
       hydrateQueueFromSnapshot(snapshot);
     }
+    // Gate the Amend button on the daemon advertising support. Without
+    // it the composer falls back to a single Send button (the chord
+    // would otherwise produce a target_not_found from the daemon).
+    if (hydraMeta && hydraMeta.promptAmending === true) {
+      state.current.daemonSupportsAmend = true;
+    }
     // Wake any queued prompt that was waiting for the bridge handshake.
     const listeners = state.current.readyListeners;
     state.current.readyListeners = [];
@@ -142,6 +148,16 @@ export function handleFrame(frame: JsonRpcFrame): void {
     state.current.ownPromptIds.delete(String(frame.id));
     finalizeTurn();
     render();
+    return;
+  }
+  // Per-id response callbacks (e.g. amendPrompt). Fire-and-forget — the
+  // callback handles success/error itself.
+  if ("id" in frame && frame.id !== undefined) {
+    const handler = state.current.responseHandlers.get(String(frame.id));
+    if (handler) {
+      state.current.responseHandlers.delete(String(frame.id));
+      handler({ result: frame.result, error: frame.error });
+    }
   }
 }
 

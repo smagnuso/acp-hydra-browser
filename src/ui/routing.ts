@@ -78,6 +78,7 @@ export function openChat(sessionId: string, load: boolean): void {
     toolCalls: new Map(),
     pendingPermissions: new Map(),
     pendingRequestById: new Map(),
+    responseHandlers: new Map(),
     spinner: null,
     plan: null,
     mode: null,
@@ -104,6 +105,7 @@ export function openChat(sessionId: string, load: boolean): void {
     idleListeners: [],
     readyListeners: [],
     currentPlanEntry: null,
+    daemonSupportsAmend: false,
   };
   state.current = initial;
   setState({ view: "chat" });

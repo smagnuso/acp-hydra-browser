@@ -27,7 +27,13 @@ export type QueueStatus =
   | "processing"
   | "done"
   | "cancelled"
-  | "editing";
+  | "editing"
+  // Terminal state used when this entry's turn was cancelled by an
+  // amend pointed at it. Rendered like a soft completion (no
+  // strikethrough, no red banner) — the replacement carries the
+  // user's intent forward, so the M1 bubble just gets a chip noting
+  // it was merged into the next prompt.
+  | "amended";
 
 export interface QueueEntry {
   // Local id assigned at submit time. Stable for the lifetime of the
@@ -44,6 +50,13 @@ export interface QueueEntry {
   // bound, used to target hydra-acp/cancel_prompt and update_prompt
   // for this entry.
   messageId?: string;
+  // Set when this entry is the M2 of an amend: the messageId of the
+  // M1 (cancelled) prompt it superseded. Drives the "+" marker on the
+  // bubble.
+  amendsMessageId?: string;
+  // Set when this entry's turn was cancelled by an amend pointed at
+  // it (i.e. the M1 of an amend pair). Drives the "amended" chip.
+  amendedByMessageId?: string;
 }
 
 export interface ToolCallState {
@@ -113,6 +126,10 @@ export interface ChatState {
   toolCalls: Map<string, ToolCallState>;
   pendingPermissions: Map<string, PermissionEntry>;
   pendingRequestById: Map<string, unknown>;
+  // Per-id callbacks registered by call sites (e.g. amendPrompt) that
+  // need the JSON-RPC response value, not just the side-effects of
+  // the notifications hydra emits.
+  responseHandlers: Map<string, (frame: { result?: unknown; error?: unknown }) => void>;
   spinner: SpinnerState | null;
   plan: unknown;
   mode: string | null;
@@ -157,6 +174,15 @@ export interface ChatState {
   // a fresh card.
   currentPlanEntry: PlanLogItem | null;
   nextId?: number;
+  // Set from bridge/ready _meta["hydra-acp"].promptAmending. Gates
+  // the Amend button — older daemons that don't advertise this fall
+  // back to a single Send button.
+  daemonSupportsAmend: boolean;
+  // The messageId of the prompt currently driving the agent's turn,
+  // or undefined when idle. Captured from prompt_queue_removed{started}
+  // (the universal signal that reaches the originator too, unlike
+  // prompt_received). Used as targetMessageId for hydra-acp/amend_prompt.
+  currentHeadMessageId?: string;
 }
 
 export interface SessionModalData {

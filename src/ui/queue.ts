@@ -12,11 +12,17 @@
 //     serializes session/prompt arrivals so the Nth added-with-our-
 //     originator event corresponds to the Nth still-unbound entry.
 
-import { state } from "./state.js";
+import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { notify, send } from "./bridge.js";
 import { ensureSpinner } from "./acp.js";
 import type { ChatState, QueueEntry } from "./types.js";
+
+interface AmendPromptResult {
+  amended: boolean;
+  reason: "ok" | "target_completed" | "target_cancelled" | "target_not_found";
+  messageId?: string;
+}
 
 export function sendPrompt(): void {
   const c = state.current;
@@ -145,6 +151,149 @@ export function updateQueuedPrompt(entry: QueueEntry, text: string): void {
     messageId: entry.messageId,
     prompt: [{ type: "text", text: trimmed }],
   });
+}
+
+// Amend the in-flight turn: cancel the head prompt and submit a
+// replacement in its place. Falls back to a regular sendPrompt when:
+//   1. The daemon doesn't advertise promptAmending (older daemon →
+//      hydra-acp/amend_prompt isn't routed at all).
+//   2. No in-flight head (currentHeadMessageId undefined) → there's
+//      nothing to amend; enqueue as a regular prompt.
+//   3. The daemon rejects the amend (target_completed,
+//      target_cancelled, target_not_found) — we surface a banner and
+//      restore the user's text into the composer so they can retry.
+//
+// Mirrors the TUI's amendPrompt flow (see cli/src/tui/app.ts:1873).
+export function amendPrompt(): void {
+  const c = state.current;
+  if (!c) return;
+  const text = c.composerValue.trim();
+  if (!text) return;
+  if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
+    c.log.push({
+      kind: "error",
+      text: "Not connected to session — prompt not sent.",
+    });
+    c.composerValue = "";
+    render();
+    return;
+  }
+  if (!c.daemonSupportsAmend || c.currentHeadMessageId === undefined) {
+    sendPrompt();
+    return;
+  }
+  const target = c.currentHeadMessageId;
+  // Stash the typed text up front so we can restore it on rejection.
+  const draft = c.composerValue;
+  c.composerValue = "";
+  pushHistory(c, text);
+  // Add an optimistic local entry mirroring sendPrompt's behavior, but
+  // pre-tagged with amendsMessageId so the bubble paints the "+"
+  // chip the moment the user clicks Amend instead of waiting for the
+  // round-trip. The messageId binding still happens on
+  // prompt_queue_added — and the daemon will set the same
+  // amendsMessageId via _meta.amending, which we leave idempotent.
+  const entry: QueueEntry = {
+    id: "p_" + Math.random().toString(36).slice(2, 10),
+    text,
+    status: "pending",
+    aheadAtEnqueue: 0,
+    amendsMessageId: target,
+  };
+  c.promptQueue.push(entry);
+  c.log.push({
+    kind: "stream",
+    role: "user",
+    text,
+    closed: true,
+    queueEntry: entry,
+  });
+  c.recentOwnPrompts.push({ text, at: Date.now() });
+  const cutoff = Date.now() - 60_000;
+  c.recentOwnPrompts = c.recentOwnPrompts.filter((p) => p.at >= cutoff).slice(-16);
+  const id = send("hydra-acp/amend_prompt", {
+    sessionId: c.sessionId,
+    targetMessageId: target,
+    prompt: [{ type: "text", text }],
+  });
+  if (id !== undefined) {
+    c.responseHandlers.set(String(id), (frame) => {
+      onAmendResponse(entry, draft, frame);
+    });
+  }
+  ensureSpinner();
+  render();
+}
+
+// Handler for hydra-acp/amend_prompt's JSON-RPC response. On success
+// we let the prompt_queue_added / turn_complete plumbing do its job —
+// the binding into messageId happens through the regular FIFO. On
+// rejection we drop the optimistic entry, restore the draft text, and
+// surface a banner. Mirrors the TUI's amendPrompt(...).then(...) arm.
+function onAmendResponse(
+  entry: QueueEntry,
+  draftText: string,
+  frame: { result?: unknown; error?: unknown },
+): void {
+  const c = state.current;
+  if (!c) return;
+  if (frame.error) {
+    rollbackAmend(c, entry, draftText);
+    setState({
+      banner: {
+        kind: "bad",
+        text: `amend failed: ${tryGetErrorMessage(frame.error)}`,
+      },
+    });
+    return;
+  }
+  const res = (frame.result ?? {}) as Partial<AmendPromptResult>;
+  if (res.amended && res.reason === "ok") {
+    // success — wait for prompt_queue_added to bind messageId and
+    // adopt the amending hint from _meta. No further action here.
+    return;
+  }
+  rollbackAmend(c, entry, draftText);
+  let msg = "amend rejected";
+  if (res.reason === "target_completed") {
+    msg = "previous response finished — press Send to send as a new turn";
+  } else if (res.reason === "target_cancelled") {
+    msg = "amend skipped — previous turn was cancelled";
+  } else if (res.reason === "target_not_found") {
+    msg = "amend skipped — no matching prompt";
+  }
+  setState({ banner: { kind: "warn", text: msg } });
+}
+
+function rollbackAmend(
+  c: ChatState,
+  entry: QueueEntry,
+  draftText: string,
+): void {
+  // Drop the optimistic bubble and matching queue entry, and put the
+  // draft text back so the user can retry / send-as-new.
+  const idx = c.promptQueue.indexOf(entry);
+  if (idx >= 0) {
+    c.promptQueue.splice(idx, 1);
+  }
+  c.log = c.log.filter(
+    (e) =>
+      !(
+        e.kind === "stream" &&
+        e.role === "user" &&
+        e.queueEntry === entry
+      ),
+  );
+  c.composerValue = draftText;
+  render();
+}
+
+function tryGetErrorMessage(err: unknown): string {
+  if (err && typeof err === "object" && "message" in err) {
+    const m = (err as { message?: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  return "unknown error";
 }
 
 // Cancel just the in-flight turn without touching the queue. The

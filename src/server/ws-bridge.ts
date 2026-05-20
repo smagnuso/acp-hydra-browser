@@ -36,6 +36,10 @@ const ALLOWED_BROWSER_REQUEST_METHODS = new Set<string>([
   // result.
   "hydra-acp/cancel_prompt",
   "hydra-acp/update_prompt",
+  // Amend the in-flight head with a replacement prompt. Hydra
+  // rejects unknown/closed/already-running targets with a typed
+  // result, so it's safe to forward.
+  "hydra-acp/amend_prompt",
 ]);
 
 const ALLOWED_BROWSER_NOTIFICATION_METHODS = new Set<string>([
@@ -340,7 +344,20 @@ function handleConnection(
   }
 
   async function doHandshake(): Promise<void> {
-    await runInitialize(upstream);
+    const initResp = (await runInitialize(upstream)) as
+      | { _meta?: Record<string, unknown> }
+      | undefined;
+    // Pluck the daemon's hydra-acp capability flags out of the
+    // initialize response _meta so we can pass them through to the
+    // browser. promptAmending is the gate for the Amend button —
+    // older daemons that don't advertise it should not show one.
+    let initHydraMeta: Record<string, unknown> | undefined;
+    if (initResp?._meta && typeof initResp._meta === "object") {
+      const hm = (initResp._meta as Record<string, unknown>)["hydra-acp"];
+      if (hm && typeof hm === "object") {
+        initHydraMeta = hm as Record<string, unknown>;
+      }
+    }
     if (load) {
       try {
         await upstream.request("session/load", { sessionId });
@@ -372,6 +389,18 @@ function handleConnection(
     }
     if (attachResp?._meta && typeof attachResp._meta === "object") {
       readyParams._meta = attachResp._meta;
+    }
+    // Merge the initialize-response hydra-acp capability flags into
+    // readyParams._meta["hydra-acp"] so the browser sees them in one
+    // place alongside the attach-response queue snapshot.
+    if (initHydraMeta !== undefined) {
+      const existingMeta = (readyParams._meta as Record<string, unknown>) ?? {};
+      const existingHydra =
+        (existingMeta["hydra-acp"] as Record<string, unknown>) ?? {};
+      readyParams._meta = {
+        ...existingMeta,
+        "hydra-acp": { ...initHydraMeta, ...existingHydra },
+      };
     }
     sendBrowserFrame({
       jsonrpc: "2.0",

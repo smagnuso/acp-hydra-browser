@@ -13,6 +13,10 @@ test("browser request whitelist matches plan", () => {
     // already-running ids with a typed result, never crashes.
     "hydra-acp/cancel_prompt",
     "hydra-acp/update_prompt",
+    // Amend the in-flight head with a replacement prompt. Hydra
+    // rejects unknown/closed/already-running targets with a typed
+    // result, so it's safe to forward.
+    "hydra-acp/amend_prompt",
   ];
   for (const m of allowed) {
     assert.equal(

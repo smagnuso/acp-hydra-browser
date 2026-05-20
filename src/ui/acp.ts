@@ -9,6 +9,7 @@ import type {
   LogItem,
   PermissionEntry,
   PlanLogItem,
+  QueueEntry,
   ToolCallState,
 } from "./types.js";
 
@@ -249,6 +250,9 @@ export function finalizeTurn(): void {
   // Forget the active-turn plan card — the next plan update should
   // push a fresh card rather than mutating last turn's into oblivion.
   state.current.currentPlanEntry = null;
+  // The head is no longer in flight; clear the amend target so a
+  // post-turn Amend doesn't point at a finished prompt.
+  state.current.currentHeadMessageId = undefined;
   // The agent is between turns now — wake any sendOurPrompt awaiting
   // a turn boundary, plus toggle the inTurn flag so the next
   // waitForIdle short-circuits if no turn comes back to life.
@@ -348,6 +352,15 @@ function onPromptQueueAdded(params: AnyRecord): void {
   if (!state.current) return;
   const messageId = typeof params.messageId === "string" ? params.messageId : "";
   if (!messageId) return;
+  // Daemon attaches _meta["hydra-acp"].amending = <M1 messageId> when
+  // this entry is the M2 of an amend pair. Captured here so the
+  // bubble can render a "+" marker even before the dedicated
+  // hydra-acp/prompt_amended notification arrives (wire-ordering is
+  // not strictly guaranteed between the two).
+  const meta = (params._meta ?? {}) as AnyRecord;
+  const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
+  const amendingTarget =
+    typeof hydraMeta.amending === "string" ? hydraMeta.amending : undefined;
   const originator = (params.originator ?? {}) as AnyRecord;
   const originatorClientId =
     typeof originator.clientId === "string" ? originator.clientId : "";
@@ -366,6 +379,10 @@ function onPromptQueueAdded(params: AnyRecord): void {
     }
     unbound.messageId = messageId;
     state.current.queueByMessageId.set(messageId, unbound);
+    if (amendingTarget !== undefined) {
+      unbound.amendsMessageId = amendingTarget;
+      tagAmendedM1(amendingTarget, messageId);
+    }
     // Adopt the daemon's authoritative position. Optimistic
     // aheadAtEnqueue at submit can undercount when peer entries we
     // weren't tracking are already queued — a one-shot correction on
@@ -399,15 +416,19 @@ function onPromptQueueAdded(params: AnyRecord): void {
   const position = typeof params.position === "number" ? params.position : 0;
   const queueDepth =
     typeof params.queueDepth === "number" ? params.queueDepth : 1;
-  const entry = {
+  const entry: QueueEntry = {
     id: "peer_" + Math.random().toString(36).slice(2, 10),
     text,
     // position 0 = head, already running; >0 = waiting in line. Mirror
     // own-prompt status semantics.
-    status: position === 0 ? ("processing" as const) : ("queued" as const),
+    status: position === 0 ? "processing" : "queued",
     aheadAtEnqueue: Math.max(0, position),
     messageId,
   };
+  if (amendingTarget !== undefined) {
+    entry.amendsMessageId = amendingTarget;
+    tagAmendedM1(amendingTarget, messageId);
+  }
   state.current.queueByMessageId.set(messageId, entry);
   // closeOpenStream so any in-flight agent stream above is broken.
   closeOpenStream();
@@ -475,14 +496,67 @@ function onPromptQueueRemoved(params: AnyRecord): void {
   if (!state.current) return;
   const messageId = typeof params.messageId === "string" ? params.messageId : "";
   if (!messageId) return;
+  const reason = typeof params.reason === "string" ? params.reason : "";
+  // reason === "started" → this messageId is now the in-flight head.
+  // Universal signal that reaches the originator too, unlike
+  // prompt_received which excludes them. Used as targetMessageId for
+  // the Amend button.
+  if (reason === "started") {
+    state.current.currentHeadMessageId = messageId;
+  }
   const entry = state.current.queueByMessageId.get(messageId);
   if (!entry) return;
-  const reason = typeof params.reason === "string" ? params.reason : "";
   if (reason === "started") {
     entry.status = "processing";
   } else if (reason === "cancelled" || reason === "abandoned") {
-    entry.status = "cancelled";
+    // If we already flagged this entry as amended (via prompt_amended
+    // or the M2's _meta.amending hint) the bubble should render as
+    // "merged forward" rather than user-cancelled. Otherwise it's a
+    // plain cancel.
+    if (entry.amendedByMessageId !== undefined) {
+      entry.status = "amended";
+    } else {
+      entry.status = "cancelled";
+    }
     state.current.queueByMessageId.delete(messageId);
+  }
+}
+
+// hydra-acp/prompt_amended is the M1→M2 linkage event. We may have
+// already tagged the pair via the amending _meta hint on M2's
+// prompt_queue_added, but this notification is the authoritative
+// signal and also catches the case where M2's added arrives later (or
+// not at all, if the daemon couldn't enqueue it).
+function onPromptAmended(params: AnyRecord): void {
+  if (!state.current) return;
+  const cancelledId =
+    typeof params.cancelledMessageId === "string"
+      ? params.cancelledMessageId
+      : "";
+  const newId =
+    typeof params.newMessageId === "string" ? params.newMessageId : "";
+  if (!cancelledId || !newId) return;
+  tagAmendedM1(cancelledId, newId);
+  const m2 = state.current.queueByMessageId.get(newId);
+  if (m2 && m2.amendsMessageId === undefined) {
+    m2.amendsMessageId = cancelledId;
+  }
+}
+
+// Mark the M1 entry as "amended by <M2 messageId>" so the bubble can
+// render an "amended" chip instead of a plain cancellation when the
+// daemon's prompt_queue_removed{cancelled} arrives. If the removed
+// event already arrived first we promote the status from "cancelled"
+// to "amended" in place.
+function tagAmendedM1(m1MessageId: string, m2MessageId: string): void {
+  if (!state.current) return;
+  const m1 =
+    state.current.queueByMessageId.get(m1MessageId) ??
+    state.current.promptQueue.find((e) => e.messageId === m1MessageId);
+  if (!m1) return;
+  m1.amendedByMessageId = m2MessageId;
+  if (m1.status === "cancelled") {
+    m1.status = "amended";
   }
 }
 
@@ -564,6 +638,10 @@ export function handleNotification(frame: JsonRpcFrame): void {
   }
   if (frame.method === "hydra-acp/prompt_queue_removed") {
     onPromptQueueRemoved((frame.params ?? {}) as AnyRecord);
+    return;
+  }
+  if (frame.method === "hydra-acp/prompt_amended") {
+    onPromptAmended((frame.params ?? {}) as AnyRecord);
     return;
   }
   if (frame.method !== "session/update") return;
@@ -667,9 +745,31 @@ export function handleNotification(frame: JsonRpcFrame): void {
       onPromptReceived(update);
       break;
     case "stop":
-    case "turn_complete":
+    case "turn_complete": {
+      // Daemon attaches _meta["hydra-acp"].amended = { cancelledMessageId,
+      // newMessageId } when the turn ended because an amend cancelled
+      // it. Promote the M1 bubble from "cancelled" to "amended" before
+      // finalizing so the chip + bubble styling reflect the merge —
+      // hydra-acp/prompt_amended is the canonical signal but it isn't
+      // strictly ordered relative to turn_complete, and the in-band
+      // marker lets us avoid a one-frame red flash.
+      const meta = (update._meta ?? {}) as AnyRecord;
+      const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
+      const amended = hydraMeta.amended as AnyRecord | undefined;
+      if (amended) {
+        const cancelledId =
+          typeof amended.cancelledMessageId === "string"
+            ? amended.cancelledMessageId
+            : "";
+        const newId =
+          typeof amended.newMessageId === "string" ? amended.newMessageId : "";
+        if (cancelledId && newId) {
+          tagAmendedM1(cancelledId, newId);
+        }
+      }
       finalizeTurn();
       break;
+    }
     case "session_info_update":
       // Hydra synthesizes this on the first prompt of a session and
       // forwards any agent-emitted update authoritatively. Either way,

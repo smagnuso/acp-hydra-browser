@@ -246,8 +246,8 @@ export interface HandshakeOptions {
 export async function runInitialize(
   conn: UpstreamConnection,
   opts: HandshakeOptions = {},
-): Promise<void> {
-  await conn.request("initialize", {
+): Promise<unknown> {
+  return await conn.request("initialize", {
     protocolVersion: opts.protocolVersion ?? ACP_PROTOCOL_VERSION,
     clientCapabilities: opts.clientCapabilities ?? {
       fs: { readTextFile: false, writeTextFile: false },
