@@ -54,6 +54,8 @@ pre code { background: transparent; padding: 0; }
 .pill { font-size: 0.8rem; color: var(--muted); padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; gap: 0.3rem; }
 .pill.clickable { cursor: pointer; }
 .pill.clickable:hover { background: var(--panel-2); color: var(--fg); }
+.host-select { font-size: 0.8rem; color: var(--muted); padding: 0.15rem 0.5rem; border-radius: 999px; background: transparent; border: 1px solid var(--border); cursor: pointer; }
+.host-select:hover { background: var(--panel-2); color: var(--fg); }
 .pill.ready { color: var(--good); border-color: var(--good); }
 .pill.working { color: var(--warn); border-color: var(--warn); }
 .pill.working .dot { animation: pill-pulse 1.1s ease-in-out infinite; }
@@ -72,6 +74,7 @@ pre code { background: transparent; padding: 0; }
 .badge { font-size: 0.75rem; padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 .badge.live { color: var(--good); border-color: var(--good); }
 .badge.cold { color: var(--warn); border-color: var(--warn); }
+.badge.imported { color: var(--accent); border-color: var(--accent); }
 .card .actions { display: flex; gap: 0.4rem; }
 .card .actions button { padding: 0.25rem 0.55rem; font-size: 0.85rem; }
 .empty { color: var(--muted); padding: 2rem; text-align: center; }

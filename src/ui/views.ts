@@ -205,6 +205,7 @@ function renderTopbar(): HTMLElement {
       },
       state.showCold ? "all" : "live",
     ),
+    renderHostFilter(),
     el("span", { class: "spacer" }),
     el(
       "button",
@@ -218,22 +219,96 @@ function renderTopbar(): HTMLElement {
   );
 }
 
+// Build the host-filter dropdown. Options are computed live from the
+// current session list so newly-imported peer hosts appear without
+// page reload. Sentinels:
+//   "__local" — sessions created here OR imported and bound to a local
+//               agent.
+//   "__all"   — every session.
+//   <host>    — passive mirrors imported from <host> that haven't been
+//               attached locally yet.
+// A peer host with no passive mirrors (all its sessions have been
+// attached locally) drops out of the option list — its filter would
+// render empty.
+function renderHostFilter(): HTMLElement {
+  const hostsSeen = new Set<string>();
+  for (const s of state.sessions) {
+    if (s.importedFromMachine && !s.upstreamSessionId) {
+      hostsSeen.add(s.importedFromMachine);
+    }
+  }
+  const hosts = [...hostsSeen].sort();
+  const select = el("select", {
+    class: "host-select",
+    title: "Filter sessions by origin host",
+    onchange: (e: Event) => {
+      const value = (e.target as HTMLSelectElement).value;
+      setState({ hostFilter: value });
+    },
+  }) as HTMLSelectElement;
+  const addOption = (value: string, label: string): void => {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    if (state.hostFilter === value) {
+      opt.selected = true;
+    }
+    select.appendChild(opt);
+  };
+  addOption("__local", "host: local");
+  for (const h of hosts) {
+    addOption(h, `host: ${h}`);
+  }
+  addOption("__all", "host: all");
+  // If the current filter points at a host that no longer appears in
+  // any session, the select would render with nothing selected. Pin
+  // the rendered value to the state explicitly so this stays sane.
+  if (
+    state.hostFilter !== "__local" &&
+    state.hostFilter !== "__all" &&
+    !hosts.includes(state.hostFilter)
+  ) {
+    select.value = state.hostFilter;
+  }
+  return select;
+}
+
 // ---- Session list -----------------------------------------------
 
 function renderList(): HTMLElement {
-  // Daemon always returns everything now; the "show cold" toggle is
-  // a client-side filter — hide cold cards when the toggle is off.
-  const visible = state.showCold
+  // Daemon always returns everything now; the "show cold" toggle and
+  // the host filter are client-side passes — apply them in order.
+  let visible = state.showCold
     ? state.sessions
     : state.sessions.filter((s) => s.status !== "cold");
-  const hiddenCold = state.sessions.length - visible.length;
+  if (state.hostFilter === "__local") {
+    visible = visible.filter(
+      (s) => !s.importedFromMachine || !!s.upstreamSessionId,
+    );
+  } else if (state.hostFilter !== "__all") {
+    visible = visible.filter(
+      (s) =>
+        s.importedFromMachine === state.hostFilter && !s.upstreamSessionId,
+    );
+  }
+  // Count cold-filtered sessions separately so the empty-state message
+  // for the "live" toggle isn't muddied by host-filter hits.
+  const hiddenCold = state.showCold
+    ? 0
+    : state.sessions.filter((s) => s.status === "cold").length;
   const groups = groupSessions(visible, state.groupBy);
   const list = el("div", { class: "list" });
   if (visible.length === 0) {
-    const msg =
-      state.sessions.length === 0
-        ? "No sessions. Use + to create one, or run `hydra-acp launch <agent>` from your editor."
-        : `No live sessions. ${hiddenCold} cold session${hiddenCold === 1 ? "" : "s"} hidden — click "live" to switch to "all".`;
+    let msg: string;
+    if (state.sessions.length === 0) {
+      msg = "No sessions. Use + to create one, or run `hydra-acp launch <agent>` from your editor.";
+    } else if (state.hostFilter === "__local") {
+      msg = "No local sessions. Switch the host filter to see imported sessions.";
+    } else if (state.hostFilter !== "__all") {
+      msg = `No sessions from ${state.hostFilter}. Try a different host.`;
+    } else {
+      msg = `No live sessions. ${hiddenCold} cold session${hiddenCold === 1 ? "" : "s"} hidden — click "live" to switch to "all".`;
+    }
     list.appendChild(el("div", { class: "empty" }, msg));
   }
   for (const g of groups) {
@@ -323,6 +398,18 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
         s.status === "cold" ? "cold" : "live",
       ),
       el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
+      ...(s.importedFromMachine && !s.upstreamSessionId
+        ? [
+            el(
+              "span",
+              {
+                class: "badge imported",
+                title: `Passive mirror imported from ${s.importedFromMachine} — attach to start working on it here.`,
+              },
+              `← ${s.importedFromMachine}`,
+            ),
+          ]
+        : []),
     ),
     el(
       "div",

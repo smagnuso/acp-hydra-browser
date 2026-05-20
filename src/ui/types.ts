@@ -13,6 +13,15 @@ export interface SessionInfo {
   attachedClients?: number;
   updatedAt?: string;
   status?: "live" | "cold";
+  // Hostname of the machine that exported the bundle this session was
+  // imported from. Undefined for sessions created on this host.
+  importedFromMachine?: string;
+  // Local ACP agent's session id once an agent has bound this session
+  // here. An imported session with no upstreamSessionId is a passive
+  // mirror; once the user attaches and an agent binds, the field is
+  // populated and the session is treated as local-ish (showing up in
+  // the "host: local" filter, getting a Slack thread, etc.).
+  upstreamSessionId?: string;
 }
 
 export interface AgentInfo {
@@ -211,6 +220,10 @@ export interface AppState {
   defaultCwd: string | null;
   groupBy: "project" | "recent";
   showCold: boolean;
+  // Host filter selection for the session list. "__local" hides every
+  // imported session; "__all" hides nothing; any other value filters
+  // to sessions whose importedFromMachine matches.
+  hostFilter: string;
   banner: Banner;
   modal: ModalState;
   current: ChatState | null;

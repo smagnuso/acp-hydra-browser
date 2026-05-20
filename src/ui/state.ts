@@ -17,6 +17,10 @@ export const state: AppState = {
   // toggle in the topbar reveals them; clicking one attaches over
   // WSS, which causes hydra to resurrect it from disk automatically.
   showCold: false,
+  // Default to local: imported sessions (from peer hosts via the
+  // archiver) are noisy if they all show up alongside the user's own
+  // work. The dropdown lets them switch to a specific peer or "all".
+  hostFilter: "__local",
   banner: null,
   modal: null,
   current: null,
