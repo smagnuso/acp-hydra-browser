@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { writeFileSync, chmodSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { writeFileSync, chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { buildContext, createServer } from "./server/http.js";
 import { registerSessionRoutes } from "./server/routes-sessions.js";
@@ -27,6 +28,10 @@ function ensureLoopbackOrTls(host: string, hasTls: boolean): void {
 }
 
 async function main(argv: string[]): Promise<void> {
+  if (argv.includes("--version") || argv.includes("-v")) {
+    process.stdout.write(`hydra-acp-browser ${readVersion()}\n`);
+    return;
+  }
   if (argv.includes("--help") || argv.includes("-h")) {
     printHelp();
     return;
@@ -90,12 +95,25 @@ function writeLinkFile(path: string, url: string): void {
   }
 }
 
+function readVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(
+      readFileSync(resolve(here, "../package.json"), "utf8"),
+    ) as { version?: string };
+    return pkg.version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 function printHelp(): void {
   process.stdout.write(
     `hydra-acp-browser — web UI extension for hydra-acp
 
 Usage:
   hydra-acp-browser                Start the server.
+  hydra-acp-browser --version      Print version and exit.
   hydra-acp-browser --help         Show this message.
 
 Set the master password on the daemon host:
