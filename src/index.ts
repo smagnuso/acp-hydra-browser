@@ -10,6 +10,7 @@ import { registerFileRoutes } from "./server/routes-files.js";
 import { registerRootRoutes } from "./server/routes-root.js";
 import { registerConfigRoutes } from "./server/routes-config.js";
 import { attachWsBridge } from "./server/ws-bridge.js";
+import { UpstreamConnection, runInitialize } from "./hydra/ws.js";
 import { logger, setDebug } from "./util/log.js";
 
 const log = logger("main");
@@ -55,6 +56,11 @@ async function main(argv: string[]): Promise<void> {
 
   attachWsBridge(app.server, ctx);
 
+  // Register this process's version with the daemon using its own token so
+  // `hydra extension list` can show the version column. Fire-and-forget —
+  // a failure here is not fatal.
+  void registerVersion(config.hydraWsUrl, config.hydraToken);
+
   const scheme = config.tls ? "https" : "http";
   const url = `${scheme}://${displayHost(config.browserHost)}:${config.browserPort}/`;
   writeLinkFile(config.linkFile, url);
@@ -76,6 +82,29 @@ async function main(argv: string[]): Promise<void> {
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+}
+
+// Open a short-lived WS connection using the extension's own process token
+// to call initialize and let the daemon record our version. This is separate
+// from the per-session bridges that use user session tokens.
+async function registerVersion(wsUrl: string, token: string): Promise<void> {
+  const conn = new UpstreamConnection({ daemonWsUrl: wsUrl, token });
+  await new Promise<void>((resolve) => {
+    conn.once("open", () => resolve());
+    conn.once("error", () => resolve());
+    conn.once("close", () => resolve());
+    conn.start();
+  });
+  if (!conn.isConnected) {
+    return;
+  }
+  try {
+    await runInitialize(conn);
+  } catch {
+    void 0;
+  } finally {
+    conn.stop();
+  }
 }
 
 function displayHost(host: string): string {

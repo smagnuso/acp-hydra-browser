@@ -253,5 +253,6 @@ export async function runInitialize(
       fs: { readTextFile: false, writeTextFile: false },
       terminal: false,
     },
+    clientInfo: { name: "hydra-acp-browser", version: pkg.version },
   });
 }
