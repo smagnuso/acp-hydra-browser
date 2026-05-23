@@ -6,6 +6,7 @@ import { state } from "./state.js";
 import { render } from "./renderer.js";
 import { contentToText } from "./markdown.js";
 import type {
+  ExitPlanLogItem,
   LogItem,
   PermissionEntry,
   PlanLogItem,
@@ -192,12 +193,90 @@ export function ensureSpinner(): void {
   insertAboveQueued({ kind: "spinner", spinner: c.spinner });
 }
 
+// Recognise Claude's ExitPlanMode across casing variants (camelCase from
+// claude-acp today; snake_case left in for forward-compat). Case-insensitive
+// so name/title carry-overs from arbitrary upstreams still match.
+function isExitPlanModeTool(name: string | undefined): boolean {
+  if (!name) return false;
+  return name.toLowerCase().replace(/[_\s-]/g, "") === "exitplanmode";
+}
+
+function readExitPlanMarkdown(update: AnyRecord): string | null {
+  const rawInput = update.rawInput;
+  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
+    return null;
+  }
+  const plan = (rawInput as AnyRecord).plan;
+  if (typeof plan !== "string" || plan.length === 0) return null;
+  return plan;
+}
+
+function findExitPlanLogItem(
+  toolCallId: string,
+): { idx: number; item: ExitPlanLogItem } | null {
+  if (!state.current) return null;
+  const log = state.current.log;
+  for (let i = 0; i < log.length; i++) {
+    const entry = log[i]!;
+    if (entry.kind === "exit-plan-mode" && entry.toolCallId === toolCallId) {
+      return { idx: i, item: entry };
+    }
+  }
+  return null;
+}
+
+// Push or update the ExitPlanMode log bubble for `toolCallId`. Returns true
+// if the update was an ExitPlanMode payload and should not fall through to
+// the generic tool-call handling.
+function applyExitPlanModeUpdate(update: AnyRecord): boolean {
+  if (!state.current) return false;
+  const toolCallId = String(update.toolCallId ?? "");
+  if (!toolCallId) return false;
+  const name = (update.name ?? update.title) as string | undefined;
+  const existing = findExitPlanLogItem(toolCallId);
+  // For an update with no name, only special-case it when we already have
+  // a bubble for this toolCallId (so subsequent tool_call_updates that
+  // omit `name` still flow through here).
+  if (!isExitPlanModeTool(name) && !existing) {
+    return false;
+  }
+  const plan = readExitPlanMarkdown(update);
+  const status =
+    typeof update.status === "string" ? update.status : undefined;
+  if (existing) {
+    if (plan !== null) existing.item.plan = plan;
+    if (status !== undefined) existing.item.status = status;
+    return true;
+  }
+  if (plan === null) {
+    // We've identified the tool by name but the plan body hasn't landed
+    // yet — fall through to the generic handler so something is rendered.
+    return false;
+  }
+  closeOpenStream();
+  const item: ExitPlanLogItem = {
+    kind: "exit-plan-mode",
+    toolCallId,
+    plan,
+  };
+  if (status !== undefined) item.status = status;
+  insertAboveQueued(item);
+  return true;
+}
+
 function onToolCall(update: AnyRecord): void {
   if (!state.current) return;
   // Close any streaming agent message before this tool so the next
   // agent chunk after the tool starts a fresh bubble — same pattern
   // hydra-acp-slack uses with closeAgentMessage.
   closeOpenStream();
+  if (applyExitPlanModeUpdate(update)) {
+    maybeResolvePermissionByToolCall(
+      String(update.toolCallId),
+      typeof update.status === "string" ? update.status : undefined,
+    );
+    return;
+  }
   const tc: ToolCallState = {
     toolCallId: String(update.toolCallId),
     title: String(update.title ?? update.kind ?? "tool"),
@@ -213,6 +292,15 @@ function onToolCall(update: AnyRecord): void {
 
 function onToolCallUpdate(update: AnyRecord): void {
   if (!state.current) return;
+  if (applyExitPlanModeUpdate(update)) {
+    if (typeof update.status === "string") {
+      maybeResolvePermissionByToolCall(
+        String(update.toolCallId),
+        update.status,
+      );
+    }
+    return;
+  }
   const existing = state.current.toolCalls.get(String(update.toolCallId));
   if (!existing) return;
   if (typeof update.status === "string") {

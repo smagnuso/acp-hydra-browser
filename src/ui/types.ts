@@ -96,6 +96,18 @@ export interface PlanLogItem {
   entries: unknown;
 }
 
+// Bubble for Claude's ExitPlanMode tool. The plan markdown rides in
+// rawInput.plan on the wire and we render it as its own message in the
+// log; the permission card lands below it as a separate "perm" item.
+// Mutated in place by tool_call_update so the status footer flips when
+// the user approves / rejects.
+export interface ExitPlanLogItem {
+  kind: "exit-plan-mode";
+  toolCallId: string;
+  plan: string;
+  status?: string;
+}
+
 export type LogItem =
   | {
       kind: "stream";
@@ -108,7 +120,8 @@ export type LogItem =
   | { kind: "error"; text: string }
   | { kind: "spinner"; spinner: SpinnerState }
   | { kind: "perm"; toolCallId: string }
-  | PlanLogItem;
+  | PlanLogItem
+  | ExitPlanLogItem;
 
 export interface FileEntry {
   name: string;

@@ -1139,7 +1139,60 @@ function renderLogItem(item: ChatState["log"][number]): Node {
   if (item.kind === "plan") {
     return renderPlan(item.entries);
   }
+  if (item.kind === "exit-plan-mode") {
+    return renderExitPlan(item);
+  }
   return document.createTextNode("");
+}
+
+function renderExitPlan(item: {
+  toolCallId: string;
+  plan: string;
+  status?: string;
+}): HTMLElement {
+  const node = el("div", { class: "msg agent plan-markdown" });
+  node.appendChild(el("div", { class: "plan-header" }, "📋 Plan"));
+  const body = el("div", { class: "body" });
+  body.innerHTML = renderMarkdown(item.plan);
+  node.appendChild(body);
+  const footer = exitPlanFooter(item.status);
+  if (footer !== null) node.appendChild(footer);
+  return node;
+}
+
+function exitPlanFooter(status: string | undefined): HTMLElement | null {
+  if (status === undefined) return null;
+  switch (status) {
+    case "completed":
+    case "succeeded":
+    case "ok":
+      return el("div", { class: "plan-status plan-status-ok" }, "✓ Approved");
+    case "failed":
+    case "error":
+    case "rejected":
+      return el(
+        "div",
+        { class: "plan-status plan-status-fail" },
+        "✗ Rejected",
+      );
+    case "cancelled":
+      return el(
+        "div",
+        { class: "plan-status plan-status-cancelled" },
+        "⊝ Cancelled",
+      );
+    case "pending":
+    case "in_progress":
+    case "running":
+    case "updated":
+      return el(
+        "div",
+        { class: "plan-status plan-status-pending" },
+        "awaiting approval…",
+      );
+    default:
+      return null;
+  }
 }
 
 function renderQueueChip(entry: QueueEntry): Node {
