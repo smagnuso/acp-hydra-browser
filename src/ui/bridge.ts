@@ -62,6 +62,7 @@ export function handleFrame(frame: JsonRpcFrame): void {
   if (frame.method === "bridge/ready") {
     state.current.ready = true;
     state.banner = null;
+    state.current.reconnectAttempt = 0;
     // Capture the server-side bridge's clientId so we can recognize
     // our own hydra-acp/prompt_queue_added events. The bridge passes
     // it through from the upstream session/attach response.

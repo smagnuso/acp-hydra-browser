@@ -205,6 +205,17 @@ export interface ChatState {
   // (the universal signal that reaches the originator too, unlike
   // prompt_received). Used as targetMessageId for hydra-acp/amend_prompt.
   currentHeadMessageId?: string;
+  // Active backoff timer for reconnect, or undefined when not pending.
+  // Cleared by closeChat / openChat so navigation cancels the loop.
+  reconnectTimer?: ReturnType<typeof setTimeout>;
+  // Count of consecutive failed reconnect attempts; reset to 0 by
+  // bridge.ts when bridge/ready arrives. Drives backoff and the
+  // "still disconnected" banner threshold.
+  reconnectAttempt?: number;
+  // Whether the load=true query param was used on the initial open.
+  // Reconnects should not re-send it: load=true is the cold-start
+  // hint for session/load and is harmless but wasted on a hot session.
+  loadOnConnect?: boolean;
 }
 
 export interface SessionModalData {
