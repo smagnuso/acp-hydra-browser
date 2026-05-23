@@ -415,6 +415,13 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
       messageId,
     };
     state.current.queueByMessageId.set(messageId, entry);
+    // Position 0 is the in-flight head. The live "started" notification
+    // already fired before we attached, so we'd never otherwise learn
+    // the head's messageId — without this the Amend button stays hidden
+    // for the rest of the in-flight turn (see views.ts:974).
+    if (position === 0) {
+      state.current.currentHeadMessageId = messageId;
+    }
     state.current.log.push({
       kind: "stream",
       role: "user",
