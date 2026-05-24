@@ -64,14 +64,15 @@ function shortenModel(model: string | undefined): string | undefined {
   return idx === -1 ? model : model.slice(idx + 1);
 }
 
-// "agent(model)" when both are known, just the agent (or "?") otherwise.
+// "agent•model" when both are known, just the agent (or "?") otherwise.
+// Matches the CLI's TUI header (see cli/src/core/agent-display.ts).
 function agentWithModel(
   agent: string | undefined,
   model: string | undefined,
 ): string {
   const a = agent || "?";
   const m = shortenModel(model);
-  return m ? `${a}(${m})` : a;
+  return m ? `${a}•${m}` : a;
 }
 
 // Abbreviated "time since" hint for the subtitle row. Matches the
