@@ -124,7 +124,7 @@ export function loadConfig(path: string = paths.configFile()): Config {
     process.env.HYDRA_ACP_TOKEN ?? map.get("HYDRA_TOKEN") ?? "";
   if (!hydraToken) {
     throw new Error(
-      "Missing HYDRA_ACP_TOKEN env var (or HYDRA_TOKEN config key). When run as a hydra extension, hydra injects this automatically; otherwise set it in ~/.hydra-acp-browser.conf.",
+      "Missing HYDRA_ACP_TOKEN env var (or HYDRA_TOKEN config key). When run as a hydra extension, hydra injects this automatically; otherwise set it in ~/.hydra-acp/browser.conf.",
     );
   }
   const hydraWsUrl =

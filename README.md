@@ -19,7 +19,7 @@ with a separate per-host authkey instead.
        hydra WSS      <----------> |                   |
        /acp                        +-------------------+
                                             |
-                                  ~/.hydra-acp-browser/
+                                  ~/.hydra-acp/browser/
                                     authkey
                                     link
 ```
@@ -97,8 +97,8 @@ The extension exposes:
 
    On startup, hydra spawns hydra-acp-browser with these env vars set:
    `HYDRA_ACP_DAEMON_URL`, `HYDRA_ACP_TOKEN`, `HYDRA_ACP_WS_URL`. The
-   first launch generates `~/.hydra-acp-browser/authkey` and writes
-   the open URL (with `?authkey=…`) to `~/.hydra-acp-browser/link`.
+   first launch generates `~/.hydra-acp/browser/authkey` and writes
+   the open URL (with `?authkey=…`) to `~/.hydra-acp/browser/link`.
    Stdout/stderr land in `~/.hydra-acp/extensions/hydra-acp-browser.log`.
    Lifecycle is managed with
    `hydra-acp extensions start|stop|restart hydra-acp-browser` —
@@ -107,7 +107,7 @@ The extension exposes:
    shows up there on first launch).
 
 3. **Run standalone (alternative).** Set `HYDRA_TOKEN` in
-   `~/.hydra-acp-browser.conf` (or export `HYDRA_ACP_TOKEN`), then:
+   `~/.hydra-acp/browser.conf` (or export `HYDRA_ACP_TOKEN`), then:
 
    ```sh
    npm start
@@ -115,21 +115,21 @@ The extension exposes:
 
 4. **Open the browser** to the URL printed on stderr. The first request
    sets a cookie; subsequent requests are authenticated by the cookie
-   alone. The URL is also at `~/.hydra-acp-browser/link` for convenience.
+   alone. The URL is also at `~/.hydra-acp/browser/link` for convenience.
 
 ## HTTPS
 
 Optional on `127.0.0.1`, **required** for any non-loopback bind (the server
 refuses otherwise — same rule as the hydra daemon). The simplest setup
-is a self-signed cert in `~/.hydra-acp-browser/tls/`.
+is a self-signed cert in `~/.hydra-acp/browser/tls/`.
 
 1. **Generate cert + key.** ECDSA P-256, 5-year validity, with a SAN
    covering loopback. Add any extra hostnames you'll hit it from
    (Tailscale name, LAN IP, etc.) to the SAN inline:
 
    ```sh
-   mkdir -p ~/.hydra-acp-browser/tls && chmod 700 ~/.hydra-acp-browser/tls
-   cd ~/.hydra-acp-browser/tls
+   mkdir -p ~/.hydra-acp/browser/tls && chmod 700 ~/.hydra-acp/browser/tls
+   cd ~/.hydra-acp/browser/tls
 
    SAN='subjectAltName=DNS:localhost,DNS:'"$(hostname)"',IP:127.0.0.1,IP:::1'
    #     ^ add ,DNS:my.tailnet.ts.net  or  ,IP:100.64.x.y  if needed.
@@ -154,11 +154,11 @@ is a self-signed cert in `~/.hydra-acp-browser/tls/`.
    Skipping `-addext "subjectAltName=…"` will make every browser reject
    the cert with `NET::ERR_CERT_COMMON_NAME_INVALID`.
 
-2. **Wire into config.** Append to `~/.hydra-acp-browser.conf`:
+2. **Wire into config.** Append to `~/.hydra-acp/browser.conf`:
 
    ```sh
-   BROWSER_TLS_CERT=~/.hydra-acp-browser/tls/cert.pem
-   BROWSER_TLS_KEY=~/.hydra-acp-browser/tls/key.pem
+   BROWSER_TLS_CERT=~/.hydra-acp/browser/tls/cert.pem
+   BROWSER_TLS_KEY=~/.hydra-acp/browser/tls/key.pem
    ```
 
    To expose beyond loopback, also set:
@@ -178,7 +178,7 @@ is a self-signed cert in `~/.hydra-acp-browser/tls/`.
 4. **Trust the cert.** Self-signed certs trip browser warnings.
    - **Click-through:** open the URL, accept the warning. Per-site only.
    - **Linux Chrome/Chromium:**
-     `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n hydra-acp-browser -i ~/.hydra-acp-browser/tls/cert.pem`
+     `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n hydra-acp-browser -i ~/.hydra-acp/browser/tls/cert.pem`
    - **macOS:** double-click `cert.pem`, add to System keychain, set
      "Always Trust" in Get Info.
    - **iOS:** AirDrop/email `cert.pem` to the device, install profile
@@ -197,7 +197,7 @@ HTTPS won't be sent over plain HTTP. Run
 
 ## Configuration keys
 
-`~/.hydra-acp-browser.conf` (KEY=VALUE). All keys are optional unless noted.
+`~/.hydra-acp/browser.conf` (KEY=VALUE). All keys are optional unless noted.
 
 | Key                          | Default                                | Notes |
 |------------------------------|----------------------------------------|-------|
@@ -205,8 +205,8 @@ HTTPS won't be sent over plain HTTP. Run
 | `BROWSER_PORT`               | `9099`                                 | Listen port. |
 | `BROWSER_TLS_CERT`           | (none)                                 | If set with `BROWSER_TLS_KEY`, listen on HTTPS. |
 | `BROWSER_TLS_KEY`            | (none)                                 | Path to TLS key. |
-| `BROWSER_AUTHKEY_FILE`       | `~/.hydra-acp-browser/authkey`         | Where the browser-side authkey lives. |
-| `BROWSER_LINK_FILE`          | `~/.hydra-acp-browser/link`            | URL written for convenience. |
+| `BROWSER_AUTHKEY_FILE`       | `~/.hydra-acp/browser/authkey`         | Where the browser-side authkey lives. |
+| `BROWSER_LINK_FILE`          | `~/.hydra-acp/browser/link`            | URL written for convenience. |
 | `BROWSER_ALLOWED_HOSTS`      | empty                                  | Comma-sep extra Host values for DNS-rebind allowlist (e.g. Tailscale name). |
 | `BROWSER_FILE_MAX_BYTES`     | `262144`                               | Upper bound for `/api/files/read`. |
 | `HYDRA_DAEMON_URL`           | from env / `http://127.0.0.1:8765`     | `HYDRA_ACP_DAEMON_URL` env wins. |
