@@ -103,7 +103,7 @@ The extension exposes:
    Lifecycle is managed with
    `hydra-acp extensions start|stop|restart hydra-acp-browser` —
    `restart` is the right call after `npm run build`. Tail the log
-   with `hydra-acp extensions logs hydra-acp-browser -f` (the open URL
+   with `hydra-acp extensions log hydra-acp-browser -f` (the open URL
    shows up there on first launch).
 
 3. **Run standalone (alternative).** Set `HYDRA_TOKEN` in
