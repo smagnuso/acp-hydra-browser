@@ -41,9 +41,18 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 export async function pollSessions(): Promise<void> {
   try {
     // Daemon always returns everything; views.ts filters cold cards
-    // client-side when state.showCold is false.
+    // client-side when state.showCold is false. We also drop sessions
+    // spawned by `hydra cat` (originatingClient.name === HYDRA_CAT_CLIENT_NAME)
+    // — they're typically one-shot CLI invocations and would clutter
+    // the browser session list.
     const data = await api<{ sessions?: unknown[] }>("/api/sessions");
-    const newSessions = (data.sessions as Array<Record<string, unknown>> ?? []) as never;
+    const rawSessions =
+      (data.sessions as Array<Record<string, unknown>>) ?? [];
+    const filtered = rawSessions.filter((s) => {
+      const oc = s.originatingClient as { name?: unknown } | undefined;
+      return oc?.name !== "hydra-acp-cat";
+    });
+    const newSessions = filtered as never;
     const hadBanner = state.banner !== null;
     const sessionsChanged = !sameValue(state.sessions, newSessions);
     state.sessions = newSessions;
