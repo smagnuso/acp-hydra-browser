@@ -1,6 +1,6 @@
 {
   "name": "@hydra-acp/browser",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "description": "Browser-based UI for hydra-acp sessions.",
   "license": "MIT",
   "type": "module",
