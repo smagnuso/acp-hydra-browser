@@ -205,7 +205,7 @@ async function createSession(
       newParams.agentId = body.agentId;
     }
     if (body.name) {
-      newParams._meta = { "hydra-acp": { name: body.name } };
+      newParams._meta = { "hydra-acp": { title: body.name } };
     }
     const newResult = (await conn.request("session/new", newParams)) as {
       sessionId: string;
