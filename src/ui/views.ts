@@ -966,7 +966,7 @@ function renderChat(c: ChatState): HTMLElement {
 
   // While a turn is in flight, split the lone Send button into two:
   //   - Amend: cancel the in-flight head and submit the typed text as
-  //     its replacement (only when the daemon advertises promptAmending).
+  //     its replacement (only when the daemon advertises prompt.amending).
   //   - Enqueue: behave like the idle-case Send — sit in the FIFO until
   //     the agent finishes.
   // When idle, a single Send button covers both behaviors.
@@ -1099,7 +1099,7 @@ function renderLogItem(item: ChatState["log"][number]): Node {
     }
     if (qe && qe.status === "editing") {
       // Inline editor over the queued bubble. Pre-fills with the
-      // current text; Enter commits via hydra-acp/update_prompt,
+      // current text; Enter commits via hydra-acp/prompt/update,
       // Escape reverts. Disabled (and the entry returns to queued)
       // once the prompt actually starts processing.
       node.appendChild(
@@ -1263,7 +1263,7 @@ function renderQueueChip(entry: QueueEntry): Node {
 }
 
 // Inline edit-while-queued textarea. Enter (without shift) commits via
-// hydra-acp/update_prompt and reverts the chip to "queued"; Escape
+// hydra-acp/prompt/update and reverts the chip to "queued"; Escape
 // reverts without sending. The commit may be rejected by hydra if the
 // prompt has already started — the chip status will get overwritten
 // shortly after by the daemon's broadcasts in either case.

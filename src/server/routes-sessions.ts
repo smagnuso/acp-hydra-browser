@@ -201,11 +201,19 @@ async function createSession(
       cwd,
       mcpServers: [],
     };
+    // Agent selection and the session label both ride under
+    // _meta["hydra-acp"] per the ACP Extensibility convention — the spec
+    // NewSessionRequest only defines cwd + mcpServers, so nothing
+    // hydra-specific goes at the top level.
+    const hydraMeta: Record<string, unknown> = {};
     if (body.agentId) {
-      newParams.agentId = body.agentId;
+      hydraMeta.agentId = body.agentId;
     }
     if (body.name) {
-      newParams._meta = { "hydra-acp": { title: body.name } };
+      hydraMeta.title = body.name;
+    }
+    if (Object.keys(hydraMeta).length > 0) {
+      newParams._meta = { "hydra-acp": hydraMeta };
     }
     const newResult = (await conn.request("session/new", newParams)) as {
       sessionId: string;

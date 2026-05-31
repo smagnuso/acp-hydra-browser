@@ -64,7 +64,7 @@ export function handleFrame(frame: JsonRpcFrame): void {
     state.banner = null;
     state.current.reconnectAttempt = 0;
     // Capture the server-side bridge's clientId so we can recognize
-    // our own hydra-acp/prompt_queue_added events. The bridge passes
+    // our own hydra-acp/prompt_queue/added events. The bridge passes
     // it through from the upstream session/attach response.
     const params = (frame.params ?? {}) as Record<string, unknown>;
     if (typeof params.clientId === "string") {
@@ -84,7 +84,10 @@ export function handleFrame(frame: JsonRpcFrame): void {
     // Gate the Amend button on the daemon advertising support. Without
     // it the composer falls back to a single Send button (the chord
     // would otherwise produce a target_not_found from the daemon).
-    if (hydraMeta && hydraMeta.promptAmending === true) {
+    const promptCaps = hydraMeta?.prompt as
+      | { amending?: boolean }
+      | undefined;
+    if (promptCaps?.amending === true) {
       state.current.daemonSupportsAmend = true;
     }
     // Wake any queued prompt that was waiting for the bridge handshake.
@@ -113,7 +116,7 @@ export function handleFrame(frame: JsonRpcFrame): void {
   // session is gone — so we mirror the WS-close cleanup (ready=false,
   // drop the queue chain) and tell the user. The list view's "cold"
   // badge updates on its own next refresh via session/list.
-  if (frame.method === "hydra-acp/session_closed") {
+  if (frame.method === "hydra-acp/session/closed") {
     if (state.current) {
       state.current.ready = false;
       cancelAllQueued(state.current);

@@ -34,12 +34,12 @@ const ALLOWED_BROWSER_REQUEST_METHODS = new Set<string>([
   // Both target a specific messageId so they're harmless to forward
   // — hydra rejects unknown / already-running ids with a structured
   // result.
-  "hydra-acp/cancel_prompt",
-  "hydra-acp/update_prompt",
+  "hydra-acp/prompt/cancel",
+  "hydra-acp/prompt/update",
   // Amend the in-flight head with a replacement prompt. Hydra
   // rejects unknown/closed/already-running targets with a typed
   // result, so it's safe to forward.
-  "hydra-acp/amend_prompt",
+  "hydra-acp/prompt/amend",
 ]);
 
 const ALLOWED_BROWSER_NOTIFICATION_METHODS = new Set<string>([
@@ -349,7 +349,7 @@ function handleConnection(
       | undefined;
     // Pluck the daemon's hydra-acp capability flags out of the
     // initialize response _meta so we can pass them through to the
-    // browser. promptAmending is the gate for the Amend button —
+    // browser. prompt.amending is the gate for the Amend button —
     // older daemons that don't advertise it should not show one.
     let initHydraMeta: Record<string, unknown> | undefined;
     if (initResp?._meta && typeof initResp._meta === "object") {

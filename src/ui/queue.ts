@@ -1,6 +1,6 @@
 // Server-driven prompt queue. Hydra owns the per-session FIFO; the
 // browser fires session/prompt eagerly and reacts to
-// hydra-acp/prompt_queue_added / _updated / _removed notifications
+// hydra-acp/prompt_queue/added / _updated / _removed notifications
 // (handled in acp.ts) to drive each bubble's queue chip state.
 //
 // What stays browser-side:
@@ -108,7 +108,7 @@ function pushHistory(c: ChatState, text: string): void {
 
 // Drop a queued prompt. If the entry has been bound to a server
 // messageId (the common case once prompt_queue_added has arrived), fire
-// hydra-acp/cancel_prompt and let the daemon's prompt_queue_removed
+// hydra-acp/prompt/cancel and let the daemon's prompt_queue_removed
 // echo drive the local state transition. If the entry isn't bound yet
 // (sub-millisecond race between submit and prompt_queue_added),
 // optimistically mark cancelled so the chip reflects the user's intent
@@ -119,7 +119,7 @@ export function cancelQueuedPrompt(entry: QueueEntry): void {
   const c = state.current;
   if (!c) return;
   if (entry.messageId !== undefined) {
-    send("hydra-acp/cancel_prompt", {
+    send("hydra-acp/prompt/cancel", {
       sessionId: c.sessionId,
       messageId: entry.messageId,
     });
@@ -146,7 +146,7 @@ export function updateQueuedPrompt(entry: QueueEntry, text: string): void {
     render();
     return;
   }
-  send("hydra-acp/update_prompt", {
+  send("hydra-acp/prompt/update", {
     sessionId: c.sessionId,
     messageId: entry.messageId,
     prompt: [{ type: "text", text: trimmed }],
@@ -155,8 +155,8 @@ export function updateQueuedPrompt(entry: QueueEntry, text: string): void {
 
 // Amend the in-flight turn: cancel the head prompt and submit a
 // replacement in its place. Falls back to a regular sendPrompt when:
-//   1. The daemon doesn't advertise promptAmending (older daemon →
-//      hydra-acp/amend_prompt isn't routed at all).
+//   1. The daemon doesn't advertise prompt.amending (older daemon →
+//      hydra-acp/prompt/amend isn't routed at all).
 //   2. No in-flight head (currentHeadMessageId undefined) → there's
 //      nothing to amend; enqueue as a regular prompt.
 //   3. The daemon rejects the amend (target_completed,
@@ -211,7 +211,7 @@ export function amendPrompt(): void {
   c.recentOwnPrompts.push({ text, at: Date.now() });
   const cutoff = Date.now() - 60_000;
   c.recentOwnPrompts = c.recentOwnPrompts.filter((p) => p.at >= cutoff).slice(-16);
-  const id = send("hydra-acp/amend_prompt", {
+  const id = send("hydra-acp/prompt/amend", {
     sessionId: c.sessionId,
     targetMessageId: target,
     prompt: [{ type: "text", text }],
@@ -225,7 +225,7 @@ export function amendPrompt(): void {
   render();
 }
 
-// Handler for hydra-acp/amend_prompt's JSON-RPC response. On success
+// Handler for hydra-acp/prompt/amend's JSON-RPC response. On success
 // we let the prompt_queue_added / turn_complete plumbing do its job —
 // the binding into messageId happens through the regular FIFO. On
 // rejection we drop the optimistic entry, restore the draft text, and
@@ -306,7 +306,7 @@ export function cancelProcessingPrompt(): void {
 }
 
 // Stop button: drop everything queued AND tell the agent to abort the
-// running turn. Cancels go through hydra-acp/cancel_prompt for bound
+// running turn. Cancels go through hydra-acp/prompt/cancel for bound
 // entries (so peers see the right prompt_queue_removed events) and
 // fall back to a local mark for unbound ones.
 export function sendCancel(): void {

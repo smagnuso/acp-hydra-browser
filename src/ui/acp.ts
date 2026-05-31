@@ -450,7 +450,7 @@ function onPromptQueueAdded(params: AnyRecord): void {
   // Daemon attaches _meta["hydra-acp"].amending = <M1 messageId> when
   // this entry is the M2 of an amend pair. Captured here so the
   // bubble can render a "+" marker even before the dedicated
-  // hydra-acp/prompt_amended notification arrives (wire-ordering is
+  // hydra-acp/prompt/amended notification arrives (wire-ordering is
   // not strictly guaranteed between the two).
   const meta = (params._meta ?? {}) as AnyRecord;
   const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
@@ -545,7 +545,7 @@ function onPromptQueueAdded(params: AnyRecord): void {
 }
 
 // Server says a queued entry's prompt content changed (someone called
-// hydra-acp/update_prompt). Apply to our local entry so the bubble's
+// hydra-acp/prompt/update). Apply to our local entry so the bubble's
 // text reflects the latest payload — works for both edits we made
 // ourselves and edits other clients made to our queued prompt.
 function onPromptQueueUpdated(params: AnyRecord): void {
@@ -617,7 +617,7 @@ function onPromptQueueRemoved(params: AnyRecord): void {
   }
 }
 
-// hydra-acp/prompt_amended is the M1→M2 linkage event. We may have
+// hydra-acp/prompt/amended is the M1→M2 linkage event. We may have
 // already tagged the pair via the amending _meta hint on M2's
 // prompt_queue_added, but this notification is the authoritative
 // signal and also catches the case where M2's added arrives later (or
@@ -723,19 +723,19 @@ export function handleNotification(frame: JsonRpcFrame): void {
   // Hydra-side prompt queue notifications. These don't fit the
   // session/update shape (they're top-level hydra-acp/* methods) so
   // they're dispatched separately, before the session/update guard.
-  if (frame.method === "hydra-acp/prompt_queue_added") {
+  if (frame.method === "hydra-acp/prompt_queue/added") {
     onPromptQueueAdded((frame.params ?? {}) as AnyRecord);
     return;
   }
-  if (frame.method === "hydra-acp/prompt_queue_updated") {
+  if (frame.method === "hydra-acp/prompt_queue/updated") {
     onPromptQueueUpdated((frame.params ?? {}) as AnyRecord);
     return;
   }
-  if (frame.method === "hydra-acp/prompt_queue_removed") {
+  if (frame.method === "hydra-acp/prompt_queue/removed") {
     onPromptQueueRemoved((frame.params ?? {}) as AnyRecord);
     return;
   }
-  if (frame.method === "hydra-acp/prompt_amended") {
+  if (frame.method === "hydra-acp/prompt/amended") {
     onPromptAmended((frame.params ?? {}) as AnyRecord);
     return;
   }
@@ -845,7 +845,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
       // newMessageId } when the turn ended because an amend cancelled
       // it. Promote the M1 bubble from "cancelled" to "amended" before
       // finalizing so the chip + bubble styling reflect the merge —
-      // hydra-acp/prompt_amended is the canonical signal but it isn't
+      // hydra-acp/prompt/amended is the canonical signal but it isn't
       // strictly ordered relative to turn_complete, and the in-band
       // marker lets us avoid a one-frame red flash.
       const meta = (update._meta ?? {}) as AnyRecord;

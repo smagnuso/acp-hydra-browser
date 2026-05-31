@@ -54,9 +54,9 @@ export interface QueueEntry {
   // submitted. Kept stable after enqueue so the "waiting on N turns"
   // chip doesn't tick down distractingly as the queue drains.
   aheadAtEnqueue: number;
-  // Server-assigned id from hydra-acp/prompt_queue_added. Undefined
+  // Server-assigned id from hydra-acp/prompt_queue/added. Undefined
   // briefly between the user's submit and the daemon's accept; once
-  // bound, used to target hydra-acp/cancel_prompt and update_prompt
+  // bound, used to target hydra-acp/prompt/cancel and update_prompt
   // for this entry.
   messageId?: string;
   // Set when this entry is the M2 of an amend: the messageId of the
@@ -176,7 +176,7 @@ export interface ChatState {
   _lastMetaFp: string;
   // Own queue entries in submit order (FIFO). Unbound entries — those
   // whose messageId is still undefined — are the front-of-FIFO waiting
-  // for hydra-acp/prompt_queue_added to bind them. Bound entries have
+  // for hydra-acp/prompt_queue/added to bind them. Bound entries have
   // their messageId set and are findable via queueByMessageId.
   promptQueue: QueueEntry[];
   // messageId → entry for O(1) lookup when prompt_queue_updated /
@@ -196,14 +196,14 @@ export interface ChatState {
   // a fresh card.
   currentPlanEntry: PlanLogItem | null;
   nextId?: number;
-  // Set from bridge/ready _meta["hydra-acp"].promptAmending. Gates
+  // Set from bridge/ready _meta["hydra-acp"].prompt.amending. Gates
   // the Amend button — older daemons that don't advertise this fall
   // back to a single Send button.
   daemonSupportsAmend: boolean;
   // The messageId of the prompt currently driving the agent's turn,
   // or undefined when idle. Captured from prompt_queue_removed{started}
   // (the universal signal that reaches the originator too, unlike
-  // prompt_received). Used as targetMessageId for hydra-acp/amend_prompt.
+  // prompt_received). Used as targetMessageId for hydra-acp/prompt/amend.
   currentHeadMessageId?: string;
   // Active backoff timer for reconnect, or undefined when not pending.
   // Cleared by closeChat / openChat so navigation cancels the loop.
