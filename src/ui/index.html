@@ -131,7 +131,11 @@ pre code { background: transparent; padding: 0; }
 .perm { background: rgba(110,168,254,0.07); border: 1px solid var(--accent); border-radius: 8px; padding: 0.75rem 0.9rem; align-self: stretch; }
 .perm .title { font-weight: 600; margin-bottom: 0.35rem; }
 .perm .desc { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.6rem; }
-.perm .opts { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.perm .detail { font-size: 0.82rem; margin-bottom: 0.3rem; display: flex; gap: 0.4rem; align-items: baseline; }
+.perm .detail .k { color: var(--muted); flex: 0 0 auto; }
+.perm .detail code { word-break: break-all; }
+.perm .detail.note { color: var(--muted); font-style: italic; }
+.perm .opts { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
 
 /* Queue / processing chips on user bubbles */
 .queue-chip { display: inline-flex; gap: 0.35rem; align-items: center; font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 999px; margin-bottom: 0.3rem; }

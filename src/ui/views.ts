@@ -1381,6 +1381,75 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
   );
 }
 
+// Best-effort extraction of what a tool call wants to touch, so the
+// permission card shows the path / command / url instead of leaning on a
+// terse title like "external_directory". Agents populate these fields
+// inconsistently; an empty array means "nothing beyond the title".
+function permissionDetailRows(tc: Record<string, unknown>): HTMLElement[] {
+  const asStr = (v: unknown): string | undefined =>
+    typeof v === "string" && v.length > 0 ? v : undefined;
+  const rows: HTMLElement[] = [];
+  const row = (label: string, value: string): HTMLElement =>
+    el(
+      "div",
+      { class: "detail" },
+      el("span", { class: "k" }, label),
+      el("code", null, value),
+    );
+
+  const kind = asStr(tc.kind);
+  if (kind) {
+    rows.push(row("kind", kind));
+  }
+
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  const addPath = (v: unknown): void => {
+    const s = asStr(v);
+    if (s && !seen.has(s)) {
+      seen.add(s);
+      paths.push(s);
+    }
+  };
+  const locations = tc.locations;
+  if (Array.isArray(locations)) {
+    for (const loc of locations) {
+      if (loc && typeof loc === "object") {
+        addPath((loc as Record<string, unknown>).path);
+      }
+    }
+  }
+  const rawInput =
+    tc.rawInput && typeof tc.rawInput === "object"
+      ? (tc.rawInput as Record<string, unknown>)
+      : undefined;
+  if (rawInput) {
+    addPath(rawInput.file_path);
+    addPath(rawInput.filePath);
+    addPath(rawInput.path);
+  }
+  for (const p of paths) {
+    rows.push(row("path", p));
+  }
+
+  if (rawInput) {
+    const command = asStr(rawInput.command);
+    if (command) {
+      rows.push(row("command", command));
+    }
+    const url = asStr(rawInput.url);
+    if (url) {
+      rows.push(row("url", url));
+    }
+    const description = asStr(rawInput.description);
+    if (description) {
+      rows.push(el("div", { class: "detail note" }, description));
+    }
+  }
+
+  return rows;
+}
+
 function renderPermission(entry: PermissionEntry): HTMLElement {
   const tc = entry.toolCall || {};
   return el(
@@ -1388,6 +1457,7 @@ function renderPermission(entry: PermissionEntry): HTMLElement {
     { class: "perm" },
     el("div", { class: "title" }, "🔒 Permission requested"),
     el("div", { class: "desc" }, tc.title || tc.name || "tool call"),
+    permissionDetailRows(tc as Record<string, unknown>),
     el(
       "div",
       { class: "opts" },
