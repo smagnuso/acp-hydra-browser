@@ -16,7 +16,7 @@ const result = await esbuild.build({
   target: "es2022",
   platform: "browser",
   write: false,
-  minify: false,
+  minify: true,
   sourcemap: false,
   legalComments: "none",
   logLevel: "info",
