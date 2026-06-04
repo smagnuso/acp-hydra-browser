@@ -44,10 +44,10 @@ The extension exposes:
    From npm (recommended once published):
 
    ```sh
-   npm install -g @hydra-acp/browser
+   npm install -g @hydra-acp/cli @hydra-acp/browser
    ```
 
-   This drops an `hydra-acp-browser` binary on your PATH.
+   This drops the `hydra-acp` (and `hydra`) CLI plus an `hydra-acp-browser` binary on your PATH. The CLI dispatches `hydra-acp <name>` to any `hydra-acp-<name>` binary on PATH, so the browser is also reachable as `hydra-acp browser`.
 
    Or from source:
 
@@ -193,7 +193,7 @@ step 4.
 
 If you flip-flop between HTTP and HTTPS, the `Secure` cookie set under
 HTTPS won't be sent over plain HTTP. Run
-`hydra-acp-browser --rotate-authkey` to start fresh.
+`hydra-acp browser --rotate-authkey` to start fresh.
 
 ## Configuration keys
 
