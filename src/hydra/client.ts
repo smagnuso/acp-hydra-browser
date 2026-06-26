@@ -9,7 +9,7 @@ export interface HydraSessionInfo {
   title: string | undefined;
   attachedClients: number;
   updatedAt: string;
-  status: "live" | "cold";
+  status: "warm" | "cold";
 }
 
 export interface HydraAgentInfo {

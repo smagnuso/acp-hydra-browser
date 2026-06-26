@@ -12,7 +12,7 @@ export interface SessionInfo {
   title?: string;
   attachedClients?: number;
   updatedAt?: string;
-  status?: "live" | "cold";
+  status?: "warm" | "cold";
   // Hostname of the machine that exported the bundle this session was
   // imported from. Undefined for sessions created on this host.
   importedFromMachine?: string;

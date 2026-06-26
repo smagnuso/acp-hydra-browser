@@ -204,7 +204,7 @@ function renderTopbar(): HTMLElement {
           setState({ showCold: !state.showCold });
         },
       },
-      state.showCold ? "all" : "live",
+      state.showCold ? "all" : "warm",
     ),
     renderHostFilter(),
     el("span", { class: "spacer" }),
@@ -293,7 +293,7 @@ function renderList(): HTMLElement {
     );
   }
   // Count cold-filtered sessions separately so the empty-state message
-  // for the "live" toggle isn't muddied by host-filter hits.
+  // for the "warm" toggle isn't muddied by host-filter hits.
   const hiddenCold = state.showCold
     ? 0
     : state.sessions.filter((s) => s.status === "cold").length;
@@ -308,7 +308,7 @@ function renderList(): HTMLElement {
     } else if (state.hostFilter !== "__all") {
       msg = `No sessions from ${state.hostFilter}. Try a different host.`;
     } else {
-      msg = `No live sessions. ${hiddenCold} cold session${hiddenCold === 1 ? "" : "s"} hidden — click "live" to switch to "all".`;
+      msg = `No warm sessions. ${hiddenCold} cold session${hiddenCold === 1 ? "" : "s"} hidden — click "warm" to switch to "all".`;
     }
     list.appendChild(el("div", { class: "empty" }, msg));
   }
@@ -331,9 +331,9 @@ interface SessionGroup {
 }
 
 function compareSessions(a: SessionInfo, b: SessionInfo): number {
-  const liveDiff = (b.status === "live" ? 1 : 0) - (a.status === "live" ? 1 : 0);
-  if (liveDiff !== 0) {
-    return liveDiff;
+  const warmDiff = (b.status === "warm" ? 1 : 0) - (a.status === "warm" ? 1 : 0);
+  if (warmDiff !== 0) {
+    return warmDiff;
   }
   return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
 }
@@ -390,13 +390,13 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
       el(
         "span",
         {
-          class: `badge ${s.status === "cold" ? "cold" : "live"}`,
+          class: `badge ${s.status === "cold" ? "cold" : "warm"}`,
           title:
             s.status === "cold"
               ? "Disk-only — opening will resurrect the session"
               : "Live in-memory session",
         },
-        s.status === "cold" ? "cold" : "live",
+        s.status === "cold" ? "cold" : "warm",
       ),
       el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
       ...(s.importedFromMachine && !s.upstreamSessionId
@@ -775,7 +775,7 @@ function renderListModal(
             el("div", { class: "row1" }, it.name || it.id),
             el("div", { class: "row2" }, it.id),
           ),
-          it.id === selectedId ? el("span", { class: "badge live" }, "current") : null,
+          it.id === selectedId ? el("span", { class: "badge warm" }, "current") : null,
         ),
       ),
     ),
