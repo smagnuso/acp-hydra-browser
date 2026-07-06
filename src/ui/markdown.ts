@@ -19,8 +19,18 @@ function inlineMd(s: string): string {
   s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
   s = s.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
-  // Markdown links [text](url) — only http(s):// or relative paths.
+  // Markdown links [text](url) — accepts http(s)://, relative paths,
+  // and hydra://sessions/<id> (rewritten to in-app SPA navigation).
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text: string, url: string) => {
+    // Hydra session link: rewrite to same-page hash route so clicking
+    // navigates the SPA to that session instead of opening a new tab.
+    // Accepts the permissive shape hydra://[<host>:<port>/]sessions/<id>[#turn-<n>]
+    // to match the TUI parser; host and turn fragment are dropped in v1.
+    const hydraMatch = url.match(/^hydra:\/\/(?:[^/\s]+\/)?sessions\/([A-Za-z0-9_-]+)(?:#turn-\d+)?$/);
+    if (hydraMatch) {
+      const sid = hydraMatch[1]!;
+      return `<a href="#/session/${escapeHtml(sid)}">${text}</a>`;
+    }
     if (!/^(https?:\/\/|\/|\.)/i.test(url)) {
       return `[${text}](${url})`;
     }
