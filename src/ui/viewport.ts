@@ -15,10 +15,11 @@
 // is that pan distance — and a fixed element that doesn't know about the
 // pan appears to slide up off the top of the screen by the same amount.
 // Countering it with a translateY of +offsetTop cancels the pan out.
-// Minimum shrinkage (visual viewport vs. the full window) before we
-// treat it as "the keyboard is up" rather than noise. Comfortably below
-// even a small predictive-text-only keyboard (150pt+) and comfortably
-// above anything else that nudges visualViewport.height by a few px.
+// Minimum shrinkage (current viewport vs. the tallest seen at this
+// orientation) before we treat it as "the keyboard is up" rather than
+// noise. Comfortably below even a small predictive-text-only keyboard
+// (150pt+) and comfortably above anything else that nudges
+// visualViewport.height by a few px.
 const KEYBOARD_HEIGHT_THRESHOLD_PX = 100;
 
 // On-screen viewport readout for debugging keyboard/viewport sizing
@@ -119,6 +120,10 @@ function topInsetPx(): number {
 
 export function initViewportHeight(): void {
   const root = document.documentElement;
+  // Tallest corrected viewport seen, keyed by viewport width so a
+  // rotation starts a fresh baseline instead of comparing portrait
+  // heights against a landscape ceiling.
+  const maxHeightByWidth = new Map<number, number>();
   const apply = (): void => {
     const vv = window.visualViewport;
     const h = (vv?.height ?? window.innerHeight) + topInsetPx();
@@ -131,7 +136,14 @@ export function initViewportHeight(): void {
     // Left alone, the composer keeps reserving that padding under an
     // open keyboard, leaving a dead gap between it and the keyboard.
     // This class lets index.html's CSS drop the padding only then.
-    const keyboardOpen = window.innerHeight - h > KEYBOARD_HEIGHT_THRESHOLD_PX;
+    // Detection compares against the tallest viewport seen rather than
+    // window.innerHeight: on iOS innerHeight shrinks in lockstep with
+    // vv.height when the keyboard opens, so an innerHeight delta reads
+    // ~0 and never fires.
+    const widthKey = Math.round(vv?.width ?? window.innerWidth);
+    const ceiling = Math.max(h, maxHeightByWidth.get(widthKey) ?? 0);
+    maxHeightByWidth.set(widthKey, ceiling);
+    const keyboardOpen = ceiling - h > KEYBOARD_HEIGHT_THRESHOLD_PX;
     root.classList.toggle("keyboard-open", keyboardOpen);
     if (DEBUG_VIEWPORT) updateDebugOverlay(h, offsetTop, keyboardOpen);
   };
