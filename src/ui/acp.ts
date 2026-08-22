@@ -421,6 +421,18 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
     // for the rest of the in-flight turn (see views.ts:974).
     if (position === 0) {
       state.current.currentHeadMessageId = messageId;
+      // The full-history replay that runs inside session/attach (before
+      // bridge/ready, which is what triggers this function) already
+      // rendered the head prompt via its prompt_received notification —
+      // see onPromptReceived. Bind this entry to that existing bubble
+      // instead of pushing a second one, or a busy session shows its
+      // current prompt twice: once at its real spot in the transcript,
+      // once again down here.
+      const existing = findUnboundUserBubble(text);
+      if (existing) {
+        existing.queueEntry = entry;
+        continue;
+      }
     }
     state.current.log.push({
       kind: "stream",
@@ -430,6 +442,28 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
       queueEntry: entry,
     });
   }
+}
+
+// Last user stream bubble with the given text that isn't already bound
+// to a queue entry. Scans backward since the head's bubble (if any) is
+// the most recently replayed history item.
+function findUnboundUserBubble(
+  text: string,
+): Extract<LogItem, { kind: "stream" }> | null {
+  if (!state.current) return null;
+  const log = state.current.log;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const item = log[i]!;
+    if (
+      item.kind === "stream" &&
+      item.role === "user" &&
+      !item.queueEntry &&
+      item.text === text
+    ) {
+      return item;
+    }
+  }
+  return null;
 }
 
 
