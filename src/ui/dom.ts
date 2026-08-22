@@ -75,11 +75,30 @@ export function el(tag: string, attrs?: Attrs, ...children: Child[]): HTMLElemen
 // so we check for one directly and skip activation — in both onpointerup
 // and onclick, since a mouse click-drag-select needs the same guard as a
 // touch long-press-select.
+//
+// A tapHandler'd container (a modal backdrop, say) can have a real form
+// control nested inside it — e.g. the new-session modal's cwd input sits
+// inside .modal-bg. That input's own pointerdown bubbles up to the
+// backdrop's handler same as anything else, and preventDefault on it
+// blocks the input's native focus-on-pointerdown, so the input never
+// focuses and the mobile keyboard never opens. Bypass entirely — no
+// preventDefault, no stopPropagation, no fn() — whenever the tap actually
+// landed on a form control, so it gets fully native behavior.
 const TAP_MOVE_THRESHOLD = 10;
 
 function hasActiveSelection(): boolean {
   const sel = window.getSelection();
   return !!sel && !sel.isCollapsed && sel.toString().length > 0;
+}
+
+function isFormControl(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  );
 }
 
 export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
@@ -88,6 +107,7 @@ export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
   let startY = 0;
   return {
     onpointerdown: (e: Event) => {
+      if (isFormControl(e.target)) return;
       const pe = e as PointerEvent;
       if (pe.pointerType === "mouse" && pe.button !== 0) return;
       startX = pe.clientX;
@@ -96,6 +116,7 @@ export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
       e.stopPropagation();
     },
     onpointerup: (e: Event) => {
+      if (isFormControl(e.target)) return;
       const pe = e as PointerEvent;
       if (pe.pointerType === "mouse" && pe.button !== 0) return;
       e.stopPropagation();
@@ -105,6 +126,7 @@ export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
       fn(e);
     },
     onclick: (e: Event) => {
+      if (isFormControl(e.target)) return;
       e.stopPropagation();
       if (firedViaPointer) {
         firedViaPointer = false;
