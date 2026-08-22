@@ -28,10 +28,13 @@ import {
   updateQueuedPrompt,
 } from "./queue.js";
 import { openChat } from "./routing.js";
+import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
+import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
   ChatState,
   ConfigOption,
+  EditDiffLogItem,
   FileEntry,
   PermissionEntry,
   QueueEntry,
@@ -1355,7 +1358,77 @@ function renderLogItem(item: ChatState["log"][number]): Node {
   if (item.kind === "exit-plan-mode") {
     return renderExitPlan(item);
   }
+  if (item.kind === "edit-diff") {
+    return renderEditDiff(item);
+  }
   return document.createTextNode("");
+}
+
+function diffLineClass(op: DiffDisplayLine["op"]): string {
+  if (op === "+") return "diff-line hljs-addition";
+  if (op === "-") return "diff-line hljs-deletion";
+  if (op === "gap") return "diff-line diff-gap";
+  return "diff-line";
+}
+
+// "+ "/"- " markers so added/removed/context lines stay distinguishable by
+// more than background color alone.
+function diffLinePrefix(op: DiffDisplayLine["op"]): string {
+  if (op === "+") return "+ ";
+  if (op === "-") return "- ";
+  if (op === "gap") return "";
+  return "  ";
+}
+
+function renderEditDiff(item: EditDiffLogItem): HTMLElement {
+  const counts = countDiffChanges(item.diff);
+  const shownPath = item.diff.path ? shortenCwd(item.diff.path) : "file";
+  const summary: HTMLElement[] = [];
+  if (counts.added > 0) {
+    summary.push(el("span", { class: "add" }, `+${counts.added}`));
+  }
+  if (counts.removed > 0) {
+    summary.push(el("span", { class: "del" }, `-${counts.removed}`));
+  }
+  const head = el(
+    "div",
+    {
+      class: "head",
+      onclick: () => {
+        item.expanded = !item.expanded;
+        render();
+      },
+    },
+    el("span", null, item.expanded ? "▾" : "▸"),
+    el("span", { class: "title" }, `Edited ${shownPath}`),
+    summary.length > 0 ? el("span", { class: "kind edit-summary" }, summary) : null,
+  );
+  const node = el(
+    "div",
+    { class: item.expanded ? "toolcard open" : "toolcard" },
+    head,
+  );
+  if (item.expanded) {
+    const lines = buildDiffDisplayLines(item.diff);
+    node.appendChild(
+      el(
+        "div",
+        { class: "body" },
+        el(
+          "pre",
+          null,
+          el(
+            "code",
+            { class: "diff-body" },
+            lines.map((l) =>
+              el("div", { class: diffLineClass(l.op) }, diffLinePrefix(l.op) + l.text),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+  return node;
 }
 
 function renderExitPlan(item: {

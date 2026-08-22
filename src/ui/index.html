@@ -150,7 +150,11 @@ pre code { background: transparent; padding: 0; }
 .toolcard .head .kind { color: var(--muted); font-size: 0.8rem; }
 .toolcard .body { display: none; padding: 0 0.75rem 0.75rem; border-top: 1px solid var(--border); }
 .toolcard.open .body { display: block; }
-.toolcard pre { margin: 0.5rem 0 0; max-height: 24rem; }
+.toolcard pre { margin: 0.5rem 0 0; max-height: 24rem; overflow-y: auto; }
+.toolcard .edit-summary .add { color: var(--good); margin-left: 0.4rem; }
+.toolcard .edit-summary .del { color: var(--bad); margin-left: 0.3rem; }
+.diff-line { white-space: pre-wrap; word-break: break-word; padding: 0 0.2rem; font-size: 0.85rem; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.diff-gap { color: var(--muted); font-style: italic; }
 
 /* Permission card */
 .perm { background: rgba(110,168,254,0.07); border: 1px solid var(--accent); border-radius: 8px; padding: 0.75rem 0.9rem; align-self: stretch; }

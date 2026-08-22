@@ -164,6 +164,28 @@ export interface ExitPlanLogItem {
   status?: string;
 }
 
+// Wire payload for an edit-style tool call, extracted from either the
+// canonical ACP content[] diff carrier or Claude's rawInput fallback
+// shapes (see src/ui/edit-diff.ts). Deliberately doesn't model the CLI's
+// oldRef/newRef blob-ref transport — out of scope here.
+export interface EditDiff {
+  path?: string;
+  oldText: string;
+  newText: string;
+}
+
+// Persistent "Edited <path>" block. Unlike the ephemeral spinner tool-call
+// list, this survives finalizeTurn() so file edits stay visible after the
+// turn ends. Mutated in place by tool_call_update so a later update amends
+// the diff rather than duplicating the block.
+export interface EditDiffLogItem {
+  kind: "edit-diff";
+  toolCallId: string;
+  diff: EditDiff;
+  status?: string;
+  expanded: boolean;
+}
+
 export type LogItem =
   | {
       kind: "stream";
@@ -183,7 +205,8 @@ export type LogItem =
   | { kind: "spinner"; spinner: SpinnerState }
   | { kind: "perm"; toolCallId: string }
   | PlanLogItem
-  | ExitPlanLogItem;
+  | ExitPlanLogItem
+  | EditDiffLogItem;
 
 export interface FileEntry {
   name: string;
