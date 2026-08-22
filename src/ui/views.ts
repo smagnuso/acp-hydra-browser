@@ -954,15 +954,11 @@ function renderChat(c: ChatState): HTMLElement {
     el(
       "div",
       { class: "chat-header-row" },
-      el(
-        "div",
-        {
-          class: "info clickable",
-          title: "Click for session details",
-          onclick: toggleDetails,
-        },
-        el("div", { class: "row2" }, cwd ? shortenCwd(cwd) : "?"),
-      ),
+      el("div", {
+        class: "info clickable",
+        title: "Click for session details",
+        onclick: toggleDetails,
+      }),
       !c.ready
         ? el(
             "span",
