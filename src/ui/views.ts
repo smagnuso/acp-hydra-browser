@@ -393,6 +393,30 @@ function workspaceRow(workspace: SessionInfo["workspace"]): HTMLElement {
   );
 }
 
+// Global (cross-session) toggle for whether agent_thought_chunk
+// bubbles render at all. Lives in the expanded chat-details panel next
+// to the config-option dropdowns since it's the same "session settings"
+// area, even though the preference itself isn't per-session.
+function hideThoughtsRow(): HTMLElement {
+  return el(
+    "div",
+    { class: "detail" },
+    el("span", { class: "k" }, "thoughts"),
+    el(
+      "label",
+      { class: "checkbox-label" },
+      el("input", {
+        type: "checkbox",
+        checked: state.hideThoughts ? "" : undefined,
+        onchange: (e: Event) => {
+          setState({ hideThoughts: (e.target as HTMLInputElement).checked });
+        },
+      }),
+      "hide",
+    ),
+  );
+}
+
 // One row per config-option dimension (hydra's own model/mode/agent
 // plus whatever the agent advertises on its own, e.g. effort) in the
 // expanded chat-details panel. A native <select> beats cycling/modal
@@ -1044,11 +1068,18 @@ function renderChat(c: ChatState): HTMLElement {
         detailRow("cwd", cwd || "?"),
         workspaceRow(live?.workspace),
         ...c.configOptions.map(configOptionRow),
+        hideThoughtsRow(),
       )
     : null;
 
   const body = el("div", { class: "chat-body" });
   for (const item of c.log) {
+    // hideThoughts skips agent_thought_chunk bubbles at render time
+    // only — they stay in c.log so toggling the preference back on
+    // (or exporting the session) still shows/keeps them.
+    if (state.hideThoughts && item.kind === "stream" && item.role === "thought") {
+      continue;
+    }
     body.appendChild(renderLogItem(item));
   }
 

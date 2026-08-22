@@ -354,6 +354,12 @@ export interface AppState {
   defaultCwd: string | null;
   groupBy: "project" | "recent";
   showCold: boolean;
+  // Hide agent_thought_chunk bubbles across every chat. Persisted
+  // globally (not per-session) since it's a display preference, not
+  // session state — thought chunks are still received and kept in
+  // the log, just skipped at render time, so toggling it back on
+  // doesn't require a reload or re-fetch.
+  hideThoughts: boolean;
   // Host filter selection for the session list. "__local" hides every
   // imported session; "__all" hides nothing; any other value filters
   // to sessions whose importedFromMachine matches.

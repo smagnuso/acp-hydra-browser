@@ -9,7 +9,12 @@ import { render } from "./renderer.js";
 // Topbar filters survive a reload so switching devices/tabs doesn't
 // reset how the session list is sliced.
 const FILTER_STORAGE_KEY = "hydra-acp-browser:filters";
-const PERSISTED_KEYS = ["groupBy", "showCold", "hostFilter"] as const;
+const PERSISTED_KEYS = [
+  "groupBy",
+  "showCold",
+  "hostFilter",
+  "hideThoughts",
+] as const;
 
 function loadPersistedFilters(): Partial<AppState> {
   try {
@@ -44,6 +49,7 @@ export const state: AppState = {
   // archiver) are noisy if they all show up alongside the user's own
   // work. The dropdown lets them switch to a specific peer or "all".
   hostFilter: "__local",
+  hideThoughts: false,
   banner: null,
   modal: null,
   current: null,
