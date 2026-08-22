@@ -102,13 +102,15 @@ pre code { background: transparent; padding: 0; }
 /* Reading-column constraint: on wide screens, .chat-body and .composer
    collapse their inline padding to keep content in a ~56rem column
    (centered) instead of stretching across the full window. */
-.chat-header { display: flex; gap: 0.4rem; align-items: center; padding: calc(0.5rem + env(safe-area-inset-top)) calc(0.6rem + env(safe-area-inset-right)) 0.5rem calc(0.6rem + env(safe-area-inset-left)); border-bottom: 1px solid var(--border); background: var(--panel); }
+.chat-header { display: flex; flex-direction: column; gap: 0.3rem; padding: calc(0.5rem + env(safe-area-inset-top)) calc(0.6rem + env(safe-area-inset-right)) 0.5rem calc(0.6rem + env(safe-area-inset-left)); border-bottom: 1px solid var(--border); background: var(--panel); }
+.chat-title { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-title.clickable { cursor: pointer; }
+.chat-title.clickable:hover { color: var(--accent); }
+.chat-header-row { display: flex; gap: 0.4rem; align-items: center; }
 .chat-header .info { flex: 1; min-width: 0; }
 .chat-header .info.clickable { cursor: pointer; }
-.chat-header .info.clickable:hover .row1 { color: var(--accent); }
 .chat-details { background: var(--panel); border-bottom: 1px solid var(--border); padding: 0.6rem 0.9rem; }
 .chat-details .detail:last-child { margin-bottom: 0; }
-.chat-header .info .row1 { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-header .info .row2 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-body { flex: 1; overflow-y: auto; padding: 1rem max(1rem, calc(50% - 28rem)); display: flex; flex-direction: column; gap: 0.65rem; }
 .msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }

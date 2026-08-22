@@ -923,100 +923,112 @@ function renderChat(c: ChatState): HTMLElement {
     el(
       "div",
       {
-        class: "info clickable",
+        class: "chat-title clickable",
         title: "Click for session details",
         onclick: toggleDetails,
       },
-      el("div", { class: "row1" }, title),
+      title,
+    ),
+    el(
+      "div",
+      { class: "chat-header-row" },
       el(
         "div",
-        { class: "row2" },
-        `${shortSessionId(c.sessionId)} · ${agentWithModel(agentId, model)} · ${cwd ? shortenCwd(cwd) : "?"}`,
-      ),
-    ),
-    !c.ready
-      ? el(
-          "span",
-          { class: "pill clickable", title: "Click for session details", onclick: toggleDetails },
-          "connecting…",
-        )
-      : c.inTurn
-      ? el(
-          "span",
-          {
-            class: "pill working clickable",
-            title: "Agent is working",
-            onclick: toggleDetails,
-          },
-          el("span", { class: "dot" }, "●"),
-          "busy",
-        )
-      : el(
-          "span",
-          {
-            class: "pill ready clickable",
-            title: "Ready for a prompt",
-            onclick: toggleDetails,
-          },
-          el("span", { class: "dot" }, "●"),
-          "ready",
+        {
+          class: "info clickable",
+          title: "Click for session details",
+          onclick: toggleDetails,
+        },
+        el(
+          "div",
+          { class: "row2" },
+          `${shortSessionId(c.sessionId)} · ${agentWithModel(agentId, model)} · ${cwd ? shortenCwd(cwd) : "?"}`,
         ),
-    c.armedTasks && c.armedTasks > 0
-      ? el(
-          "span",
-          {
-            class: "pill armed clickable",
-            title: c.armedSince
-              ? `Agent has a background task running (armed ${Math.max(1, Math.floor((Date.now() - c.armedSince) / 60000))}m ago). It may resume on its own.`
-              : "Agent has a background task running. It may resume on its own.",
-            onclick: toggleDetails,
-          },
-          "armed",
-        )
-      : null,
-    live?.workspace
-      ? el(
-          "span",
-          {
-            class: "pill clickable",
-            title: `In workspace "${live.workspace.label}" (source: ${shortenCwd(live.workspace.sourceCwd)})`,
-            onclick: toggleDetails,
-          },
-          "⎇ " + live.workspace.label,
-        )
-      : null,
-    c.model
-      ? el(
-          "span",
-          { class: "pill clickable", title: "Model (click to change)", onclick: openModelPicker },
-          c.model,
-        )
-      : null,
-    c.contextUsed != null && c.contextSize
-      ? el(
-          "span",
-          {
-            class: "pill",
-            title: `${c.contextUsed.toLocaleString()} / ${c.contextSize.toLocaleString()} context tokens`,
-          },
-          `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
-        )
-      : null,
-    fmtCost(c.cost)
-      ? el(
-          "span",
-          { class: "pill", title: "Session cost so far" },
-          fmtCost(c.cost) as string,
-        )
-      : null,
-    el("button", { onclick: openFiles, title: "Files" }, "📁"),
-    el(
-      "button",
-      {
-        title: "Export this session as a *.hydra bundle",
-        onclick: () => triggerExportDownload(c.sessionId),
-      },
-      "⬇",
+      ),
+      !c.ready
+        ? el(
+            "span",
+            { class: "pill clickable", title: "Click for session details", onclick: toggleDetails },
+            "connecting…",
+          )
+        : c.inTurn
+        ? el(
+            "span",
+            {
+              class: "pill working clickable",
+              title: "Agent is working",
+              onclick: toggleDetails,
+            },
+            el("span", { class: "dot" }, "●"),
+            "busy",
+          )
+        : el(
+            "span",
+            {
+              class: "pill ready clickable",
+              title: "Ready for a prompt",
+              onclick: toggleDetails,
+            },
+            el("span", { class: "dot" }, "●"),
+            "ready",
+          ),
+      c.armedTasks && c.armedTasks > 0
+        ? el(
+            "span",
+            {
+              class: "pill armed clickable",
+              title: c.armedSince
+                ? `Agent has a background task running (armed ${Math.max(1, Math.floor((Date.now() - c.armedSince) / 60000))}m ago). It may resume on its own.`
+                : "Agent has a background task running. It may resume on its own.",
+              onclick: toggleDetails,
+            },
+            "armed",
+          )
+        : null,
+      live?.workspace
+        ? el(
+            "span",
+            {
+              class: "pill clickable",
+              title: `In workspace "${live.workspace.label}" (source: ${shortenCwd(live.workspace.sourceCwd)})`,
+              onclick: toggleDetails,
+            },
+            "⎇ " + live.workspace.label,
+          )
+        : null,
+      c.model
+        ? el(
+            "span",
+            { class: "pill clickable", title: "Model (click to change)", onclick: openModelPicker },
+            c.model,
+          )
+        : null,
+      c.contextUsed != null && c.contextSize
+        ? el(
+            "span",
+            {
+              class: "pill",
+              title: `${c.contextUsed.toLocaleString()} / ${c.contextSize.toLocaleString()} context tokens`,
+            },
+            `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
+          )
+        : null,
+      fmtCost(c.cost)
+        ? el(
+            "span",
+            { class: "pill", title: "Session cost so far" },
+            fmtCost(c.cost) as string,
+          )
+        : null,
+      el("button", { onclick: openFiles, title: "Files" }, "📁"),
+      el(
+        "button",
+        {
+          title: "Export this session as a *.hydra bundle",
+          onclick: () => triggerExportDownload(c.sessionId),
+        },
+        "⬇",
+      ),
     ),
   );
 
