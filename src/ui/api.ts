@@ -117,13 +117,8 @@ export async function loadAgents(): Promise<void> {
 
 export async function loadConfig(): Promise<void> {
   try {
-    const data = await api<{ defaultAgent?: string; defaultCwd?: string }>(
-      "/api/config",
-    );
-    setState({
-      defaultAgent: data.defaultAgent ?? null,
-      defaultCwd: data.defaultCwd ?? null,
-    });
+    const data = await api<{ defaultCwd?: string }>("/api/config");
+    setState({ defaultCwd: data.defaultCwd ?? null });
   } catch {
     // Older daemons don't expose /v1/config; fall through silently and
     // the modal uses its existing fallbacks.

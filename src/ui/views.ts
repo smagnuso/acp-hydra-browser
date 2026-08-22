@@ -185,15 +185,15 @@ function renderTopbar(): HTMLElement {
   return el(
     "div",
     { class: "topbar" },
-    el("span", { class: "title" }, "hydra-acp-browser"),
     el(
       "span",
       {
         class: "pill clickable",
+        title: "Click to toggle grouping by project/recent",
         onclick: () =>
           setState({ groupBy: state.groupBy === "project" ? "recent" : "project" }),
       },
-      `group: ${state.groupBy}`,
+      state.groupBy,
     ),
     el(
       "span",
@@ -214,9 +214,9 @@ function renderTopbar(): HTMLElement {
         onclick: openImportPicker,
         title: "Import a *.hydra bundle from disk",
       },
-      "Import",
+      "📥",
     ),
-    el("button", { onclick: openSessionModal }, "New Session"),
+    el("button", { onclick: openSessionModal, title: "New Session" }, "＋"),
   );
 }
 
@@ -256,11 +256,11 @@ function renderHostFilter(): HTMLElement {
     }
     select.appendChild(opt);
   };
-  addOption("__local", "host: local");
+  addOption("__local", "local");
   for (const h of hosts) {
-    addOption(h, `host: ${h}`);
+    addOption(h, h);
   }
-  addOption("__all", "host: all");
+  addOption("__all", "all");
   // If the current filter points at a host that no longer appears in
   // any session, the select would render with nothing selected. Pin
   // the rendered value to the state explicitly so this stays sane.
@@ -565,17 +565,33 @@ async function importBundleFromFile(file: File): Promise<void> {
 
 // ---- New-session modal -------------------------------------------
 
+const LAST_CWD_KEY = "hydra-acp-browser:lastCwd";
+
+function loadLastCwd(): string | null {
+  try {
+    return localStorage.getItem(LAST_CWD_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveLastCwd(cwd: string): void {
+  try {
+    localStorage.setItem(LAST_CWD_KEY, cwd);
+  } catch {
+    // Private browsing / quota — the field just won't persist.
+  }
+}
+
 function openSessionModal(): void {
-  const hasDefault =
-    state.defaultAgent &&
-    state.agents.some((a) => a.id === state.defaultAgent);
   setState({
     modal: {
       kind: "session",
-      cwd: state.defaultCwd ?? "",
-      agentId: hasDefault
-        ? state.defaultAgent!
-        : (state.agents[0]?.id ?? ""),
+      cwd: loadLastCwd() ?? state.defaultCwd ?? "",
+      // Empty means "let the daemon pick its default" — see the
+      // `if (m.agentId)` guard in createSession, which omits the field
+      // entirely rather than sending a resolved id.
+      agentId: "",
       name: "",
       prompt: "",
       err: null,
@@ -672,9 +688,9 @@ function renderAgentSelect(m: SessionModalData): HTMLElement {
       m.agentId = (e.target as HTMLSelectElement).value;
     },
   });
-  if (state.agents.length === 0) {
-    sel.appendChild(el("option", { value: "" }, "(default)"));
-  }
+  const defaultOpt = el("option", { value: "" }, "<default>");
+  if (m.agentId === "") defaultOpt.setAttribute("selected", "");
+  sel.appendChild(defaultOpt);
   for (const a of state.agents) {
     const opt = el("option", { value: a.id }, a.id);
     if (a.id === m.agentId) opt.setAttribute("selected", "");
@@ -703,6 +719,7 @@ async function createSession(): Promise<void> {
       method: "POST",
       body: JSON.stringify(body),
     });
+    saveLastCwd(m.cwd);
     closeModal();
     void pollSessions();
     if (data && data.sessionId) {
@@ -799,7 +816,7 @@ function renderChat(c: ChatState): HTMLElement {
   const header = el(
     "div",
     { class: "chat-header" },
-    el("button", { class: "ghost", onclick: closeChat }, "←"),
+    el("button", { class: "ghost back", onclick: closeChat }, "←"),
     el(
       "div",
       { class: "info" },
@@ -826,10 +843,18 @@ function renderChat(c: ChatState): HTMLElement {
           "ready",
         ),
     c.mode
-      ? el("span", { class: "pill clickable", onclick: cycleMode }, "mode: " + c.mode)
+      ? el(
+          "span",
+          { class: "pill clickable", title: "Mode (click to cycle)", onclick: cycleMode },
+          c.mode,
+        )
       : null,
     c.model
-      ? el("span", { class: "pill clickable", onclick: openModelPicker }, "model: " + c.model)
+      ? el(
+          "span",
+          { class: "pill clickable", title: "Model (click to change)", onclick: openModelPicker },
+          c.model,
+        )
       : null,
     c.contextUsed != null && c.contextSize
       ? el(
@@ -838,7 +863,7 @@ function renderChat(c: ChatState): HTMLElement {
             class: "pill",
             title: `${c.contextUsed.toLocaleString()} / ${c.contextSize.toLocaleString()} context tokens`,
           },
-          `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)} tokens`,
+          `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
         )
       : null,
     fmtCost(c.cost)
@@ -848,14 +873,14 @@ function renderChat(c: ChatState): HTMLElement {
           fmtCost(c.cost) as string,
         )
       : null,
-    el("button", { onclick: openFiles }, "Files"),
+    el("button", { onclick: openFiles, title: "Files" }, "📁"),
     el(
       "button",
       {
         title: "Export this session as a *.hydra bundle",
         onclick: () => triggerExportDownload(c.sessionId),
       },
-      "Export",
+      "⬇",
     ),
   );
 
@@ -1004,8 +1029,12 @@ function renderChat(c: ChatState): HTMLElement {
     "div",
     { class: "composer" },
     textarea,
-    el("button", { class: "stop", onclick: sendCancel, title: "Cancel current turn" }, "Stop"),
-    ...sendButtons,
+    el(
+      "div",
+      { class: "composer-buttons" },
+      el("button", { class: "stop", onclick: sendCancel, title: "Cancel current turn" }, "Stop"),
+      ...sendButtons,
+    ),
   );
 
   // Auto-scroll is owned by renderer.ts now (it captures the previous

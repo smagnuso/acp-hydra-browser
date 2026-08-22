@@ -240,7 +240,6 @@ export interface AppState {
   view: "list" | "chat";
   sessions: SessionInfo[];
   agents: AgentInfo[];
-  defaultAgent: string | null;
   defaultCwd: string | null;
   groupBy: "project" | "recent";
   showCold: boolean;

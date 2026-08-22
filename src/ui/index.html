@@ -34,9 +34,14 @@ button.primary:hover { filter: brightness(0.9); }
 button.danger { color: var(--bad); border-color: var(--bad); }
 button.danger:hover { background: rgba(249, 117, 131, 0.12); }
 button.ghost { border-color: transparent; }
+button.ghost.back { padding: 0.35rem 0.4rem; }
 input, select, textarea {
   font: inherit; color: inherit; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem;
+  /* iOS Safari auto-zooms the page on focus for inputs under 16px, and
+     with body's overflow:hidden there's nowhere for the zoomed viewport
+     to scroll back to — the layout appears to run off the right edge. */
+  font-size: max(16px, 1em);
 }
 input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 a { color: var(--accent); text-decoration: none; }
@@ -48,8 +53,7 @@ pre code { background: transparent; padding: 0; }
 #app { height: 100dvh; display: flex; flex-direction: column; }
 
 /* Header */
-.topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--panel); }
-.topbar .title { font-weight: 600; font-size: 0.95rem; }
+.topbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.6rem 0.6rem; border-bottom: 1px solid var(--border); background: var(--panel); }
 .topbar .spacer { flex: 1; }
 .pill { font-size: 0.8rem; color: var(--muted); padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; display: inline-flex; align-items: center; gap: 0.3rem; }
 .pill.clickable { cursor: pointer; }
@@ -84,7 +88,7 @@ pre code { background: transparent; padding: 0; }
 /* Reading-column constraint: on wide screens, .chat-body and .composer
    collapse their inline padding to keep content in a ~56rem column
    (centered) instead of stretching across the full window. */
-.chat-header { display: flex; gap: 0.5rem; align-items: center; padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--border); background: var(--panel); }
+.chat-header { display: flex; gap: 0.4rem; align-items: center; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--border); background: var(--panel); }
 .chat-header .info { flex: 1; min-width: 0; }
 .chat-header .info .row1 { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-header .info .row2 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -157,8 +161,9 @@ pre code { background: transparent; padding: 0; }
 .queue-editor textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 0.4rem 0.5rem; box-sizing: border-box; }
 
 /* Composer */
-.composer { display: flex; gap: 0.5rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)); border-top: 1px solid var(--border); background: var(--panel); align-items: flex-end; }
-.composer textarea { flex: 1; min-height: 2.4rem; max-height: 12rem; resize: none; }
+.composer { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)); border-top: 1px solid var(--border); background: var(--panel); }
+.composer textarea { width: 100%; min-height: 2.4rem; max-height: 12rem; resize: none; }
+.composer-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .composer .stop { color: var(--bad); border-color: var(--bad); }
 
 /* Modal */
