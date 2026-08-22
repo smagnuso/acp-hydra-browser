@@ -427,12 +427,28 @@ interface SessionGroup {
   sessions: SessionInfo[];
 }
 
+// Same tiering as the TUI picker's sortSessions (picker.ts), minus the
+// priority-pin tiers the browser has no equivalent for: a mid-turn agent
+// blocked on a question (busy + awaiting-input) is the most urgent row
+// there is, plain busy comes next, then a stale awaiting-input flag on a
+// turn that's already over (often just an uncleared flag rather than an
+// agent actually standing by), then idle-warm, then cold. Tiebreak is
+// updatedAt at minute precision so per-chunk mtime churn doesn't
+// reshuffle the list between polls.
 function compareSessions(a: SessionInfo, b: SessionInfo): number {
-  const warmDiff = (b.status === "warm" ? 1 : 0) - (a.status === "warm" ? 1 : 0);
-  if (warmDiff !== 0) {
-    return warmDiff;
+  const tier = (s: SessionInfo): number => {
+    const isWarm = s.status === "warm";
+    if (isWarm && s.busy && s.awaitingInput) return 4;
+    if (isWarm && s.busy) return 3;
+    if (isWarm && s.awaitingInput) return 2;
+    if (isWarm) return 1;
+    return 0;
+  };
+  const dt = tier(b) - tier(a);
+  if (dt !== 0) {
+    return dt;
   }
-  return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  return String(b.updatedAt || "").slice(0, 16).localeCompare(String(a.updatedAt || "").slice(0, 16));
 }
 
 // Collapse a leading home directory into "~" so the session list has
