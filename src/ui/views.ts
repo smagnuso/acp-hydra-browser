@@ -931,15 +931,10 @@ function renderListModal(
 function renderChat(c: ChatState): HTMLElement {
   // Pull fresh metadata from the session list each render so a
   // deep-link reload (where the SPA opened the chat before any poll
-  // landed) gets the real title/cwd/agentId once polling completes.
+  // landed) gets the real title/cwd once polling completes.
   const live = state.sessions.find((s) => s.sessionId === c.sessionId);
   const title = live?.title || c.title || fallbackTitle(c.sessionId);
   const cwd = live?.cwd || c.cwd;
-  const agentId = live?.agentId || c.agentId;
-  // The chat's `c.model` is the live, WS-updated value (more current than
-  // any session-list poll); fall back to the polled record so the row
-  // isn't empty before the first current_model_update lands.
-  const model = c.model || live?.currentModel;
   const toggleDetails = (): void => {
     c.headerExpanded = !c.headerExpanded;
     render();
@@ -966,11 +961,7 @@ function renderChat(c: ChatState): HTMLElement {
           title: "Click for session details",
           onclick: toggleDetails,
         },
-        el(
-          "div",
-          { class: "row2" },
-          `${agentWithModel(agentId, model)} · ${cwd ? shortenCwd(cwd) : "?"}`,
-        ),
+        el("div", { class: "row2" }, cwd ? shortenCwd(cwd) : "?"),
       ),
       !c.ready
         ? el(
