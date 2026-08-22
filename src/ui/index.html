@@ -64,6 +64,9 @@ button.primary:hover { filter: brightness(0.9); }
 button.danger { color: var(--bad); border-color: var(--bad); }
 button.danger:hover { background: rgba(249, 117, 131, 0.12); }
 button.ghost { border-color: transparent; }
+button:disabled { opacity: 0.4; cursor: default; }
+button:disabled:hover { background: transparent; filter: none; }
+button.primary:disabled:hover { background: var(--accent); }
 input, select, textarea {
   font: inherit; color: inherit; background: var(--panel-2);
   border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.75rem;

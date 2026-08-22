@@ -414,6 +414,11 @@ export interface AppState {
   // the log, just skipped at render time, so toggling it back on
   // doesn't require a reload or re-fetch.
   hideThoughts: boolean;
+  // Fire a system notification when a turn THIS tab submitted finishes
+  // while the tab isn't visible/focused. Persisted globally like
+  // hideThoughts. See notifications.ts — gated on Notification
+  // permission, which the checkbox requests when first turned on.
+  notifyOnTurnEnd: boolean;
   // Host filter selection for the session list. "__local" hides every
   // imported session; "__all" hides nothing; any other value filters
   // to sessions whose importedFromMachine matches.

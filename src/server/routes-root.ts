@@ -30,6 +30,17 @@ async function loadHtml(): Promise<string> {
   return cachedHtml;
 }
 
+let cachedSw: string | undefined;
+
+async function loadSw(): Promise<string> {
+  if (cachedSw) {
+    return cachedSw;
+  }
+  const path = resolve(UI_DIR, "sw.js");
+  cachedSw = await fsp.readFile(path, "utf8");
+  return cachedSw;
+}
+
 export function registerRootRoutes(
   app: FastifyInstance,
   ctx: ServerContext,
@@ -79,6 +90,17 @@ export function registerRootRoutes(
       reply.code(204).send();
     },
   );
+
+  // Registration-only service worker (see src/ui/sw.js) — exists so
+  // Notification permission grants a working notifications.showNotification()
+  // path even on Safari, which requires that instead of a bare `new
+  // Notification()`. Same auth/CSRF posture as any other authenticated
+  // GET; a same-origin navigator.serviceWorker.register() call passes
+  // those checks the same as a normal fetch.
+  app.get("/sw.js", async (_request, reply) => {
+    reply.header("Content-Type", "application/javascript; charset=utf-8");
+    reply.send(await loadSw());
+  });
 }
 
 async function handleLogin(

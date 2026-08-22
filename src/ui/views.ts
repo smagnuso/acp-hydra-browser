@@ -29,6 +29,7 @@ import {
   updateQueuedPrompt,
 } from "./queue.js";
 import { openChat } from "./routing.js";
+import { requestNotificationPermission } from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
@@ -503,6 +504,47 @@ function hideThoughtsRow(): HTMLElement {
         },
       }),
       "hide",
+    ),
+  );
+}
+
+// Global toggle for a system notification when a turn THIS tab
+// submitted finishes while the tab isn't visible/focused. Turning it on
+// requests Notification permission (and registers the notification
+// service worker) right away rather than waiting for the first turn to
+// finish, so a denial surfaces immediately instead of silently.
+function notifyOnTurnEndRow(): HTMLElement {
+  return el(
+    "div",
+    { class: "detail" },
+    el("span", { class: "k" }, "notify"),
+    el(
+      "label",
+      { class: "checkbox-label" },
+      el("input", {
+        type: "checkbox",
+        checked: state.notifyOnTurnEnd ? "" : undefined,
+        onchange: (e: Event) => {
+          const checked = (e.target as HTMLInputElement).checked;
+          if (!checked) {
+            setState({ notifyOnTurnEnd: false });
+            return;
+          }
+          void requestNotificationPermission().then((granted) => {
+            if (!granted) {
+              setState({
+                banner: {
+                  kind: "warn",
+                  text: "Notifications blocked — enable them for this site in your browser settings.",
+                },
+              });
+              return;
+            }
+            setState({ notifyOnTurnEnd: true });
+          });
+        },
+      }),
+      "on turn end",
     ),
   );
 }
@@ -1207,6 +1249,7 @@ function renderChat(c: ChatState): HTMLElement {
         workspaceRow(live?.workspace),
         ...c.configOptions.map(configOptionRow),
         hideThoughtsRow(),
+        notifyOnTurnEndRow(),
       )
     : null;
 
@@ -1332,6 +1375,17 @@ function renderChat(c: ChatState): HTMLElement {
           c.historyDraft = null;
         }
         autosize(t);
+        // Sync the send/enqueue/amend buttons' disabled state directly
+        // rather than going through a full render() — a full teardown
+        // on every keystroke tanks typing responsiveness and resets
+        // the textarea node out from under the browser's native
+        // spellcheck/autocorrect session.
+        const nowHasContent = t.value.trim().length > 0 || c.attachments.length > 0;
+        const buttons =
+          t.closest(".composer")?.querySelectorAll<HTMLButtonElement>(".content-gated") ?? [];
+        for (const btn of buttons) {
+          btn.disabled = !nowHasContent;
+        }
       },
     },
     c.composerValue,
@@ -1352,6 +1406,7 @@ function renderChat(c: ChatState): HTMLElement {
   // render() may have already torn down and rebuilt this button's DOM
   // node, silently dropping the event (the tap highlight still flashes
   // regardless, so the button looks like it registered).
+  const hasContent = c.composerValue.trim().length > 0 || c.attachments.length > 0;
   const sendButtons: Node[] = [];
   if (c.inTurn) {
     if (c.daemonSupportsAmend && c.currentHeadMessageId !== undefined) {
@@ -1359,6 +1414,8 @@ function renderChat(c: ChatState): HTMLElement {
         el(
           "button",
           {
+            class: "content-gated",
+            disabled: !hasContent,
             ...tapHandler(amendPrompt),
             title: "Cancel the current turn and replace its prompt",
           },
@@ -1370,7 +1427,8 @@ function renderChat(c: ChatState): HTMLElement {
       el(
         "button",
         {
-          class: "primary",
+          class: "primary content-gated",
+          disabled: !hasContent,
           ...tapHandler(sendPrompt),
           title: "Queue this prompt to run after the current turn",
         },
@@ -1381,7 +1439,7 @@ function renderChat(c: ChatState): HTMLElement {
     sendButtons.push(
       el(
         "button",
-        { class: "primary", ...tapHandler(sendPrompt) },
+        { class: "primary content-gated", disabled: !hasContent, ...tapHandler(sendPrompt) },
         "Send",
       ),
     );
@@ -1396,7 +1454,13 @@ function renderChat(c: ChatState): HTMLElement {
       { class: "composer-buttons" },
       el(
         "button",
-        { class: "stop", ...tapHandler(sendCancel), title: "Cancel current turn" },
+        {
+          class: "stop",
+          disabled:
+            !c.inTurn && !c.promptQueue.some((e) => e.status === "queued" || e.status === "pending"),
+          ...tapHandler(sendCancel),
+          title: "Cancel current turn",
+        },
         "Stop",
       ),
       ...sendButtons,

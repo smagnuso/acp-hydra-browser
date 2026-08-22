@@ -15,6 +15,7 @@ import {
 } from "./acp.js";
 import { cancelAllQueued } from "./queue.js";
 import { parseArmedTaskList } from "./acp.js";
+import { notifyTurnEnded } from "./notifications.js";
 import type { ChatState, PermissionEntry } from "./types.js";
 
 interface JsonRpcFrame {
@@ -194,6 +195,7 @@ export function handleFrame(frame: JsonRpcFrame): void {
   ) {
     state.current.ownPromptIds.delete(String(frame.id));
     finalizeTurn();
+    void notifyTurnEnded(state.current);
     render();
     return;
   }

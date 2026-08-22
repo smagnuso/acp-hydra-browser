@@ -14,6 +14,7 @@ const PERSISTED_KEYS = [
   "showCold",
   "hostFilter",
   "hideThoughts",
+  "notifyOnTurnEnd",
 ] as const;
 
 function loadPersistedFilters(): Partial<AppState> {
@@ -50,6 +51,7 @@ export const state: AppState = {
   // work. The dropdown lets them switch to a specific peer or "all".
   hostFilter: "__local",
   hideThoughts: false,
+  notifyOnTurnEnd: false,
   banner: null,
   modal: null,
   current: null,
