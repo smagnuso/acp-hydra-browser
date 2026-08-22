@@ -33,6 +33,23 @@ export interface SessionInfo {
   // session may restart itself with no prompt even while otherwise
   // idle. See PROTOCOL.md's "Armed tasks (the third session state)".
   armedTasks?: number;
+  // Present only for a session running in an isolated workspace. Named
+  // `workspace` on the wire, not `workspaceInfo` (that name belongs to
+  // the separate ACP `_meta["hydra-acp"]` surface). See PROTOCOL.md's
+  // "Workspace isolation". sourceCwd is the tree it was derived from
+  // (this session's own `cwd` is the workspace path).
+  workspace?: {
+    path: string;
+    sourceCwd: string;
+    label: string;
+    provider: string;
+    snapshot?: string;
+    vcs?: { kind: string; branch?: string };
+    clean?: boolean;
+  };
+  // Present when isolation was requested and fell back to the source
+  // tree. Live-only.
+  workspaceError?: string;
 }
 
 export interface AgentInfo {

@@ -2,6 +2,16 @@ import { logger } from "../util/log.js";
 
 const log = logger("hydra-rest");
 
+export interface HydraWorkspaceInfo {
+  path: string;
+  sourceCwd: string;
+  label: string;
+  provider: string;
+  snapshot?: string;
+  vcs?: { kind: string; branch?: string };
+  clean?: boolean;
+}
+
 export interface HydraSessionInfo {
   sessionId: string;
   cwd: string;
@@ -12,6 +22,14 @@ export interface HydraSessionInfo {
   status: "warm" | "cold";
   busy: boolean;
   awaitingInput: boolean;
+  // Present only for a session running in an isolated workspace. Named
+  // `workspace` on the wire (GET/POST /v1/sessions), not `workspaceInfo`
+  // — that name is only used in the separate ACP `_meta["hydra-acp"]`
+  // surface. See PROTOCOL.md's "Workspace isolation".
+  workspace?: HydraWorkspaceInfo;
+  // Present when isolation was requested and fell back to the source
+  // tree. Live-only.
+  workspaceError?: string;
 }
 
 export interface HydraAgentInfo {

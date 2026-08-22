@@ -29,14 +29,35 @@ export function sendPrompt(): void {
   if (!c) return;
   const text = c.composerValue.trim();
   if (!text) return;
+  if (dispatchPrompt(c, text)) {
+    c.composerValue = "";
+  }
+  render();
+}
+
+// Fire a fixed slash command (e.g. a `/hydra workspace <verb>` action
+// button) through the same eager-send path as a typed prompt, without
+// touching the composer's draft text or recall history.
+export function sendWorkspaceCommand(
+  verb: "start" | "sync" | "stop" | "apply",
+): void {
+  const c = state.current;
+  if (!c) return;
+  dispatchPrompt(c, `/hydra workspace ${verb}`, { addToHistory: false });
+  render();
+}
+
+function dispatchPrompt(
+  c: ChatState,
+  text: string,
+  opts: { addToHistory?: boolean } = {},
+): boolean {
   if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
     c.log.push({
       kind: "error",
       text: "Not connected to session — prompt not sent.",
     });
-    c.composerValue = "";
-    render();
-    return;
+    return false;
   }
   // aheadAtEnqueue is an UX hint — number of entries the user has to
   // wait through before theirs runs. Captured at submit time so the
@@ -85,9 +106,10 @@ export function sendPrompt(): void {
     c.ownPromptIds.add(String(promptId));
   }
   ensureSpinner();
-  pushHistory(c, text);
-  c.composerValue = "";
-  render();
+  if (opts.addToHistory ?? true) {
+    pushHistory(c, text);
+  }
+  return true;
 }
 
 // Append a submitted prompt to the up/down recall history. Most-recent

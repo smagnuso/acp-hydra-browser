@@ -23,6 +23,7 @@ import {
   sendPrompt,
   sendSetMode,
   sendSetModel,
+  sendWorkspaceCommand,
   updateQueuedPrompt,
 } from "./queue.js";
 import { closeChat, openChat } from "./routing.js";
@@ -350,6 +351,40 @@ function detailRow(label: string, value: string): HTMLElement {
     { class: "detail" },
     el("span", { class: "k" }, label),
     el("code", null, value),
+  );
+}
+
+// Workspace action row for the expanded chat-details panel. Buttons send
+// `/hydra workspace <verb>` through the composer's own send path — there
+// is no REST equivalent for these verbs (only `clean` has one), so a
+// slash command is the only way to trigger them.
+function workspaceRow(workspace: SessionInfo["workspace"]): HTMLElement {
+  const button = (verb: "start" | "sync" | "stop" | "apply", label: string) =>
+    el(
+      "button",
+      { class: "ghost", onclick: () => sendWorkspaceCommand(verb) },
+      label,
+    );
+  if (!workspace) {
+    return el(
+      "div",
+      { class: "detail" },
+      el("span", { class: "k" }, "workspace"),
+      button("start", "Start workspace"),
+    );
+  }
+  return el(
+    "div",
+    { class: "detail" },
+    el("span", { class: "k" }, "workspace"),
+    el(
+      "code",
+      null,
+      `${workspace.label}${workspace.clean === false ? " · dirty" : ""}`,
+    ),
+    button("sync", "Sync"),
+    button("stop", "Stop"),
+    button("apply", "Apply"),
   );
 }
 
@@ -920,6 +955,17 @@ function renderChat(c: ChatState): HTMLElement {
           "armed",
         )
       : null,
+    live?.workspace
+      ? el(
+          "span",
+          {
+            class: "pill clickable",
+            title: `In workspace "${live.workspace.label}" (source: ${shortenCwd(live.workspace.sourceCwd)})`,
+            onclick: toggleDetails,
+          },
+          "⎇ " + live.workspace.label,
+        )
+      : null,
     c.mode
       ? el(
           "span",
@@ -970,6 +1016,7 @@ function renderChat(c: ChatState): HTMLElement {
         detailRow("session", c.sessionId),
         detailRow("agent", agentWithModel(agentId, model)),
         detailRow("cwd", cwd || "?"),
+        workspaceRow(live?.workspace),
       )
     : null;
 
