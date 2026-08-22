@@ -12,7 +12,14 @@
 <meta name="theme-color" content="#0e1116">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<!-- "black", NOT "black-translucent": with translucent, iOS sizes the
+     standalone web view to screen-minus-status-bar but anchors it at
+     the very top of the screen, leaving a dead, unpaintable strip at
+     the bottom exactly the status bar's height (verified with paint
+     markers — content hard-clips there no matter what CSS does). With
+     an opaque black bar the web view sits below it and fills the rest
+     of the screen edge-to-edge. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="hydra-acp">
 <style nonce="__CSP_NONCE__">
 :root {
@@ -36,7 +43,20 @@
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--fg); overflow: hidden; }
+/* Three deliberate iOS accommodations here (see viewport.ts for the
+   JS half of each):
+   - position:fixed pins the document so iOS can't drag the whole page
+     to scroll a focused input into view; #app's height already shrinks
+     to stay above the keyboard, so there's nothing to "help" with.
+   - The translateY counters WebKit fixing fixed-position elements to
+     the layout viewport: when iOS pans the visual viewport to reveal a
+     focused input, an uncompensated fixed body slides off the top.
+   - NO overflow:hidden: overflow on <body> propagates to the viewport
+     itself, and the promoted clip would cut content at the (sometimes
+     under-reported) ICB height. #app carries the containment instead —
+     child elements don't propagate. Nothing is left in-flow, so the
+     document has no scrollable overflow and still can't be dragged. */
+body { position: fixed; top: 0; left: 0; right: 0; height: var(--app-height, 100%); transform: translateY(var(--app-offset-top, 0px)); background: var(--bg); color: var(--fg); }
 button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.75rem; cursor: pointer; }
 button:hover { background: var(--panel-2); }
 button.primary { background: var(--accent); color: #0a0d12; border-color: var(--accent); font-weight: 600; }
@@ -59,7 +79,9 @@ code { background: var(--panel-2); padding: 0.1rem 0.4rem; border-radius: 4px; f
 pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; overflow-x: auto; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.88em; line-height: 1.45; margin: 0.5rem 0; }
 pre code { background: transparent; padding: 0; }
 
-#app { height: 100%; display: flex; flex-direction: column; }
+/* --app-height is set from window.visualViewport by viewport.ts — see
+   its comment for why the plain 100% chain isn't enough on iOS. */
+#app { height: var(--app-height, 100%); display: flex; flex-direction: column; overflow: hidden; }
 
 /* Header */
 .topbar { display: flex; align-items: center; gap: 0.5rem; padding: calc(0.6rem + env(safe-area-inset-top)) calc(0.6rem + env(safe-area-inset-right)) 0.6rem calc(0.6rem + env(safe-area-inset-left)); border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -203,10 +225,23 @@ pre code { background: transparent; padding: 0; }
 .queue-editor textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 0.4rem 0.5rem; box-sizing: border-box; }
 
 /* Composer */
-.composer { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)) 0; border-top: 1px solid var(--border); background: var(--panel); }
+.composer { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)) calc(0.6rem + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--panel); }
+/* The keyboard already bounds the composer's bottom edge, so the
+   safe-area reserve (there for the home indicator when it's not up)
+   would just leave a dead gap above it — see viewport.ts. */
+html.keyboard-open .composer { padding-bottom: 0.6rem; }
 .composer textarea { width: 100%; min-height: 2.4rem; max-height: 12rem; resize: none; }
 .composer-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
 .composer .stop { color: var(--bad); border-color: var(--bad); }
+
+/* Pasted-image attachments: pending chips above the composer, and
+   thumbnails on a sent bubble that carried them. */
+.attachment-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.attachment-chip { position: relative; display: inline-flex; }
+.attachment-chip .attachment-thumb { width: 3rem; height: 3rem; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); }
+.attachment-chip .attachment-remove { position: absolute; top: -0.4rem; right: -0.4rem; width: 1.2rem; height: 1.2rem; padding: 0; border-radius: 999px; background: var(--bad); color: #fff; border: 2px solid var(--panel); font-size: 0.7rem; line-height: 1; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.attachment-thumbs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.3rem; }
+.attachment-thumbs .attachment-thumb { max-width: 12rem; max-height: 12rem; border-radius: 8px; border: 1px solid var(--border); }
 
 /* Modal */
 .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 1rem; z-index: 50; }

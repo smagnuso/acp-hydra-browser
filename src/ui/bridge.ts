@@ -11,6 +11,7 @@ import {
   handleNotification,
   hydrateQueueFromSnapshot,
   pushLog,
+  resetChatHistoryState,
 } from "./acp.js";
 import { cancelAllQueued } from "./queue.js";
 import { parseArmedTaskList } from "./acp.js";
@@ -60,6 +61,19 @@ export function reply(id: number | string, result: unknown): void {
 // handler in routing.ts.
 export function handleFrame(frame: JsonRpcFrame): void {
   if (!state.current) return;
+  // Arrives before the replayed session/update frames it describes, per
+  // the bridge's buffer-then-decide handshake (ws-bridge.ts doHandshake).
+  // "after_message" means our existing transcript is still valid and the
+  // upcoming frames are just the delta — leave it alone. Anything else
+  // ("full", or an older bridge build that never sends this at all) means
+  // a fresh replay is about to land, so clear first or it'd duplicate.
+  if (frame.method === "bridge/replay_policy") {
+    const policy = (frame.params as Record<string, unknown> | undefined)?.policy;
+    if (policy !== "after_message") {
+      resetChatHistoryState(state.current);
+    }
+    return;
+  }
   if (frame.method === "bridge/ready") {
     state.current.ready = true;
     state.banner = null;

@@ -8,6 +8,7 @@ import { contentToText } from "./markdown.js";
 import { extractEditDiff } from "./edit-diff.js";
 import type {
   ArmedTask,
+  ChatState,
   ConfigOption,
   EditDiffLogItem,
   ExitPlanLogItem,
@@ -23,6 +24,58 @@ type AnyRecord = Record<string, unknown>;
 export function pushLog(item: LogItem): void {
   if (!state.current) return;
   state.current.log.push(item);
+}
+
+// session/update kinds that carry live/derived state rather than
+// recordable history — the daemon doesn't persist them, so it can't use
+// one as an after_message reconnect anchor. Mirrors cli's tui/app.ts
+// STATE_UPDATE_KINDS.
+const STATE_UPDATE_KINDS = new Set([
+  "session_info_update",
+  "current_model_update",
+  "current_mode_update",
+  "available_commands_update",
+  "available_modes_update",
+  "usage_update",
+  "config_option_update",
+  "hydra_compaction",
+  "hydra_workspace",
+  "clarifier_question_asked",
+  "clarifier_question_answered",
+  "clarifier_question_dismissed",
+]);
+
+// Reset the history-bearing slice of chat state for a full session/attach
+// replay — either a session's first attach, or a reconnect where the
+// daemon couldn't honor an after_message delta request (see bridge.ts's
+// bridge/replay_policy handling). A successful delta reattach skips this
+// entirely, which is what keeps the transcript and scroll position intact
+// across a quiet reconnect instead of blanking and re-snapping to bottom.
+export function resetChatHistoryState(c: ChatState): void {
+  c.log = [];
+  c.toolCalls = new Map();
+  c.pendingPermissions = new Map();
+  c.spinner = null;
+  c.plan = null;
+  c.mode = null;
+  c.model = null;
+  c.modes = [];
+  c.models = [];
+  c.contextUsed = null;
+  c.contextSize = null;
+  c.cost = null;
+  c.busy = false;
+  c.recentOwnPrompts = [];
+  c.promptQueue = [];
+  c.queueByMessageId = new Map();
+  c.ownPromptIds = new Set();
+  c.inTurn = false;
+  c.unsolicitedTurnOpen = new Set();
+  c.currentPlanEntry = null;
+  c.daemonSupportsAmend = false;
+  c.ownClientId = undefined;
+  c.currentHeadMessageId = undefined;
+  c.lastSeenMessageId = undefined;
 }
 
 // True for bubbles representing a prompt still waiting in the queue.
@@ -963,6 +1016,18 @@ export function handleNotification(frame: JsonRpcFrame): void {
   const update = (frame.params?.update ?? null) as AnyRecord | null;
   if (!update || typeof update !== "object") return;
   const kind = String(update.sessionUpdate ?? "");
+  // Track the last recordable messageId so a future reconnect can ask
+  // the daemon for a delta replay (afterMessageId) instead of a full
+  // one. State-kind updates are skipped — they aren't persisted, so the
+  // daemon can't use one as a replay cutoff.
+  if (
+    state.current &&
+    kind &&
+    !STATE_UPDATE_KINDS.has(kind) &&
+    typeof update.messageId === "string"
+  ) {
+    state.current.lastSeenMessageId = update.messageId;
+  }
   // Sibling-resolved permission tear-down. Doesn't flip inTurn or
   // route through the per-case switch — it's a transient correlation
   // signal, not session activity.

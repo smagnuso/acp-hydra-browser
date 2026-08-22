@@ -4,7 +4,7 @@
 
 import { setState, state } from "./state.js";
 import { handleFrame } from "./bridge.js";
-import { cancelAllQueued } from "./queue.js";
+import { cancelUnboundQueued } from "./queue.js";
 import { render } from "./renderer.js";
 import type { ChatState, SessionInfo } from "./types.js";
 
@@ -98,6 +98,7 @@ export function openChat(sessionId: string, load: boolean): void {
     cost: null,
     fileOverlay: null,
     composerValue: "",
+    attachments: [],
     busy: false,
     recentOwnPrompts: [],
     history: [],
@@ -128,13 +129,24 @@ export function openChat(sessionId: string, load: boolean): void {
 // Open a WS to /ws for the given chat and wire its event listeners.
 // Called for the initial connect from openChat and for every retry from
 // the reconnect loop. The caller is responsible for resetting the
-// WS-dependent slice of `chat` before invoking on a reconnect
-// (resetChatStateForReconnect).
+// connection-scoped slice of `chat` before invoking on a reconnect
+// (resetConnectionStateForReconnect) — the history-bearing slice (log,
+// tool cards, queue, …) is left alone here and only cleared later, by
+// bridge.ts, if the bridge/replay_policy frame says the daemon couldn't
+// honor our afterMessageId request.
 function connectChatSocket(chat: ChatState): void {
   const url = new URL("/ws", location.href);
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
   url.searchParams.set("session", chat.sessionId);
   if (chat.loadOnConnect) url.searchParams.set("load", "true");
+  // Ask the bridge for a delta replay instead of a full one — see
+  // acp.ts's lastSeenMessageId tracking and ws-bridge.ts's doHandshake.
+  // Only set once we've actually seen a recordable update, which also
+  // means a session's very first connect never sends this (nothing to
+  // anchor on yet) and correctly gets a full replay.
+  if (chat.lastSeenMessageId !== undefined) {
+    url.searchParams.set("afterMessageId", chat.lastSeenMessageId);
+  }
   const ws = new WebSocket(url.toString());
   chat.ws = ws;
 
@@ -168,10 +180,11 @@ function connectChatSocket(chat: ChatState): void {
 
 function scheduleReconnect(chat: ChatState): void {
   chat.ready = false;
-  // Drop the queue chain so prompts don't sit waiting for an idle that
-  // won't arrive on the dead socket; the upcoming attach replay will
-  // repopulate any entries the server still has.
-  cancelAllQueued(chat);
+  // Drop only prompts the daemon never acknowledged — the ones it did
+  // (bound to a messageId) keep their bubble and chip as-is; an
+  // after_message reconnect (or the attach response's queue snapshot)
+  // will report their true status. See cancelUnboundQueued.
+  cancelUnboundQueued(chat);
 
   const attempt = chat.reconnectAttempt ?? 0;
   const delay =
@@ -190,47 +203,28 @@ function scheduleReconnect(chat: ChatState): void {
     }
     chat.reconnectTimer = undefined;
     chat.reconnectAttempt = attempt + 1;
-    resetChatStateForReconnect(chat);
+    resetConnectionStateForReconnect(chat);
     render();
     connectChatSocket(chat);
   }, delay);
 }
 
-// Wipe the WS-dependent slice of state before a reconnect. The server
-// bridge does session/attach with historyPolicy:"full" so the log,
-// queue, tool cards, etc. will all be re-replayed — leaving the old
-// copies in place would dupe everything. Identity, composer text, and
-// the up/down history buffer are preserved.
-function resetChatStateForReconnect(chat: ChatState): void {
+// Wipe only the state tied to the dead socket itself before opening a
+// new one. The history-bearing slice (log, tool cards, queue, live turn
+// state, …) is deliberately left alone: we don't yet know whether the
+// upcoming attach will be a delta (afterMessageId) or a full replay, and
+// clearing it here would blank the transcript and re-snap scroll to
+// bottom even when the delta path lands cleanly. bridge.ts's
+// bridge/replay_policy handling clears that slice itself, but only if
+// the daemon couldn't honor the delta request. Identity, composer text,
+// and the up/down history buffer are preserved either way.
+function resetConnectionStateForReconnect(chat: ChatState): void {
   chat.ws = null;
   chat.ready = false;
-  chat.log = [];
-  chat.toolCalls = new Map();
-  chat.pendingPermissions = new Map();
   chat.pendingRequestById = new Map();
   chat.responseHandlers = new Map();
-  chat.spinner = null;
-  chat.plan = null;
-  chat.mode = null;
-  chat.model = null;
-  chat.modes = [];
-  chat.models = [];
-  chat.contextUsed = null;
-  chat.contextSize = null;
-  chat.cost = null;
-  chat.busy = false;
-  chat.recentOwnPrompts = [];
-  chat.promptQueue = [];
-  chat.queueByMessageId = new Map();
-  chat.ownPromptIds = new Set();
-  chat.inTurn = false;
-  chat.unsolicitedTurnOpen = new Set();
   chat.idleListeners = [];
   chat.readyListeners = [];
-  chat.currentPlanEntry = null;
-  chat.daemonSupportsAmend = false;
-  chat.ownClientId = undefined;
-  chat.currentHeadMessageId = undefined;
   chat.nextId = undefined;
 }
 

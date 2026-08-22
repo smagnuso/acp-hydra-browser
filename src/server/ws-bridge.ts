@@ -97,13 +97,18 @@ export function attachWsBridge(
     }
     const sessionId = url.searchParams.get("session");
     const load = url.searchParams.get("load") === "true";
+    // Set by a reconnecting client that already holds a transcript — lets
+    // us ask the daemon for a delta replay instead of a full one (see
+    // doHandshake below) so a quiet reconnect doesn't blow away the
+    // browser's scroll position.
+    const afterMessageId = url.searchParams.get("afterMessageId") ?? undefined;
     if (!sessionId) {
       socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
       socket.destroy();
       return;
     }
     wss.handleUpgrade(request, socket, head, (browserWs) => {
-      handleConnection(browserWs, request, ctx, sessionId, sessionToken, load);
+      handleConnection(browserWs, request, ctx, sessionId, sessionToken, load, afterMessageId);
     });
   });
 
@@ -117,6 +122,7 @@ function handleConnection(
   sessionId: string,
   sessionToken: string,
   load: boolean,
+  afterMessageId: string | undefined,
 ): void {
   log.info(`bridge open session=${sessionId} load=${load}`);
 
@@ -143,6 +149,16 @@ function handleConnection(
   // While the upstream handshake is running we can't yet forward browser
   // frames. Buffer them and flush once attach completes.
   const browserBuffer: JsonRpcMessage[] = [];
+  // session/update notifications arrive via notify() from inside the
+  // daemon's session/attach handler, so replay can start landing before
+  // the attach *response* (and its authoritative historyPolicy field)
+  // does. Park them here until doHandshake knows whether the daemon
+  // honored an after_message request or fell back to a full replay —
+  // the browser needs that answer first so it knows whether to keep its
+  // existing transcript or clear it before the replay lands. Non-null
+  // while armed; set to null once flushed. Mirrors cli's tui/app.ts
+  // reconnectReplayBuffer.
+  let handshakeBuffer: JsonRpcMessage[] | null = [];
 
   upstream.on("open", () => {
     void doHandshake().catch((err: unknown) => {
@@ -177,6 +193,10 @@ function handleConnection(
           );
           return;
         }
+      }
+      if (handshakeBuffer) {
+        handshakeBuffer.push(n);
+        return;
       }
     }
     sendBrowserFrame(n);
@@ -379,9 +399,11 @@ function handleConnection(
         );
       }
     }
+    const wantsAfterMessage = afterMessageId !== undefined;
     const attachResp = (await upstream.request("session/attach", {
       sessionId,
-      historyPolicy: "full",
+      historyPolicy: wantsAfterMessage ? "after_message" : "full",
+      ...(wantsAfterMessage ? { afterMessageId } : {}),
       clientInfo: {
         name: upstream.clientName,
         version: upstream.clientVersion,
@@ -389,9 +411,30 @@ function handleConnection(
     })) as {
       sessionId?: string;
       clientId?: string;
+      historyPolicy?: string;
       _meta?: Record<string, unknown>;
       configOptions?: unknown[];
     };
+    // Tell the browser whether it got the delta replay it asked for
+    // before forwarding any of the buffered session/update notifications,
+    // so it knows whether to keep its existing transcript (after_message)
+    // or clear it first (full — either never requested, or the daemon
+    // couldn't find afterMessageId and fell back). Order matters: this
+    // must land before the buffered replay frames below.
+    const appliedPolicy: "full" | "after_message" =
+      wantsAfterMessage && attachResp?.historyPolicy === "after_message"
+        ? "after_message"
+        : "full";
+    const buffered = handshakeBuffer ?? [];
+    handshakeBuffer = null;
+    sendBrowserFrame({
+      jsonrpc: "2.0",
+      method: "bridge/replay_policy",
+      params: { policy: appliedPolicy },
+    });
+    for (const n of buffered) {
+      sendBrowserFrame(n);
+    }
     // Pass through clientId and _meta from the attach response so the
     // browser can recognize its own prompt_queue_added broadcasts (by
     // matching originator.clientId) and hydrate any queue snapshot

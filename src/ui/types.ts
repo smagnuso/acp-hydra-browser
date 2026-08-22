@@ -14,6 +14,16 @@ export interface ConfigOptionValue {
   description?: string;
 }
 
+// One pasted image, ready to be sent as an ACP image content block. data is
+// base64-encoded raw bytes; mimeType matches. name/sizeBytes are
+// display-only — the outgoing wire block only carries data + mimeType.
+export interface Attachment {
+  mimeType: string;
+  data: string;
+  name?: string;
+  sizeBytes: number;
+}
+
 export interface ConfigOption {
   id: string;
   name: string;
@@ -136,6 +146,10 @@ export interface QueueEntry {
   // The entry stays "queued" in status the whole time: this only
   // changes how the chip reads.
   held?: boolean;
+  // Images submitted alongside `text`. Carried on the entry (not just the
+  // log item) so amend/steer resends and rollback can rebuild the same
+  // content blocks without re-threading them through every call site.
+  attachments?: Attachment[];
 }
 
 export interface ToolCallState {
@@ -207,6 +221,10 @@ export type LogItem =
       text: string;
       closed?: boolean;
       queueEntry?: QueueEntry;
+      // Images attached at submit time (pasted into the composer). Kept on
+      // the log item so the sent bubble shows what was actually attached,
+      // independent of the composer's current draft.
+      attachments?: Attachment[];
       // Set for structured CLI-style output injected as an agent
       // message (e.g. `_meta["hydra-acp"].synthetic` frames like
       // `/hydra workspace start`'s status block) rather than LLM
@@ -262,6 +280,9 @@ export interface ChatState {
   cost: unknown;
   fileOverlay: FileOverlayState | null;
   composerValue: string;
+  // Images pasted into the composer, waiting to go out with the next send.
+  // Cleared on submit; restored by rollbackAmend if an amend is rejected.
+  attachments: Attachment[];
   busy: boolean;
   recentOwnPrompts: Array<{ text: string; at: number }>;
   // Shell-style up/down history. `history` is most-recent-first and
@@ -353,6 +374,13 @@ export interface ChatState {
   // agent advertises, e.g. effort). See config_option_update handling
   // in acp.ts. Empty until the first snapshot arrives.
   configOptions: ConfigOption[];
+  // messageId of the last recordable (non state-kind) session/update we
+  // processed. Sent back as afterMessageId on the next reconnect so the
+  // bridge can ask the daemon for a delta replay instead of a full one —
+  // see routing.ts's connectChatSocket and bridge.ts's handling of
+  // bridge/replay_policy. Undefined until the first recordable update
+  // arrives, which also means the very first attach always gets "full".
+  lastSeenMessageId?: string;
 }
 
 export interface SessionModalData {

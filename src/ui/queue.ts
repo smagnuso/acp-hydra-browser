@@ -16,7 +16,24 @@ import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { notify, send } from "./bridge.js";
 import { ensureSpinner } from "./acp.js";
-import type { ChatState, QueueEntry } from "./types.js";
+import type { Attachment, ChatState, QueueEntry } from "./types.js";
+
+// Build an ACP ContentBlock[] for session/prompt et al. Text block is
+// omitted when empty so an image-only send doesn't ship a stray blank
+// text block.
+function buildContentBlocks(
+  text: string,
+  attachments: Attachment[],
+): Array<Record<string, unknown>> {
+  const blocks: Array<Record<string, unknown>> = [];
+  if (text) {
+    blocks.push({ type: "text", text });
+  }
+  for (const a of attachments) {
+    blocks.push({ type: "image", data: a.data, mimeType: a.mimeType });
+  }
+  return blocks;
+}
 
 interface AmendPromptResult {
   amended: boolean;
@@ -28,9 +45,11 @@ export function sendPrompt(): void {
   const c = state.current;
   if (!c) return;
   const text = c.composerValue.trim();
-  if (!text) return;
-  if (dispatchPrompt(c, text)) {
+  const attachments = c.attachments;
+  if (!text && attachments.length === 0) return;
+  if (dispatchPrompt(c, text, { attachments })) {
     c.composerValue = "";
+    c.attachments = [];
   }
   render();
 }
@@ -60,8 +79,9 @@ export function sendCompactCommand(): void {
 function dispatchPrompt(
   c: ChatState,
   text: string,
-  opts: { addToHistory?: boolean } = {},
+  opts: { addToHistory?: boolean; attachments?: Attachment[] } = {},
 ): boolean {
+  const attachments = opts.attachments ?? [];
   if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
     c.log.push({
       kind: "error",
@@ -92,6 +112,7 @@ function dispatchPrompt(
     // from the session/prompt response.
     status: ahead > 0 ? "queued" : "pending",
     aheadAtEnqueue: ahead,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
   c.promptQueue.push(entry);
   c.log.push({
@@ -100,6 +121,7 @@ function dispatchPrompt(
     text,
     closed: true,
     queueEntry: entry,
+    attachments: entry.attachments,
   });
   c.recentOwnPrompts.push({ text, at: Date.now() });
   const cutoff = Date.now() - 60_000;
@@ -110,7 +132,7 @@ function dispatchPrompt(
   // need a local chain.
   const promptId = send("session/prompt", {
     sessionId: c.sessionId,
-    prompt: [{ type: "text", text }],
+    prompt: buildContentBlocks(text, attachments),
   });
   if (promptId !== undefined) {
     c.ownPromptIds.add(String(promptId));
@@ -181,7 +203,7 @@ export function updateQueuedPrompt(entry: QueueEntry, text: string): void {
   send("hydra-acp/prompt/update", {
     sessionId: c.sessionId,
     messageId: entry.messageId,
-    prompt: [{ type: "text", text: trimmed }],
+    prompt: buildContentBlocks(trimmed, entry.attachments ?? []),
   });
 }
 
@@ -208,13 +230,15 @@ export function amendPrompt(): void {
   const c = state.current;
   if (!c) return;
   const text = c.composerValue.trim();
-  if (!text) return;
+  const attachments = c.attachments;
+  if (!text && attachments.length === 0) return;
   if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
     c.log.push({
       kind: "error",
       text: "Not connected to session — prompt not sent.",
     });
     c.composerValue = "";
+    c.attachments = [];
     render();
     return;
   }
@@ -226,6 +250,7 @@ export function amendPrompt(): void {
   // Stash the typed text up front so we can restore it on rejection.
   const draft = c.composerValue;
   c.composerValue = "";
+  c.attachments = [];
   pushHistory(c, text);
   // Add an optimistic local entry mirroring sendPrompt's behavior, but
   // pre-tagged with amendsMessageId so the bubble paints the "+"
@@ -239,6 +264,7 @@ export function amendPrompt(): void {
     status: "pending",
     aheadAtEnqueue: 0,
     amendsMessageId: target,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
   c.promptQueue.push(entry);
   c.log.push({
@@ -247,6 +273,7 @@ export function amendPrompt(): void {
     text,
     closed: true,
     queueEntry: entry,
+    attachments: entry.attachments,
   });
   c.recentOwnPrompts.push({ text, at: Date.now() });
   const cutoff = Date.now() - 60_000;
@@ -271,7 +298,7 @@ function sendSteerRequest(
   if (!c) return;
   const id = send("_session/steering", {
     sessionId: c.sessionId,
-    prompt: [{ type: "text", text }],
+    prompt: buildContentBlocks(text, entry.attachments ?? []),
   });
   if (id !== undefined) {
     c.responseHandlers.set(String(id), (frame) => {
@@ -345,7 +372,7 @@ function sendLegacyAmend(
   const id = send("hydra-acp/prompt/amend", {
     sessionId: c.sessionId,
     targetMessageId: target,
-    prompt: [{ type: "text", text }],
+    prompt: buildContentBlocks(text, entry.attachments ?? []),
   });
   if (id !== undefined) {
     c.responseHandlers.set(String(id), (frame) => {
@@ -414,6 +441,7 @@ function rollbackAmend(
       ),
   );
   c.composerValue = draftText;
+  c.attachments = entry.attachments ?? [];
   render();
 }
 
@@ -502,6 +530,27 @@ export function cancelAllQueued(c: ChatState): void {
       if (entry.messageId !== undefined) {
         c.queueByMessageId.delete(entry.messageId);
       }
+    }
+  }
+}
+
+// Same idea, but only for entries the daemon never acknowledged (no
+// messageId bound yet) — used on a WS drop where the client is about to
+// attempt a delta (afterMessageId) reconnect and keeps its transcript,
+// including these bubbles' queueEntry references, intact. Marking a
+// *bound* entry cancelled here would be a guess: the daemon may still be
+// processing it, and the eventual after_message replay (or the attach
+// response's queue snapshot, see hydrateQueueFromSnapshot) will report
+// its true status — cancelling it locally first would show a false
+// strikethrough on a prompt that's actually still running.
+export function cancelUnboundQueued(c: ChatState): void {
+  for (const entry of c.promptQueue) {
+    if (
+      entry.messageId === undefined &&
+      entry.status !== "done" &&
+      entry.status !== "cancelled"
+    ) {
+      entry.status = "cancelled";
     }
   }
 }
