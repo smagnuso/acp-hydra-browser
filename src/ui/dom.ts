@@ -66,7 +66,21 @@ export function el(tag: string, attrs?: Attrs, ...children: Child[]): HTMLElemen
 // For touch this fully suppresses activation (the compatibility click is
 // already gone via preventDefault); for mouse it falls through to the
 // click handler below, matching a plain onclick's behavior.
+//
+// Same story for a long-press-to-select: it barely moves the pointer, so
+// the movement check doesn't catch it, but a native click is still
+// suppressed once the gesture resolves into a text selection instead of a
+// tap (e.g. long-pressing a session card to copy its cwd). preventDefault
+// on pointerdown doesn't stop that native selection gesture from starting,
+// so we check for one directly and skip activation — in both onpointerup
+// and onclick, since a mouse click-drag-select needs the same guard as a
+// touch long-press-select.
 const TAP_MOVE_THRESHOLD = 10;
+
+function hasActiveSelection(): boolean {
+  const sel = window.getSelection();
+  return !!sel && !sel.isCollapsed && sel.toString().length > 0;
+}
 
 export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
   let firedViaPointer = false;
@@ -86,6 +100,7 @@ export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
       if (pe.pointerType === "mouse" && pe.button !== 0) return;
       e.stopPropagation();
       if (Math.hypot(pe.clientX - startX, pe.clientY - startY) > TAP_MOVE_THRESHOLD) return;
+      if (hasActiveSelection()) return;
       firedViaPointer = true;
       fn(e);
     },
@@ -95,6 +110,7 @@ export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
         firedViaPointer = false;
         return;
       }
+      if (hasActiveSelection()) return;
       fn(e);
     },
   };
