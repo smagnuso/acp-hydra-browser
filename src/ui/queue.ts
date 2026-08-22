@@ -153,17 +153,25 @@ export function updateQueuedPrompt(entry: QueueEntry, text: string): void {
   });
 }
 
-// Amend the in-flight turn: cancel the head prompt and submit a
-// replacement in its place. Falls back to a regular sendPrompt when:
-//   1. The daemon doesn't advertise prompt.amending (older daemon →
-//      hydra-acp/prompt/amend isn't routed at all).
+// Amend the in-flight turn. Falls back to a regular sendPrompt when:
+//   1. The daemon doesn't advertise prompt.amending (older daemon —
+//      neither hydra-acp/prompt/amend nor _session/steering exist to
+//      route this onto).
 //   2. No in-flight head (currentHeadMessageId undefined) → there's
 //      nothing to amend; enqueue as a regular prompt.
-//   3. The daemon rejects the amend (target_completed,
-//      target_cancelled, target_not_found) — we surface a banner and
-//      restore the user's text into the composer so they can retry.
 //
-// Mirrors the TUI's amendPrompt flow (see cli/src/tui/app.ts:1873).
+// Otherwise this tries _session/steering first — a pre-standard
+// extension that injects the replacement into the SAME running turn
+// (preserving the agent's partial progress) when the live agent
+// supports it natively; hydra itself decides whether to forward
+// natively or fall back to cancel-and-resubmit, so we don't need to
+// know which happened. Only a live MethodNotFound (an old daemon that
+// predates _session/steering) drops back to the legacy
+// hydra-acp/prompt/amend cancel-and-resubmit call. A rejection that
+// isn't MethodNotFound (target_completed etc.) surfaces a banner and
+// restores the user's text into the composer so they can retry.
+//
+// Mirrors the TUI's steerPrompt flow (see cli/src/tui/app.ts:6653).
 export function amendPrompt(): void {
   const c = state.current;
   if (!c) return;
@@ -211,6 +219,97 @@ export function amendPrompt(): void {
   c.recentOwnPrompts.push({ text, at: Date.now() });
   const cutoff = Date.now() - 60_000;
   c.recentOwnPrompts = c.recentOwnPrompts.filter((p) => p.at >= cutoff).slice(-16);
+  ensureSpinner();
+  sendSteerRequest(entry, draft, target, text);
+  render();
+}
+
+interface SteerResult {
+  outcome?: "injected" | "startedNewTurn" | "promptRequired" | "failed";
+  reason?: string;
+}
+
+function sendSteerRequest(
+  entry: QueueEntry,
+  draftText: string,
+  target: string,
+  text: string,
+): void {
+  const c = state.current;
+  if (!c) return;
+  const id = send("_session/steering", {
+    sessionId: c.sessionId,
+    prompt: [{ type: "text", text }],
+  });
+  if (id !== undefined) {
+    c.responseHandlers.set(String(id), (frame) => {
+      onSteerResponse(entry, draftText, target, text, frame);
+    });
+  }
+}
+
+// Handler for _session/steering's JSON-RPC response.
+function onSteerResponse(
+  entry: QueueEntry,
+  draftText: string,
+  target: string,
+  text: string,
+  frame: { result?: unknown; error?: unknown },
+): void {
+  const c = state.current;
+  if (!c) return;
+  if (frame.error) {
+    const code = (frame.error as { code?: number } | undefined)?.code;
+    if (code === -32601) {
+      // Stale daemon that predates _session/steering — fall back to
+      // the legacy cancel-and-resubmit amend, reusing the same
+      // optimistic entry so the bubble doesn't flicker.
+      sendLegacyAmend(entry, draftText, target, text);
+      return;
+    }
+    rollbackAmend(c, entry, draftText);
+    setState({
+      banner: {
+        kind: "bad",
+        text: `steering failed: ${tryGetErrorMessage(frame.error)}`,
+      },
+    });
+    return;
+  }
+  const res = (frame.result ?? {}) as SteerResult;
+  if (res.outcome === "injected") {
+    // Nothing was enqueued server-side — no prompt_queue_added/removed
+    // pair will ever arrive to bind this entry. It's already part of
+    // the running turn; finalizeTurn flips any "processing" entry to
+    // "done" when that turn ends, same as a normally-bound entry.
+    entry.status = "processing";
+    render();
+    return;
+  }
+  if (res.outcome === "startedNewTurn") {
+    // Either native forward's own cancel-resubmit or hydra's
+    // synthesized fallback ran server-side — both genuinely create a
+    // new queue entry, so leave this one as-is; prompt_queue_added
+    // will bind it exactly like a normal amend success.
+    return;
+  }
+  // "failed" (native forward errored — resolved, not thrown, per
+  // codex-acp's own convention), "promptRequired", or an unrecognized
+  // outcome.
+  rollbackAmend(c, entry, draftText);
+  setState({
+    banner: { kind: "warn", text: "steering failed" },
+  });
+}
+
+function sendLegacyAmend(
+  entry: QueueEntry,
+  draftText: string,
+  target: string,
+  text: string,
+): void {
+  const c = state.current;
+  if (!c) return;
   const id = send("hydra-acp/prompt/amend", {
     sessionId: c.sessionId,
     targetMessageId: target,
@@ -218,11 +317,9 @@ export function amendPrompt(): void {
   });
   if (id !== undefined) {
     c.responseHandlers.set(String(id), (frame) => {
-      onAmendResponse(entry, draft, frame);
+      onAmendResponse(entry, draftText, frame);
     });
   }
-  ensureSpinner();
-  render();
 }
 
 // Handler for hydra-acp/prompt/amend's JSON-RPC response. On success

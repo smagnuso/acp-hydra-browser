@@ -17,6 +17,10 @@ test("browser request whitelist matches plan", () => {
     // rejects unknown/closed/already-running targets with a typed
     // result, so it's safe to forward.
     "hydra-acp/prompt/amend",
+    // Mid-turn steering (pre-standard extension) — always operates
+    // against this connection's own sessionId (coerced by the
+    // bridge), same as the amend/cancel/update trio above.
+    "_session/steering",
   ];
   for (const m of allowed) {
     assert.equal(

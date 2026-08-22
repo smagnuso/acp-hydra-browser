@@ -40,6 +40,13 @@ const ALLOWED_BROWSER_REQUEST_METHODS = new Set<string>([
   // rejects unknown/closed/already-running targets with a typed
   // result, so it's safe to forward.
   "hydra-acp/prompt/amend",
+  // Mid-turn steering (pre-standard extension) — injects into the
+  // live turn instead of cancel-and-resubmit when the underlying
+  // agent supports it natively; hydra synthesizes the amend-style
+  // fallback itself when it doesn't. Always operates against this
+  // connection's own sessionId (coerced below), so it's as harmless
+  // to forward as the amend/cancel/update trio above.
+  "_session/steering",
 ]);
 
 const ALLOWED_BROWSER_NOTIFICATION_METHODS = new Set<string>([
