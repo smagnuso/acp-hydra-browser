@@ -117,7 +117,7 @@ export function openChat(sessionId: string, load: boolean): void {
     loadOnConnect: load,
     reconnectAttempt: 0,
     headerExpanded: false,
-    unsolicitedTurnOpen: false,
+    unsolicitedTurnOpen: new Set(),
     configOptions: [],
   };
   state.current = initial;
@@ -224,7 +224,7 @@ function resetChatStateForReconnect(chat: ChatState): void {
   chat.queueByMessageId = new Map();
   chat.ownPromptIds = new Set();
   chat.inTurn = false;
-  chat.unsolicitedTurnOpen = false;
+  chat.unsolicitedTurnOpen = new Set();
   chat.idleListeners = [];
   chat.readyListeners = [];
   chat.currentPlanEntry = null;

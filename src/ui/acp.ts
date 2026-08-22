@@ -1043,8 +1043,11 @@ export function handleNotification(frame: JsonRpcFrame): void {
       const meta = (update._meta ?? {}) as AnyRecord;
       const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
       if (hydraMeta.unsolicited !== true) break;
-      if (state.current.unsolicitedTurnOpen) break;
-      state.current.unsolicitedTurnOpen = true;
+      const messageId =
+        typeof update.messageId === "string" ? update.messageId : undefined;
+      if (!messageId) break;
+      if (state.current.unsolicitedTurnOpen.has(messageId)) break;
+      state.current.unsolicitedTurnOpen.add(messageId);
       markActive();
       const cause = (hydraMeta.cause ?? {}) as AnyRecord;
       const label = typeof cause.label === "string" ? cause.label : undefined;
@@ -1061,12 +1064,25 @@ export function handleNotification(frame: JsonRpcFrame): void {
       const meta = (update._meta ?? {}) as AnyRecord;
       const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
       if (hydraMeta.unsolicited !== true) break;
-      if (!state.current.unsolicitedTurnOpen) break;
-      state.current.unsolicitedTurnOpen = false;
+      const startedMessageId =
+        typeof update.startedMessageId === "string"
+          ? update.startedMessageId
+          : undefined;
+      // Ignore a turn_ended that doesn't match any open id: a replay or
+      // an unpaired close (e.g. after a daemon restart) must not
+      // finalize a turn we never saw open, or double-close one already
+      // closed by an earlier turn_ended for a different messageId.
+      if (!startedMessageId) break;
+      if (!state.current.unsolicitedTurnOpen.has(startedMessageId)) break;
+      state.current.unsolicitedTurnOpen.delete(startedMessageId);
       // "superseded" means a prompt took over the still-running agent:
       // it isn't actually done, so don't finalize. The real end arrives
       // via that prompt's own turn_complete (or a later salvage).
       if (hydraMeta.reason === "superseded") break;
+      // Other unsolicited turns may still be open (e.g. overlapping
+      // onceIdle-swap retries); only finalize once none remain, since
+      // finalizeTurn tears down the single shared inTurn/spinner state.
+      if (state.current.unsolicitedTurnOpen.size > 0) break;
       finalizeTurn();
       break;
     }

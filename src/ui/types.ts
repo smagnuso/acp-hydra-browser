@@ -304,13 +304,18 @@ export interface ChatState {
   // Whether the chat-header's detail panel (full title/cwd/agent/model,
   // untruncated) is expanded. Toggled by clicking the header's info block.
   headerExpanded: boolean;
-  // True while an agent-initiated (unsolicited) turn is open server-side:
-  // the agent restarted itself off a finished background task, not a
-  // session/prompt we sent. Tracked locally (not inferred purely from
-  // messageId pairing) so a replayed or unpaired turn_ended (e.g. after
-  // a daemon restart) can't double-close or close a turn we never saw
-  // open. Mirrors cli's tui/app.ts and slack's acp/session.ts.
-  unsolicitedTurnOpen: boolean;
+  // messageIds of agent-initiated (unsolicited) turns currently open
+  // server-side: the agent restarted itself off a finished background
+  // task, not a session/prompt we sent. Keyed by messageId (turn_started's
+  // messageId, matched against turn_ended's startedMessageId) rather than
+  // a single boolean so overlapping unsolicited turns (e.g. several
+  // onceIdle-swap retries firing in quick succession during an agent
+  // switch) don't drop or misfire each other's open/close. A replayed or
+  // unpaired turn_ended (e.g. after a daemon restart) that doesn't match
+  // any open id is simply ignored rather than double-closing or closing a
+  // turn we never saw open. Mirrors cli's tui/app.ts and slack's
+  // acp/session.ts, adapted for the multi-turn case.
+  unsolicitedTurnOpen: Set<string>;
   // Count of background tasks armed but not yet resolved, and when the
   // oldest of them was armed. Seeded from bridge/ready's forwarded
   // session/attach _meta and kept live by
