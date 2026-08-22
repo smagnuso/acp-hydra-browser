@@ -47,6 +47,16 @@ export function sendWorkspaceCommand(
   render();
 }
 
+// Fire /hydra compact, same eager-send path. The confirm prompt and the
+// compactionPhase no-op guard live in views.ts alongside the pill's click
+// handler; this is just the dispatch.
+export function sendCompactCommand(): void {
+  const c = state.current;
+  if (!c) return;
+  dispatchPrompt(c, "/hydra compact", { addToHistory: false });
+  render();
+}
+
 function dispatchPrompt(
   c: ChatState,
   text: string,

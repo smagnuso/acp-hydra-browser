@@ -2,7 +2,7 @@
 // signal (inTurn) and tool-call/permission tracking. Stays free of WS
 // plumbing — that lives in bridge.ts.
 
-import { state } from "./state.js";
+import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { contentToText } from "./markdown.js";
 import { extractEditDiff } from "./edit-diff.js";
@@ -788,6 +788,43 @@ export function parseArmedTaskList(raw: unknown): ArmedTask[] | undefined {
   return out;
 }
 
+// session/update kind "hydra_compaction": agent-side history summarization
+// + generation swap, not tied to a turn (can fire while idle, or be
+// deferred until the session quiesces). Mirrors the TUI's persistent
+// compactionIndicator/transient notify() split (app.ts
+// handleCompactionUpdate): a persistent phase while running, cleared on
+// swapped/failed/rolled_back with a toast — deliberately not on converged,
+// which can arrive before or after the terminal swap.
+function onCompactionUpdate(update: AnyRecord): void {
+  if (!state.current) return;
+  const phase = typeof update.phase === "string" ? update.phase : "";
+  switch (phase) {
+    case "started":
+    case "iteration":
+      state.current.compactionPhase = "running";
+      break;
+    case "deferred":
+      state.current.compactionPhase = "deferred";
+      break;
+    case "swapped":
+      state.current.compactionPhase = undefined;
+      setState({ banner: { kind: "good", text: "Context compacted." } });
+      break;
+    case "failed":
+      state.current.compactionPhase = undefined;
+      setState({ banner: { kind: "bad", text: "Context compaction failed." } });
+      break;
+    case "rolled_back":
+      state.current.compactionPhase = undefined;
+      setState({ banner: { kind: "warn", text: "Compaction rolled back." } });
+      break;
+    default:
+      // "converged" and anything unrecognized: leave the persistent phase
+      // as-is.
+      break;
+  }
+}
+
 // hydra-acp/prompt/amended is the M1→M2 linkage event. We may have
 // already tagged the pair via the amending _meta hint on M2's
 // prompt_queue_added, but this notification is the authoritative
@@ -1119,6 +1156,9 @@ export function handleNotification(frame: JsonRpcFrame): void {
       if (state.current && typeof update.title === "string") {
         state.current.title = update.title;
       }
+      break;
+    case "hydra_compaction":
+      onCompactionUpdate(update);
       break;
     default:
       // Unknown but harmless; ignore.

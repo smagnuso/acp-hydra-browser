@@ -342,6 +342,13 @@ export interface ChatState {
   // "no list known yet" (daemon too old, or not seeded); [] means "seeded,
   // nothing armed".
   armedTaskList?: ArmedTask[];
+  // Live hydra_compaction phase, from session/update notifications. Mirrors
+  // the TUI's persistent compactionIndicator (app.ts handleCompactionUpdate):
+  // set on "started"/"iteration" ("running") and "deferred" ("deferred"),
+  // cleared on "swapped"/"failed"/"rolled_back" — deliberately NOT on
+  // "converged", which can arrive before or after the terminal swap.
+  // Undefined means "not compacting".
+  compactionPhase?: "running" | "deferred";
   // Full config-option snapshot (model/mode/agent plus whatever the
   // agent advertises, e.g. effort). See config_option_update handling
   // in acp.ts. Empty until the first snapshot arrives.

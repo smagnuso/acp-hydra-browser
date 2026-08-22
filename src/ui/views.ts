@@ -20,6 +20,7 @@ import {
   cancelProcessingPrompt,
   cancelQueuedPrompt,
   sendCancel,
+  sendCompactCommand,
   sendPrompt,
   sendSetConfigOption,
   sendSetMode,
@@ -598,6 +599,18 @@ async function killSession(s: SessionInfo): Promise<void> {
   }
 }
 
+// Click handler for the context-usage pill. A no-op while compaction is
+// already running/queued (compactionPhase set) rather than re-prompting —
+// onCompactionUpdate (acp.ts) clears it and toasts a banner once the
+// daemon reports a terminal phase.
+function requestCompact(c: ChatState): void {
+  if (c.compactionPhase) return;
+  if (!confirm("Compact this session's context now? The agent will summarize history and continue from the summary.")) {
+    return;
+  }
+  sendCompactCommand();
+}
+
 // Navigate to the export endpoint to trigger the browser's native
 // download flow. The proxy forwards the daemon's Content-Disposition
 // header so the file lands with the right filename; the session
@@ -1062,10 +1075,19 @@ function renderChat(c: ChatState): HTMLElement {
         ? el(
             "span",
             {
-              class: "pill",
-              title: `${c.contextUsed.toLocaleString()} / ${c.contextSize.toLocaleString()} context tokens`,
+              class: c.compactionPhase ? "pill clickable compacting" : "pill clickable",
+              title: c.compactionPhase
+                ? c.compactionPhase === "deferred"
+                  ? "Compaction queued — will run once the session is idle."
+                  : "Compacting…"
+                : `${c.contextUsed.toLocaleString()} / ${c.contextSize.toLocaleString()} context tokens — click to compact`,
+              ...tapHandler(() => requestCompact(c)),
             },
-            `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
+            c.compactionPhase
+              ? c.compactionPhase === "deferred"
+                ? "⏳ queued"
+                : "◐ compacting…"
+              : `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
           )
         : null,
       fmtCost(c.cost)
