@@ -13,6 +13,7 @@ import {
   pushLog,
 } from "./acp.js";
 import { cancelAllQueued } from "./queue.js";
+import { parseArmedTaskList } from "./acp.js";
 import type { ChatState, PermissionEntry } from "./types.js";
 
 interface JsonRpcFrame {
@@ -111,6 +112,7 @@ export function handleFrame(frame: JsonRpcFrame): void {
         hydraMeta.armedTasks > 0 && typeof hydraMeta.armedSince === "number"
           ? hydraMeta.armedSince
           : undefined;
+      state.current.armedTaskList = parseArmedTaskList(hydraMeta.armedTaskList);
     }
     // Wake any queued prompt that was waiting for the bridge handshake.
     const listeners = state.current.readyListeners;

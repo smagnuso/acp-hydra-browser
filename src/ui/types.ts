@@ -24,6 +24,20 @@ export interface ConfigOption {
   options: ConfigOptionValue[];
 }
 
+// One background job the agent is running right now (Monitor, backgrounded
+// Bash), as the daemon reports it via hydra-acp/session/armed_tasks_updated.
+// Outlives the turn that armed it — see PROTOCOL.md "Armed tasks (the third
+// session state)". Level-sourced entries (claude-acp) carry taskId/taskType
+// but no toolCallId; edge-inferred entries (other agents) carry toolCallId
+// but taskId only once an update reveals it. Always REPLACE, never merge.
+export interface ArmedTask {
+  label: string;
+  taskId?: string;
+  taskType?: string;
+  toolCallId?: string;
+  since: number;
+}
+
 export interface SessionInfo {
   sessionId: string;
   cwd: string;
@@ -323,6 +337,11 @@ export interface ChatState {
   // onArmedTasksUpdated).
   armedTasks?: number;
   armedSince?: number;
+  // The armed set itself (names, per-task elapsed), not just the count.
+  // Same seeding/replace rules as armedTasks/armedSince. Undefined means
+  // "no list known yet" (daemon too old, or not seeded); [] means "seeded,
+  // nothing armed".
+  armedTaskList?: ArmedTask[];
   // Full config-option snapshot (model/mode/agent plus whatever the
   // agent advertises, e.g. effort). See config_option_update handling
   // in acp.ts. Empty until the first snapshot arrives.

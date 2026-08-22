@@ -7,6 +7,7 @@ import { render } from "./renderer.js";
 import { contentToText } from "./markdown.js";
 import { extractEditDiff } from "./edit-diff.js";
 import type {
+  ArmedTask,
   ConfigOption,
   EditDiffLogItem,
   ExitPlanLogItem,
@@ -762,6 +763,29 @@ function onArmedTasksUpdated(params: AnyRecord): void {
     params.count > 0 && typeof params.since === "number"
       ? params.since
       : undefined;
+  state.current.armedTaskList = parseArmedTaskList(params.tasks);
+}
+
+// Validates each entry rather than a bare cast: this rides straight off the
+// wire, and a malformed one (old/mismatched daemon) shouldn't paint garbage
+// rows in the tasks block. Exported so bridge.ts can reuse it to seed from
+// the attach/new response's armedTaskList snapshot.
+export function parseArmedTaskList(raw: unknown): ArmedTask[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: ArmedTask[] = [];
+  for (const t of raw) {
+    if (!t || typeof t !== "object") continue;
+    const r = t as AnyRecord;
+    if (typeof r.label !== "string" || typeof r.since !== "number") continue;
+    out.push({
+      label: r.label,
+      since: r.since,
+      taskId: typeof r.taskId === "string" ? r.taskId : undefined,
+      taskType: typeof r.taskType === "string" ? r.taskType : undefined,
+      toolCallId: typeof r.toolCallId === "string" ? r.toolCallId : undefined,
+    });
+  }
+  return out;
 }
 
 // hydra-acp/prompt/amended is the M1→M2 linkage event. We may have

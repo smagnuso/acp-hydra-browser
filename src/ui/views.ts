@@ -32,6 +32,7 @@ import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
+  ArmedTask,
   ChatState,
   ConfigOption,
   EditDiffLogItem,
@@ -81,14 +82,10 @@ function agentWithModel(
   return m ? `${a}•${m}` : a;
 }
 
-// Abbreviated "time since" hint for the subtitle row. Matches the
-// CLI/TUI style: "<1m", "12m", "3h", "2d", "5w", "11mo", "2y".
-function formatRelativeAge(iso: string | undefined, now: number = Date.now()): string {
-  if (!iso) return "?";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return "?";
-  const diff = Math.max(0, now - t);
-  const sec = Math.floor(diff / 1000);
+// Abbreviated duration. Matches the CLI/TUI style: "<1m", "12m", "3h",
+// "2d", "5w", "11mo", "2y".
+function formatDuration(ms: number): string {
+  const sec = Math.floor(Math.max(0, ms) / 1000);
   if (sec < 60) return "<1m";
   const min = Math.floor(sec / 60);
   if (min < 60) return `${min}m`;
@@ -102,6 +99,14 @@ function formatRelativeAge(iso: string | undefined, now: number = Date.now()): s
   if (month < 12) return `${month}mo`;
   const year = Math.floor(day / 365);
   return `${year}y`;
+}
+
+// "Time since" hint for the subtitle row.
+function formatRelativeAge(iso: string | undefined, now: number = Date.now()): string {
+  if (!iso) return "?";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "?";
+  return formatDuration(now - t);
 }
 
 // Compact-format a token count: <1k → "n", <1M → "n.nk", else "n.nM".
@@ -921,6 +926,44 @@ function renderListModal(
   );
 }
 
+// Mirrors the TUI's tasksGadget (cli/src/tui/sidebar/gadgets.ts): a list of
+// background jobs the agent armed (Monitor, backgrounded Bash) that outlive
+// their turn and can wake the session up on their own. REPLACE semantics —
+// there's no "done" state, an entry simply stops appearing in the next
+// armed_tasks_updated payload once it resolves.
+const ARMED_TASKS_PAGE_SIZE = 5;
+
+function renderArmedTasksBlock(c: ChatState): Node {
+  const tasks = c.armedTaskList;
+  if (!tasks || tasks.length === 0) return document.createTextNode("");
+  const shown = tasks.slice(0, ARMED_TASKS_PAGE_SIZE);
+  const now = Date.now();
+  return el(
+    "div",
+    { class: "armed-tasks" },
+    ...shown.map((t: ArmedTask) =>
+      el(
+        "div",
+        { class: "armed-task" },
+        el("span", { class: "dot" }, "◐"),
+        el(
+          "span",
+          { class: "label" },
+          t.label.length > 0 ? t.label : (t.taskType ?? "background task"),
+        ),
+        el("span", { class: "elapsed" }, formatDuration(now - t.since)),
+      ),
+    ),
+    tasks.length > ARMED_TASKS_PAGE_SIZE
+      ? el(
+          "div",
+          { class: "armed-tasks-more" },
+          `+${tasks.length - ARMED_TASKS_PAGE_SIZE} more`,
+        )
+      : null,
+  );
+}
+
 // ---- Chat view ---------------------------------------------------
 
 function renderChat(c: ChatState): HTMLElement {
@@ -1246,7 +1289,15 @@ function renderChat(c: ChatState): HTMLElement {
   // renderer also respects the user's scrollTop when they're not at
   // the bottom.
 
-  return el("div", { class: "chat" }, header, details, body, composer);
+  return el(
+    "div",
+    { class: "chat" },
+    header,
+    details,
+    renderArmedTasksBlock(c),
+    body,
+    composer,
+  );
 }
 
 function renderLogItem(item: ChatState["log"][number]): Node {

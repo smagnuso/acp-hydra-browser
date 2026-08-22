@@ -111,6 +111,15 @@ pre code { background: transparent; padding: 0; }
 .chat-header .info.clickable { cursor: pointer; }
 .chat-details { background: var(--panel); border-bottom: 1px solid var(--border); padding: 0.6rem 0.9rem; }
 .chat-details .detail:last-child { margin-bottom: 0; }
+
+/* Armed background tasks (Monitor / backgrounded Bash) — mirrors the TUI's
+   tasks sidebar gadget. No "done" state: a row just stops appearing. */
+.armed-tasks { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.4rem 0.9rem; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 0.82rem; }
+.armed-task { display: flex; gap: 0.4rem; align-items: baseline; }
+.armed-task .dot { color: var(--accent); }
+.armed-task .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.armed-task .elapsed { color: var(--muted); font-variant-numeric: tabular-nums; }
+.armed-tasks-more { color: var(--muted); font-size: 0.78rem; padding-left: 1.1rem; }
 .chat-header .info .row2 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-body { flex: 1; overflow-y: auto; padding: 1rem max(1rem, calc(50% - 28rem)); display: flex; flex-direction: column; gap: 0.65rem; }
 .msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }
