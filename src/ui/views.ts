@@ -630,17 +630,23 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
       el(
         "div",
         { class: "badges" },
-        el(
-          "span",
-          {
-            class: `badge ${s.status === "cold" ? "cold" : "warm"}`,
-            title:
-              s.status === "cold"
-                ? "Disk-only — opening will resurrect the session"
-                : "Live in-memory session",
-          },
-          s.status === "cold" ? "cold" : "warm",
-        ),
+        // "warm" is implied by busy/needs-input/armed (you can't be busy
+        // and not warm), so skip the redundant badge whenever one of
+        // those is already showing — "cold" is still worth its own badge
+        // since it's the interesting/actionable state either way.
+        s.status === "cold" || !(s.busy || s.awaitingInput || armed)
+          ? el(
+              "span",
+              {
+                class: `badge ${s.status === "cold" ? "cold" : "warm"}`,
+                title:
+                  s.status === "cold"
+                    ? "Disk-only — opening will resurrect the session"
+                    : "Live in-memory session",
+              },
+              s.status === "cold" ? "cold" : "warm",
+            )
+          : null,
         s.busy || s.awaitingInput || armed
           ? el(
               "span",
@@ -1132,6 +1138,17 @@ function renderChat(c: ChatState): HTMLElement {
               ...tapHandler(toggleDetails),
             },
             "connecting…",
+          )
+        : c.pendingPermissions.size > 0
+        ? el(
+            "span",
+            {
+              class: "pill blocked clickable",
+              title: "Waiting on you — a permission request is pending",
+              ...tapHandler(toggleDetails),
+            },
+            el("span", { class: "dot" }, "●"),
+            "blocked",
           )
         : c.inTurn
         ? el(
