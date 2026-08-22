@@ -663,18 +663,29 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
               s.status === "cold" ? "cold" : "warm",
             )
           : null,
-        s.busy || s.awaitingInput || armed
+        // busy and blocked are independent axes, not one enum — a session
+        // can be mid-turn AND blocked on a permission prompt at once, so
+        // both badges can legitimately show together.
+        s.busy || armed
           ? el(
               "span",
               {
                 class: "badge busy",
                 title: s.busy
                   ? "Agent is working"
-                  : s.awaitingInput
-                    ? "Waiting on you — a permission request or other prompt is pending"
-                    : "Agent has a background task running. It may resume on its own.",
+                  : "Agent has a background task running. It may resume on its own.",
               },
-              s.awaitingInput && !s.busy ? "needs input" : "busy",
+              "busy",
+            )
+          : null,
+        s.awaitingInput
+          ? el(
+              "span",
+              {
+                class: "badge blocked",
+                title: "Waiting on you — a permission request or other prompt is pending",
+              },
+              "blocked",
             )
           : null,
         el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
@@ -1155,17 +1166,6 @@ function renderChat(c: ChatState): HTMLElement {
             },
             "connecting…",
           )
-        : c.pendingPermissions.size > 0
-        ? el(
-            "span",
-            {
-              class: "pill blocked clickable",
-              title: "Waiting on you — a permission request is pending",
-              ...tapHandler(toggleDetails),
-            },
-            el("span", { class: "dot" }, "●"),
-            "blocked",
-          )
         : c.inTurn
         ? el(
             "span",
@@ -1175,7 +1175,20 @@ function renderChat(c: ChatState): HTMLElement {
               ...tapHandler(toggleDetails),
             },
             el("span", { class: "dot" }, "●"),
-            "busy",
+            "thinking",
+          )
+        : c.armedTasks && c.armedTasks > 0
+        ? el(
+            "span",
+            {
+              class: "pill waiting clickable",
+              title: c.armedSince
+                ? `Agent has a background task running (armed ${Math.max(1, Math.floor((Date.now() - c.armedSince) / 60000))}m ago). It may resume on its own.`
+                : "Agent has a background task running. It may resume on its own.",
+              ...tapHandler(toggleDetails),
+            },
+            el("span", { class: "dot" }, "●"),
+            "waiting",
           )
         : el(
             "span",
@@ -1187,19 +1200,6 @@ function renderChat(c: ChatState): HTMLElement {
             el("span", { class: "dot" }, "●"),
             "ready",
           ),
-      c.armedTasks && c.armedTasks > 0
-        ? el(
-            "span",
-            {
-              class: "pill armed clickable",
-              title: c.armedSince
-                ? `Agent has a background task running (armed ${Math.max(1, Math.floor((Date.now() - c.armedSince) / 60000))}m ago). It may resume on its own.`
-                : "Agent has a background task running. It may resume on its own.",
-              ...tapHandler(toggleDetails),
-            },
-            "armed",
-          )
-        : null,
       live?.workspace
         ? el(
             "span",
