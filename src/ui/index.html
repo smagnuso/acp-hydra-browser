@@ -218,6 +218,25 @@ pre code { background: transparent; padding: 0; }
 .banner { padding: 0.4rem 0.9rem; font-size: 0.85rem; text-align: center; }
 .banner.bad { background: rgba(249,117,131,0.12); color: var(--bad); border-bottom: 1px solid var(--bad); }
 .banner.warn { background: rgba(212,161,126,0.12); color: var(--warn); border-bottom: 1px solid var(--warn); }
+
+/* Pull-to-refresh indicator (session list only) */
+.pull-refresh {
+  position: fixed;
+  left: 50%;
+  top: calc(0.5rem + env(safe-area-inset-top));
+  transform: translate(-50%, -48px);
+  z-index: 60;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  transition: opacity 0.1s linear;
+}
 </style>
 </head>
 <body>
