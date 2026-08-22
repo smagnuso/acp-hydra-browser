@@ -26,7 +26,7 @@ import {
   sendWorkspaceCommand,
   updateQueuedPrompt,
 } from "./queue.js";
-import { closeChat, openChat } from "./routing.js";
+import { openChat } from "./routing.js";
 import type {
   AppState,
   ChatState,
@@ -900,7 +900,6 @@ function renderChat(c: ChatState): HTMLElement {
   const header = el(
     "div",
     { class: "chat-header" },
-    el("button", { class: "ghost back", onclick: closeChat }, "←"),
     el(
       "div",
       {
