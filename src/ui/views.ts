@@ -969,7 +969,7 @@ function renderChat(c: ChatState): HTMLElement {
         el(
           "div",
           { class: "row2" },
-          `${shortSessionId(c.sessionId)} · ${agentWithModel(agentId, model)} · ${cwd ? shortenCwd(cwd) : "?"}`,
+          `${agentWithModel(agentId, model)} · ${cwd ? shortenCwd(cwd) : "?"}`,
         ),
       ),
       !c.ready
@@ -1064,7 +1064,7 @@ function renderChat(c: ChatState): HTMLElement {
         "div",
         { class: "chat-details" },
         detailRow("title", title),
-        detailRow("session", c.sessionId),
+        detailRow("session", shortSessionId(c.sessionId)),
         detailRow("cwd", cwd || "?"),
         workspaceRow(live?.workspace),
         ...c.configOptions.map(configOptionRow),
