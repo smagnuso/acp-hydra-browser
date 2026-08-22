@@ -462,9 +462,6 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
         "div",
         { class: "meta" },
         el("div", { class: "row2" }, subtitle),
-        showCwd
-          ? el("div", { class: "row3" }, s.cwd ? shortenCwd(s.cwd) : "?")
-          : null,
       ),
       el(
         "div",
@@ -548,6 +545,9 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
         ),
       ),
     ),
+    showCwd
+      ? el("div", { class: "row3" }, s.cwd ? shortenCwd(s.cwd) : "?")
+      : null,
   );
 }
 
