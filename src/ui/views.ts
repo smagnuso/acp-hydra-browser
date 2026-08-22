@@ -603,6 +603,11 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
     agentWithModel(s.agentId, s.currentModel),
     `age ${formatRelativeAge(s.updatedAt)}`,
   ].join(" · ");
+  // A session with armed background tasks but no turn in flight is idle
+  // right now but may restart itself with no prompt. The TUI just folds
+  // that into "busy" rather than giving it its own status, so mirror
+  // that here instead of a separate "armed" badge.
+  const armed = !s.busy && (s.armedTasks ?? 0) > 0;
   return el(
     "div",
     {
@@ -636,30 +641,18 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
           },
           s.status === "cold" ? "cold" : "warm",
         ),
-        s.busy || s.awaitingInput
+        s.busy || s.awaitingInput || armed
           ? el(
               "span",
               {
                 class: "badge busy",
                 title: s.busy
                   ? "Agent is working"
-                  : "Waiting on you — a permission request or other prompt is pending",
+                  : s.awaitingInput
+                    ? "Waiting on you — a permission request or other prompt is pending"
+                    : "Agent has a background task running. It may resume on its own.",
               },
-              s.busy ? "busy" : "needs input",
-            )
-          : null,
-        // A session with armed background tasks but no turn in flight is
-        // idle right now but may restart itself with no prompt: worth a
-        // distinct badge from "busy" (working right now) so a user
-        // browsing the list can tell it isn't fully at rest.
-        !s.busy && (s.armedTasks ?? 0) > 0
-          ? el(
-              "span",
-              {
-                class: "badge armed",
-                title: "Agent has a background task running. It may resume on its own.",
-              },
-              "armed",
+              s.awaitingInput && !s.busy ? "needs input" : "busy",
             )
           : null,
         el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),

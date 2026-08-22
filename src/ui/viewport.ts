@@ -127,9 +127,8 @@ export function initViewportHeight(): void {
   const apply = (): void => {
     const vv = window.visualViewport;
     const h = (vv?.height ?? window.innerHeight) + topInsetPx();
-    const offsetTop = vv?.offsetTop ?? 0;
+    const rawOffsetTop = vv?.offsetTop ?? 0;
     root.style.setProperty("--app-height", `${h}px`);
-    root.style.setProperty("--app-offset-top", `${offsetTop}px`);
     // env(safe-area-inset-bottom) is a static device property — it
     // doesn't shrink to 0 just because the keyboard now occupies that
     // strip of the screen instead of the home-indicator gesture area.
@@ -145,6 +144,16 @@ export function initViewportHeight(): void {
     maxHeightByWidth.set(widthKey, ceiling);
     const keyboardOpen = ceiling - h > KEYBOARD_HEIGHT_THRESHOLD_PX;
     root.classList.toggle("keyboard-open", keyboardOpen);
+    // visualViewport fires "scroll" for more than the keyboard pan this
+    // is meant to counter — a touch-drag inside a scrollable div (e.g.
+    // .chat-body) can make WebKit pan the visual viewport itself instead
+    // of cleanly scrolling the div, and mirroring that into body's
+    // transform unconditionally turns "scroll chat history" into "drag
+    // the whole app around, and it doesn't reliably scroll." Only apply
+    // the offset while the keyboard is actually open, which is the one
+    // case this compensates for.
+    const offsetTop = keyboardOpen ? rawOffsetTop : 0;
+    root.style.setProperty("--app-offset-top", `${offsetTop}px`);
     if (DEBUG_VIEWPORT) updateDebugOverlay(h, offsetTop, keyboardOpen);
   };
   apply();
