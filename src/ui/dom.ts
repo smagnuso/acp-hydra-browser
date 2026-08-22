@@ -39,6 +39,43 @@ export function el(tag: string, attrs?: Attrs, ...children: Child[]): HTMLElemen
   return node;
 }
 
+// Button activation via "click" is unreliable on mobile Chrome for this
+// app: click is a compatibility event synthesized after pointerup, and
+// on a slower device it can land a frame or more later — after our
+// full-teardown render() has already replaced the button's DOM node out
+// from under it, silently dropping the event. pointerup fires
+// synchronously with the physical release, before any of that, so we
+// act on it directly instead. preventDefault on pointerdown stops the
+// button from taking focus (which would blur/dismiss an open mobile
+// keyboard) and, for touch, suppresses the compatibility click entirely;
+// the firedViaPointer guard covers the mouse case, where click still
+// fires after pointerup despite the preventDefault. A plain "click" (no
+// preceding pointerdown/pointerup — keyboard Enter/Space activation)
+// still runs fn() normally.
+export function tapHandler(fn: () => void): Record<string, unknown> {
+  let firedViaPointer = false;
+  return {
+    onpointerdown: (e: Event) => {
+      const pe = e as PointerEvent;
+      if (pe.pointerType === "mouse" && pe.button !== 0) return;
+      e.preventDefault();
+    },
+    onpointerup: (e: Event) => {
+      const pe = e as PointerEvent;
+      if (pe.pointerType === "mouse" && pe.button !== 0) return;
+      firedViaPointer = true;
+      fn();
+    },
+    onclick: () => {
+      if (firedViaPointer) {
+        firedViaPointer = false;
+        return;
+      }
+      fn();
+    },
+  };
+}
+
 function appendChild(parent: Node, c: Child): void {
   if (c == null || c === false) return;
   if (c instanceof Node) {

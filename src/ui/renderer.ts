@@ -8,6 +8,42 @@ import { renderApp } from "./views.js";
 
 let scheduled = false;
 
+// A full render() tears down and rebuilds the whole #app tree (see
+// actuallyRender() below), which destroys any DOM node mid-gesture. A
+// button press spans mousedown/touchstart -> mouseup/touchend -> click,
+// and WS traffic (e.g. agent_message_chunk while a turn is streaming)
+// can trigger a render() at any point in that window — tearing out the
+// pressed button before the click event has a chance to fire on it. So
+// while a button is physically held down we hold off on the actual
+// rebuild; the deferred render flushes on release, just before the
+// browser dispatches click, so the still-live node handles it normally.
+let buttonPressed = false;
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    if ((e.target as HTMLElement | null)?.closest("button")) {
+      buttonPressed = true;
+    }
+  },
+  true,
+);
+document.addEventListener(
+  "pointerup",
+  () => {
+    if (!buttonPressed) return;
+    buttonPressed = false;
+    render();
+  },
+  true,
+);
+document.addEventListener(
+  "pointercancel",
+  () => {
+    buttonPressed = false;
+  },
+  true,
+);
+
 // Debug mode is enabled via ?debug=1 in the URL. When on, render() logs
 // each scheduled render with a stack trace fingerprint and updates a
 // tiny corner overlay showing renders-per-second.
@@ -35,6 +71,11 @@ export function render(): void {
   scheduled = true;
   requestAnimationFrame(() => {
     scheduled = false;
+    if (buttonPressed) {
+      // Defer until the press releases instead of dropping the render.
+      render();
+      return;
+    }
     actuallyRender();
     if (DEBUG_RENDER) {
       renderCount += 1;
@@ -49,7 +90,7 @@ function updateDebugOverlay(): void {
     overlay = document.createElement("div");
     overlay.id = "__render_debug__";
     overlay.style.cssText =
-      "position:fixed;bottom:0.5rem;right:0.5rem;z-index:9999;background:rgba(0,0,0,0.85);color:#9fd;padding:0.4rem 0.6rem;font:11px/1.3 ui-monospace,monospace;border:1px solid #6ea8fe;border-radius:6px;max-width:30rem;max-height:14rem;overflow:auto;pointer-events:none;white-space:pre-wrap";
+      "position:fixed;top:0.5rem;right:0.5rem;z-index:9999;background:rgba(0,0,0,0.85);color:#9fd;padding:0.4rem 0.6rem;font:11px/1.3 ui-monospace,monospace;border:1px solid #6ea8fe;border-radius:6px;max-width:30rem;max-height:14rem;overflow:auto;pointer-events:none;white-space:pre-wrap";
     document.body.appendChild(overlay);
   }
   const recent = lastReasons.slice(-5).join("\n");

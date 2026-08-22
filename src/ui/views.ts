@@ -5,7 +5,7 @@
 
 import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
-import { el } from "./dom.js";
+import { el, tapHandler } from "./dom.js";
 import { renderMarkdown, escapeHtml } from "./markdown.js";
 import { highlightCode } from "./hljs.js";
 import {
@@ -1135,6 +1135,12 @@ function renderChat(c: ChatState): HTMLElement {
   //   - Enqueue: behave like the idle-case Send — sit in the FIFO until
   //     the agent finishes.
   // When idle, a single Send button covers both behaviors.
+  // tapHandler acts on pointerup instead of click: on mobile Chrome the
+  // "click" fired for a button in this composer can land a frame or
+  // more after the physical tap release, by which point a WS-driven
+  // render() may have already torn down and rebuilt this button's DOM
+  // node, silently dropping the event (the tap highlight still flashes
+  // regardless, so the button looks like it registered).
   const sendButtons: Node[] = [];
   if (c.inTurn) {
     if (c.daemonSupportsAmend && c.currentHeadMessageId !== undefined) {
@@ -1142,7 +1148,7 @@ function renderChat(c: ChatState): HTMLElement {
         el(
           "button",
           {
-            onclick: amendPrompt,
+            ...tapHandler(amendPrompt),
             title: "Cancel the current turn and replace its prompt",
           },
           "Amend",
@@ -1154,7 +1160,7 @@ function renderChat(c: ChatState): HTMLElement {
         "button",
         {
           class: "primary",
-          onclick: sendPrompt,
+          ...tapHandler(sendPrompt),
           title: "Queue this prompt to run after the current turn",
         },
         "Enqueue",
@@ -1162,7 +1168,11 @@ function renderChat(c: ChatState): HTMLElement {
     );
   } else {
     sendButtons.push(
-      el("button", { class: "primary", onclick: sendPrompt }, "Send"),
+      el(
+        "button",
+        { class: "primary", ...tapHandler(sendPrompt) },
+        "Send",
+      ),
     );
   }
   const composer = el(
@@ -1172,7 +1182,11 @@ function renderChat(c: ChatState): HTMLElement {
     el(
       "div",
       { class: "composer-buttons" },
-      el("button", { class: "stop", onclick: sendCancel, title: "Cancel current turn" }, "Stop"),
+      el(
+        "button",
+        { class: "stop", ...tapHandler(sendCancel), title: "Cancel current turn" },
+        "Stop",
+      ),
       ...sendButtons,
     ),
   );
