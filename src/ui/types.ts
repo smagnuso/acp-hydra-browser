@@ -13,6 +13,12 @@ export interface SessionInfo {
   attachedClients?: number;
   updatedAt?: string;
   status?: "warm" | "cold";
+  // Mid-turn flag (a prompt is in flight). See PROTOCOL.md's
+  // SessionListEntry.
+  busy?: boolean;
+  // Any attention flag raised — a permission request or transformer flag
+  // waiting on the user. Can be true on cold sessions too.
+  awaitingInput?: boolean;
   // Hostname of the machine that exported the bundle this session was
   // imported from. Undefined for sessions created on this host.
   importedFromMachine?: string;
@@ -216,6 +222,9 @@ export interface ChatState {
   // Reconnects should not re-send it: load=true is the cold-start
   // hint for session/load and is harmless but wasted on a hot session.
   loadOnConnect?: boolean;
+  // Whether the chat-header's detail panel (full title/cwd/agent/model,
+  // untruncated) is expanded. Toggled by clicking the header's info block.
+  headerExpanded: boolean;
 }
 
 export interface SessionModalData {

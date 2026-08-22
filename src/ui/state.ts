@@ -6,6 +6,30 @@
 import type { AppState } from "./types.js";
 import { render } from "./renderer.js";
 
+// Topbar filters survive a reload so switching devices/tabs doesn't
+// reset how the session list is sliced.
+const FILTER_STORAGE_KEY = "hydra-acp-browser:filters";
+const PERSISTED_KEYS = ["groupBy", "showCold", "hostFilter"] as const;
+
+function loadPersistedFilters(): Partial<AppState> {
+  try {
+    const raw = localStorage.getItem(FILTER_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function savePersistedFilters(): void {
+  try {
+    const out: Record<string, unknown> = {};
+    for (const k of PERSISTED_KEYS) out[k] = state[k];
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(out));
+  } catch {
+    // Private browsing / quota — the filters just won't persist.
+  }
+}
+
 export const state: AppState = {
   view: "list",
   sessions: [],
@@ -23,16 +47,24 @@ export const state: AppState = {
   banner: null,
   modal: null,
   current: null,
+  ...loadPersistedFilters(),
 };
 
 export function setState(patch: Partial<AppState>): void {
   let changed = false;
+  let filtersChanged = false;
   for (const k of Object.keys(patch) as Array<keyof AppState>) {
     const next = (patch as Record<string, unknown>)[k as string];
     if (!sameValue(state[k], next)) {
       (state as unknown as Record<string, unknown>)[k as string] = next;
       changed = true;
+      if ((PERSISTED_KEYS as readonly string[]).includes(k as string)) {
+        filtersChanged = true;
+      }
     }
+  }
+  if (filtersChanged) {
+    savePersistedFilters();
   }
   if (changed) {
     render();

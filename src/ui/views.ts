@@ -338,6 +338,21 @@ function compareSessions(a: SessionInfo, b: SessionInfo): number {
   return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
 }
 
+// Collapse a leading home directory into "~" so the session list has
+// room to actually show the rest of the path instead of truncating it.
+function shortenCwd(cwd: string): string {
+  return cwd.replace(/^\/(home|Users)\/[^/]+/, "~");
+}
+
+function detailRow(label: string, value: string): HTMLElement {
+  return el(
+    "div",
+    { class: "detail" },
+    el("span", { class: "k" }, label),
+    el("code", null, value),
+  );
+}
+
 function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): SessionGroup[] {
   if (mode === "recent") {
     const sorted = sessions.slice().sort(compareSessions);
@@ -352,22 +367,18 @@ function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): Ses
   const out: SessionGroup[] = [];
   for (const [cwd, items] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     items.sort(compareSessions);
-    out.push({ label: cwd, sessions: items });
+    out.push({ label: shortenCwd(cwd), sessions: items });
   }
   return out;
 }
 
 function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
   const title = s.title || fallbackTitle(s.sessionId);
-  const parts = [
+  const subtitle = [
     shortSessionId(s.sessionId),
     agentWithModel(s.agentId, s.currentModel),
     `age ${formatRelativeAge(s.updatedAt)}`,
-  ];
-  if (showCwd) {
-    parts.push(s.cwd || "?");
-  }
-  const subtitle = parts.join(" · ");
+  ].join(" · ");
   return el(
     "div",
     {
@@ -378,65 +389,84 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
         openChat(s.sessionId, s.status === "cold");
       },
     },
+    el("div", { class: "row1" }, title),
     el(
       "div",
-      { class: "meta" },
-      el("div", { class: "row1" }, title),
-      el("div", { class: "row2" }, subtitle),
-    ),
-    el(
-      "div",
-      { class: "badges" },
+      { class: "card-body" },
       el(
-        "span",
-        {
-          class: `badge ${s.status === "cold" ? "cold" : "warm"}`,
-          title:
-            s.status === "cold"
-              ? "Disk-only — opening will resurrect the session"
-              : "Live in-memory session",
-        },
-        s.status === "cold" ? "cold" : "warm",
+        "div",
+        { class: "meta" },
+        el("div", { class: "row2" }, subtitle),
+        showCwd
+          ? el("div", { class: "row3" }, s.cwd ? shortenCwd(s.cwd) : "?")
+          : null,
       ),
-      el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
-      ...(s.importedFromMachine && !s.upstreamSessionId
-        ? [
-            el(
+      el(
+        "div",
+        { class: "badges" },
+        el(
+          "span",
+          {
+            class: `badge ${s.status === "cold" ? "cold" : "warm"}`,
+            title:
+              s.status === "cold"
+                ? "Disk-only — opening will resurrect the session"
+                : "Live in-memory session",
+          },
+          s.status === "cold" ? "cold" : "warm",
+        ),
+        s.busy || s.awaitingInput
+          ? el(
               "span",
               {
-                class: "badge imported",
-                title: `Passive mirror imported from ${s.importedFromMachine} — attach to start working on it here.`,
+                class: "badge busy",
+                title: s.busy
+                  ? "Agent is working"
+                  : "Waiting on you — a permission request or other prompt is pending",
               },
-              `← ${s.importedFromMachine}`,
-            ),
-          ]
-        : []),
-    ),
-    el(
-      "div",
-      { class: "actions" },
-      el(
-        "button",
-        {
-          class: "ghost",
-          title: "Export session as *.hydra bundle",
-          onclick: (e: Event) => {
-            e.stopPropagation();
-            triggerExportDownload(s.sessionId);
-          },
-        },
-        "↓",
+              s.busy ? "busy" : "needs input",
+            )
+          : null,
+        el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
+        ...(s.importedFromMachine && !s.upstreamSessionId
+          ? [
+              el(
+                "span",
+                {
+                  class: "badge imported",
+                  title: `Passive mirror imported from ${s.importedFromMachine} — attach to start working on it here.`,
+                },
+                `← ${s.importedFromMachine}`,
+              ),
+            ]
+          : []),
       ),
       el(
-        "button",
-        {
-          class: "danger",
-          onclick: (e: Event) => {
-            e.stopPropagation();
-            void killSession(s);
+        "div",
+        { class: "actions" },
+        el(
+          "button",
+          {
+            class: "ghost",
+            title: "Export session as *.hydra bundle",
+            onclick: (e: Event) => {
+              e.stopPropagation();
+              triggerExportDownload(s.sessionId);
+            },
           },
-        },
-        "×",
+          "↓",
+        ),
+        el(
+          "button",
+          {
+            class: "danger",
+            onclick: (e: Event) => {
+              e.stopPropagation();
+              void killSession(s);
+            },
+          },
+          "×",
+        ),
       ),
     ),
   );
@@ -813,32 +843,52 @@ function renderChat(c: ChatState): HTMLElement {
   // any session-list poll); fall back to the polled record so the row
   // isn't empty before the first current_model_update lands.
   const model = c.model || live?.currentModel;
+  const toggleDetails = (): void => {
+    c.headerExpanded = !c.headerExpanded;
+    render();
+  };
   const header = el(
     "div",
     { class: "chat-header" },
     el("button", { class: "ghost back", onclick: closeChat }, "←"),
     el(
       "div",
-      { class: "info" },
+      {
+        class: "info clickable",
+        title: "Click for session details",
+        onclick: toggleDetails,
+      },
       el("div", { class: "row1" }, title),
       el(
         "div",
         { class: "row2" },
-        `${shortSessionId(c.sessionId)} · ${agentWithModel(agentId, model)} · ${cwd || "?"}`,
+        `${shortSessionId(c.sessionId)} · ${agentWithModel(agentId, model)} · ${cwd ? shortenCwd(cwd) : "?"}`,
       ),
     ),
     !c.ready
-      ? el("span", { class: "pill" }, "connecting…")
+      ? el(
+          "span",
+          { class: "pill clickable", title: "Click for session details", onclick: toggleDetails },
+          "connecting…",
+        )
       : c.inTurn
       ? el(
           "span",
-          { class: "pill working", title: "Agent is working" },
+          {
+            class: "pill working clickable",
+            title: "Agent is working",
+            onclick: toggleDetails,
+          },
           el("span", { class: "dot" }, "●"),
-          "working",
+          "busy",
         )
       : el(
           "span",
-          { class: "pill ready", title: "Ready for a prompt" },
+          {
+            class: "pill ready clickable",
+            title: "Ready for a prompt",
+            onclick: toggleDetails,
+          },
           el("span", { class: "dot" }, "●"),
           "ready",
         ),
@@ -883,6 +933,17 @@ function renderChat(c: ChatState): HTMLElement {
       "⬇",
     ),
   );
+
+  const details = c.headerExpanded
+    ? el(
+        "div",
+        { class: "chat-details" },
+        detailRow("title", title),
+        detailRow("session", c.sessionId),
+        detailRow("agent", agentWithModel(agentId, model)),
+        detailRow("cwd", cwd || "?"),
+      )
+    : null;
 
   const body = el("div", { class: "chat-body" });
   for (const item of c.log) {
@@ -1043,7 +1104,7 @@ function renderChat(c: ChatState): HTMLElement {
   // renderer also respects the user's scrollTop when they're not at
   // the bottom.
 
-  return el("div", { class: "chat" }, header, body, composer);
+  return el("div", { class: "chat" }, header, details, body, composer);
 }
 
 function renderLogItem(item: ChatState["log"][number]): Node {

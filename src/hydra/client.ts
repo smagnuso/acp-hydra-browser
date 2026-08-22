@@ -10,6 +10,8 @@ export interface HydraSessionInfo {
   attachedClients: number;
   updatedAt: string;
   status: "warm" | "cold";
+  busy: boolean;
+  awaitingInput: boolean;
 }
 
 export interface HydraAgentInfo {

@@ -116,6 +116,7 @@ export function openChat(sessionId: string, load: boolean): void {
     daemonSupportsAmend: false,
     loadOnConnect: load,
     reconnectAttempt: 0,
+    headerExpanded: false,
   };
   state.current = initial;
   setState({ view: "chat" });
