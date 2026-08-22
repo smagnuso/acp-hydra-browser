@@ -132,6 +132,12 @@ export type LogItem =
       text: string;
       closed?: boolean;
       queueEntry?: QueueEntry;
+      // Set for structured CLI-style output injected as an agent
+      // message (e.g. `_meta["hydra-acp"].synthetic` frames like
+      // `/hydra workspace start`'s status block) rather than LLM
+      // prose. Rendered preformatted instead of through markdown so
+      // line breaks and indentation survive.
+      synthetic?: boolean;
     }
   | { kind: "system"; text: string }
   | { kind: "error"; text: string }

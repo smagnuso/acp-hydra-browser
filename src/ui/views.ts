@@ -702,6 +702,7 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
             "data-focus-key": "session-modal-prompt",
             rows: "4",
             placeholder: "What should the agent do first?",
+            autocapitalize: "off",
             oninput: (e: Event) => {
               m.prompt = (e.target as HTMLTextAreaElement).value;
             },
@@ -1057,6 +1058,11 @@ function renderChat(c: ChatState): HTMLElement {
       "data-focus-key": "composer",
       placeholder: c.ready ? "Message…" : "Connecting…",
       rows: "1",
+      // Mobile keyboards auto-capitalize the first letter of a
+      // "sentence", which includes the start of the field — so
+      // `/hydra ...` becomes `/Hydra ...` and silently fails to match
+      // the (case-sensitive) command.
+      autocapitalize: "off",
       onkeydown: composerOnKey,
       oninput: (e: Event) => {
         const t = e.target as HTMLTextAreaElement;
@@ -1225,8 +1231,12 @@ function renderLogItem(item: ChatState["log"][number]): Node {
         }),
       );
     } else {
-      const body = el("div", { class: "body" });
-      body.innerHTML = renderMarkdown(item.text);
+      const body = el("div", { class: item.synthetic ? "body raw" : "body" });
+      if (item.synthetic) {
+        body.textContent = item.text;
+      } else {
+        body.innerHTML = renderMarkdown(item.text);
+      }
       if (qe && qe.status === "cancelled") {
         body.style.textDecoration = "line-through";
         body.style.opacity = "0.6";
@@ -1397,6 +1407,7 @@ function renderQueueEditor(
   const textarea = el("textarea", {
     class: "queue-edit-area",
     rows: "3",
+    autocapitalize: "off",
   }) as HTMLTextAreaElement;
   textarea.value = entry.text;
   textarea.addEventListener("keydown", (ev) => {

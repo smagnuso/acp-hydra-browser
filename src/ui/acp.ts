@@ -87,7 +87,11 @@ export function waitForIdle(): Promise<void> {
 
 // ---- Streaming chunks --------------------------------------------
 
-export function pushChunk(role: "user" | "agent" | "thought", content: unknown): void {
+export function pushChunk(
+  role: "user" | "agent" | "thought",
+  content: unknown,
+  synthetic = false,
+): void {
   if (!state.current) return;
   const text = contentToText(content);
   if (!text) return;
@@ -107,11 +111,17 @@ export function pushChunk(role: "user" | "agent" | "thought", content: unknown):
       break;
     }
   }
-  if (last && last.kind === "stream" && last.role === role && !last.closed) {
+  if (
+    last &&
+    last.kind === "stream" &&
+    last.role === role &&
+    !last.closed &&
+    !!last.synthetic === synthetic
+  ) {
     last.text += text;
     return;
   }
-  log.splice(boundary, 0, { kind: "stream", role, text });
+  log.splice(boundary, 0, { kind: "stream", role, text, synthetic: synthetic || undefined });
 }
 
 // Mark the most recent OPEN stream entry as closed so a subsequent
@@ -870,9 +880,12 @@ export function handleNotification(frame: JsonRpcFrame): void {
       }
       break;
     }
-    case "agent_message_chunk":
-      pushChunk("agent", update.content);
+    case "agent_message_chunk": {
+      const meta = (update._meta ?? {}) as AnyRecord;
+      const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
+      pushChunk("agent", update.content, hydraMeta.synthetic === true);
       break;
+    }
     case "agent_thought_chunk":
       pushChunk("thought", update.content);
       break;
