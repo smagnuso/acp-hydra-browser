@@ -196,8 +196,9 @@ function renderTopbar(): HTMLElement {
       {
         class: "pill clickable",
         title: "Click to toggle grouping by project/recent",
-        onclick: () =>
+        ...tapHandler(() =>
           setState({ groupBy: state.groupBy === "project" ? "recent" : "project" }),
+        ),
       },
       state.groupBy,
     ),
@@ -206,9 +207,9 @@ function renderTopbar(): HTMLElement {
       {
         class: "pill clickable",
         title: "Click to toggle showing disk-only sessions",
-        onclick: () => {
+        ...tapHandler(() => {
           setState({ showCold: !state.showCold });
-        },
+        }),
       },
       state.showCold ? "all" : "warm",
     ),
@@ -217,12 +218,12 @@ function renderTopbar(): HTMLElement {
     el(
       "button",
       {
-        onclick: openImportPicker,
+        ...tapHandler(openImportPicker),
         title: "Import a *.hydra bundle from disk",
       },
       "📥",
     ),
-    el("button", { onclick: openSessionModal, title: "New Session" }, "＋"),
+    el("button", { ...tapHandler(openSessionModal), title: "New Session" }, "＋"),
   );
 }
 
@@ -475,11 +476,11 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
     "div",
     {
       class: "card",
-      onclick: (e: Event) => {
+      ...tapHandler((e) => {
         const target = e.target as HTMLElement;
         if (target.closest("button")) return;
         openChat(s.sessionId, s.status === "cold");
-      },
+      }),
     },
     el("div", { class: "row1" }, title),
     el(
@@ -552,10 +553,7 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
           {
             class: "ghost",
             title: "Export session as *.hydra bundle",
-            onclick: (e: Event) => {
-              e.stopPropagation();
-              triggerExportDownload(s.sessionId);
-            },
+            ...tapHandler(() => triggerExportDownload(s.sessionId)),
           },
           "↓",
         ),
@@ -563,10 +561,7 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
           "button",
           {
             class: "danger",
-            onclick: (e: Event) => {
-              e.stopPropagation();
-              void killSession(s);
-            },
+            ...tapHandler(() => void killSession(s)),
           },
           "×",
         ),
@@ -741,9 +736,9 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
     "div",
     {
       class: "modal-bg",
-      onclick: (e: Event) => {
+      ...tapHandler((e) => {
         if ((e.target as HTMLElement).classList.contains("modal-bg")) closeModal();
-      },
+      }),
     },
     el(
       "div",
@@ -806,10 +801,10 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
       el(
         "div",
         { class: "actions" },
-        el("button", { onclick: closeModal, disabled: m.busy }, "Cancel"),
+        el("button", { ...tapHandler(closeModal), disabled: m.busy }, "Cancel"),
         el(
           "button",
-          { class: "primary", onclick: createSession, disabled: m.busy },
+          { class: "primary", ...tapHandler(createSession), disabled: m.busy },
           m.busy ? "Creating…" : "Create",
         ),
       ),
@@ -895,9 +890,9 @@ function renderListModal(
     "div",
     {
       class: "modal-bg",
-      onclick: (e: Event) => {
+      ...tapHandler((e) => {
         if ((e.target as HTMLElement).classList.contains("modal-bg")) closeModal();
-      },
+      }),
     },
     el(
       "div",
@@ -908,10 +903,10 @@ function renderListModal(
           "div",
           {
             class: "card",
-            onclick: () => {
+            ...tapHandler(() => {
               onPick(it);
               closeModal();
-            },
+            }),
           },
           el(
             "div",
@@ -947,7 +942,7 @@ function renderChat(c: ChatState): HTMLElement {
       {
         class: "chat-title clickable",
         title: "Click for session details",
-        onclick: toggleDetails,
+        ...tapHandler(toggleDetails),
       },
       title,
     ),
@@ -957,7 +952,11 @@ function renderChat(c: ChatState): HTMLElement {
       !c.ready
         ? el(
             "span",
-            { class: "pill clickable", title: "Click for session details", onclick: toggleDetails },
+            {
+              class: "pill clickable",
+              title: "Click for session details",
+              ...tapHandler(toggleDetails),
+            },
             "connecting…",
           )
         : c.inTurn
@@ -966,7 +965,7 @@ function renderChat(c: ChatState): HTMLElement {
             {
               class: "pill working clickable",
               title: "Agent is working",
-              onclick: toggleDetails,
+              ...tapHandler(toggleDetails),
             },
             el("span", { class: "dot" }, "●"),
             "busy",
@@ -976,7 +975,7 @@ function renderChat(c: ChatState): HTMLElement {
             {
               class: "pill ready clickable",
               title: "Ready for a prompt",
-              onclick: toggleDetails,
+              ...tapHandler(toggleDetails),
             },
             el("span", { class: "dot" }, "●"),
             "ready",
@@ -989,7 +988,7 @@ function renderChat(c: ChatState): HTMLElement {
               title: c.armedSince
                 ? `Agent has a background task running (armed ${Math.max(1, Math.floor((Date.now() - c.armedSince) / 60000))}m ago). It may resume on its own.`
                 : "Agent has a background task running. It may resume on its own.",
-              onclick: toggleDetails,
+              ...tapHandler(toggleDetails),
             },
             "armed",
           )
@@ -1000,7 +999,7 @@ function renderChat(c: ChatState): HTMLElement {
             {
               class: "pill clickable",
               title: `In workspace "${live.workspace.label}" (source: ${shortenCwd(live.workspace.sourceCwd)})`,
-              onclick: toggleDetails,
+              ...tapHandler(toggleDetails),
             },
             "⎇ " + live.workspace.label,
           )
@@ -1008,7 +1007,11 @@ function renderChat(c: ChatState): HTMLElement {
       c.model
         ? el(
             "span",
-            { class: "pill clickable", title: "Model (click to change)", onclick: openModelPicker },
+            {
+              class: "pill clickable",
+              title: "Model (click to change)",
+              ...tapHandler(openModelPicker),
+            },
             c.model,
           )
         : null,
@@ -1029,19 +1032,19 @@ function renderChat(c: ChatState): HTMLElement {
             fmtCost(c.cost) as string,
           )
         : null,
-      el("button", { onclick: openFiles, title: "Files" }, "📁"),
+      el("button", { ...tapHandler(openFiles), title: "Files" }, "📁"),
       el(
         "button",
         {
           title: "Export this session as a *.hydra bundle",
-          onclick: () => triggerExportDownload(c.sessionId),
+          ...tapHandler(() => triggerExportDownload(c.sessionId)),
         },
         "⬇",
       ),
       el("div", {
         class: "info clickable",
         title: "Click for session details",
-        onclick: toggleDetails,
+        ...tapHandler(toggleDetails),
       }),
     ),
   );
@@ -1412,10 +1415,10 @@ function renderEditDiff(item: EditDiffLogItem): HTMLElement {
     "div",
     {
       class: "head",
-      onclick: () => {
+      ...tapHandler(() => {
         item.expanded = !item.expanded;
         render();
-      },
+      }),
     },
     el("span", null, item.expanded ? "▾" : "▸"),
     el("span", { class: "title" }, `Edited ${shownPath}`),
@@ -1515,10 +1518,10 @@ function renderQueueChip(entry: QueueEntry): Node {
         "button",
         {
           class: "queue-edit",
-          onclick: () => {
+          ...tapHandler(() => {
             entry.status = "editing";
             render();
-          },
+          }),
           title: "Edit before sending",
         },
         "✎",
@@ -1527,7 +1530,7 @@ function renderQueueChip(entry: QueueEntry): Node {
         "button",
         {
           class: "queue-cancel",
-          onclick: () => cancelQueuedPrompt(entry),
+          ...tapHandler(() => cancelQueuedPrompt(entry)),
           title: "Cancel before sending",
         },
         "×",
@@ -1615,10 +1618,7 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
     "button",
     {
       class: "queue-cancel",
-      onclick: (e: Event) => {
-        e.stopPropagation();
-        cancelProcessingPrompt();
-      },
+      ...tapHandler(() => cancelProcessingPrompt()),
       title: "Cancel this turn",
     },
     "×",
@@ -1628,10 +1628,10 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
       "div",
       {
         class: "spinner",
-        onclick: () => {
+        ...tapHandler(() => {
           spinner.expanded = true;
           render();
-        },
+        }),
       },
       el(
         "div",
@@ -1670,10 +1670,10 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
     "div",
     {
       class: "spinner expanded",
-      onclick: () => {
+      ...tapHandler(() => {
         spinner.expanded = false;
         render();
-      },
+      }),
     },
     el(
       "div",
@@ -1775,14 +1775,14 @@ function renderPermission(entry: PermissionEntry): HTMLElement {
               : o.kind?.startsWith("reject")
               ? "danger"
               : "",
-            onclick: () => respondPermission(entry.toolCallId, o.optionId),
+            ...tapHandler(() => respondPermission(entry.toolCallId, o.optionId)),
           },
           o.name || o.optionId,
         ),
       ),
       el(
         "button",
-        { onclick: () => respondPermission(entry.toolCallId, "__cancel__") },
+        { ...tapHandler(() => respondPermission(entry.toolCallId, "__cancel__")) },
         "Cancel",
       ),
     ),
@@ -1898,14 +1898,14 @@ function navigateFile(entry: FileEntry): void {
 function fileBreadcrumb(path: string): HTMLElement {
   const parts = path ? path.split("/").filter(Boolean) : [];
   const crumbs: Node[] = [
-    el("span", { class: "crumb", onclick: () => listFiles("") }, "."),
+    el("span", { class: "crumb", ...tapHandler(() => listFiles("")) }, "."),
   ];
   let acc = "";
   for (const p of parts) {
     acc = acc ? `${acc}/${p}` : p;
     const target = acc;
     crumbs.push(document.createTextNode(" / "));
-    crumbs.push(el("span", { class: "crumb", onclick: () => listFiles(target) }, p));
+    crumbs.push(el("span", { class: "crumb", ...tapHandler(() => listFiles(target)) }, p));
   }
   return el("div", { class: "crumbs" }, crumbs);
 }
@@ -1936,7 +1936,7 @@ function renderFileOverlay(c: ChatState): Node {
     for (let i = 1; i <= lineCount; i++) {
       const ln = i;
       gutter.appendChild(
-        el("div", { class: "ln", onclick: () => addLineRef(path, ln) }, String(ln)),
+        el("div", { class: "ln", ...tapHandler(() => addLineRef(path, ln)) }, String(ln)),
       );
     }
     body = el(
@@ -1945,7 +1945,7 @@ function renderFileOverlay(c: ChatState): Node {
       el(
         "div",
         { class: "crumbs" },
-        el("span", { class: "crumb", onclick: () => closeFilePreview() }, "← back to listing"),
+        el("span", { class: "crumb", ...tapHandler(() => closeFilePreview()) }, "← back to listing"),
         document.createTextNode(`  ${path}`),
       ),
       el(
@@ -1965,7 +1965,7 @@ function renderFileOverlay(c: ChatState): Node {
               "div",
               {
                 class: "entry",
-                onclick: () => listFiles(fo.path.split("/").slice(0, -1).join("/")),
+                ...tapHandler(() => listFiles(fo.path.split("/").slice(0, -1).join("/"))),
               },
               el("span", { class: "icon" }, "▸"),
               el("span", { class: "name" }, ".."),
@@ -1975,7 +1975,7 @@ function renderFileOverlay(c: ChatState): Node {
         ...fo.entries.map((e) =>
           el(
             "div",
-            { class: "entry", onclick: () => navigateFile(e) },
+            { class: "entry", ...tapHandler(() => navigateFile(e)) },
             el("span", { class: "icon" }, e.kind === "dir" ? "▸" : "·"),
             el("span", { class: "name" }, e.name),
             el("span", { class: "size" }, e.kind === "file" ? `${e.size}b` : ""),
@@ -1987,9 +1987,9 @@ function renderFileOverlay(c: ChatState): Node {
     "div",
     {
       class: "modal-bg",
-      onclick: (ev: Event) => {
+      ...tapHandler((ev) => {
         if ((ev.target as HTMLElement).classList.contains("modal-bg")) closeFiles();
-      },
+      }),
     },
     el(
       "div",
@@ -2002,7 +2002,7 @@ function renderFileOverlay(c: ChatState): Node {
         el("span", { class: "title" }, "Files"),
         el("span", { class: "pill" }, c.cwd),
         el("span", { class: "spacer" }),
-        el("button", { onclick: closeFiles }, "×"),
+        el("button", { ...tapHandler(closeFiles) }, "×"),
       ),
       fileBreadcrumb(fo.path),
       el(

@@ -51,27 +51,51 @@ export function el(tag: string, attrs?: Attrs, ...children: Child[]): HTMLElemen
 // the firedViaPointer guard covers the mouse case, where click still
 // fires after pointerup despite the preventDefault. A plain "click" (no
 // preceding pointerdown/pointerup — keyboard Enter/Space activation)
-// still runs fn() normally.
-export function tapHandler(fn: () => void): Record<string, unknown> {
+// still runs fn(e) normally. Every stage also stops propagation, so a
+// tapHandler'd control nested inside another clickable container (a
+// card, a modal backdrop, a spinner row) never double-fires the
+// ancestor's own handler — for mouse, click still bubbles even after
+// preventDefault, so without this a nested control's click could also
+// trigger its parent's onclick.
+//
+// A native click is also suppressed by the browser when the pointer
+// moves far enough between down and up to count as a drag/scroll
+// (e.g. the pull-to-refresh gesture starting on a session card) — acting
+// on pointerup directly bypasses that, so we track the down position and
+// skip fn() on pointerup if the release has moved past TAP_MOVE_THRESHOLD.
+// For touch this fully suppresses activation (the compatibility click is
+// already gone via preventDefault); for mouse it falls through to the
+// click handler below, matching a plain onclick's behavior.
+const TAP_MOVE_THRESHOLD = 10;
+
+export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
   let firedViaPointer = false;
+  let startX = 0;
+  let startY = 0;
   return {
     onpointerdown: (e: Event) => {
       const pe = e as PointerEvent;
       if (pe.pointerType === "mouse" && pe.button !== 0) return;
+      startX = pe.clientX;
+      startY = pe.clientY;
       e.preventDefault();
+      e.stopPropagation();
     },
     onpointerup: (e: Event) => {
       const pe = e as PointerEvent;
       if (pe.pointerType === "mouse" && pe.button !== 0) return;
+      e.stopPropagation();
+      if (Math.hypot(pe.clientX - startX, pe.clientY - startY) > TAP_MOVE_THRESHOLD) return;
       firedViaPointer = true;
-      fn();
+      fn(e);
     },
-    onclick: () => {
+    onclick: (e: Event) => {
+      e.stopPropagation();
       if (firedViaPointer) {
         firedViaPointer = false;
         return;
       }
-      fn();
+      fn(e);
     },
   };
 }

@@ -87,6 +87,18 @@ Ships as `hydra-acp-browser` on PATH. Registered via
 - **The auth rate limiter is defense-in-depth**, not primary — the
   daemon has its own on `/v1/auth/login`. Removing the local one isn't
   "simplification".
+- **The SPA's `render()` is a full teardown** of `#app` (`renderer.ts`),
+  and WS/poll events (`bridge.ts`, `acp.ts`, `queue.ts`) can trigger one
+  at any point, including mid-tap. On mobile Chrome, `click` is a
+  compatibility event synthesized after `pointerup` and can arrive a
+  frame or more later — after `render()` has already replaced the
+  element out from under it, silently dropping the tap. Every
+  interactive element in `views.ts` is wired with `tapHandler()`
+  (`dom.ts`), which acts on `pointerup` instead and stops propagation so
+  a nested control can't double-fire its container's handler. Any new
+  clickable element must use `tapHandler`, not a plain `onclick` — a
+  plain `onclick` will "mostly work" in testing and then flake on real
+  phones under load.
 
 ## Updating this file
 
