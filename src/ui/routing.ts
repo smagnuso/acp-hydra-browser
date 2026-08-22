@@ -117,6 +117,7 @@ export function openChat(sessionId: string, load: boolean): void {
     loadOnConnect: load,
     reconnectAttempt: 0,
     headerExpanded: false,
+    unsolicitedTurnOpen: false,
   };
   state.current = initial;
   setState({ view: "chat" });
@@ -222,6 +223,7 @@ function resetChatStateForReconnect(chat: ChatState): void {
   chat.queueByMessageId = new Map();
   chat.ownPromptIds = new Set();
   chat.inTurn = false;
+  chat.unsolicitedTurnOpen = false;
   chat.idleListeners = [];
   chat.readyListeners = [];
   chat.currentPlanEntry = null;

@@ -427,6 +427,20 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
               s.busy ? "busy" : "needs input",
             )
           : null,
+        // A session with armed background tasks but no turn in flight is
+        // idle right now but may restart itself with no prompt: worth a
+        // distinct badge from "busy" (working right now) so a user
+        // browsing the list can tell it isn't fully at rest.
+        !s.busy && (s.armedTasks ?? 0) > 0
+          ? el(
+              "span",
+              {
+                class: "badge armed",
+                title: "Agent has a background task running. It may resume on its own.",
+              },
+              "armed",
+            )
+          : null,
         el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
         ...(s.importedFromMachine && !s.upstreamSessionId
           ? [
@@ -892,6 +906,19 @@ function renderChat(c: ChatState): HTMLElement {
           el("span", { class: "dot" }, "●"),
           "ready",
         ),
+    c.armedTasks && c.armedTasks > 0
+      ? el(
+          "span",
+          {
+            class: "pill armed clickable",
+            title: c.armedSince
+              ? `Agent has a background task running (armed ${Math.max(1, Math.floor((Date.now() - c.armedSince) / 60000))}m ago). It may resume on its own.`
+              : "Agent has a background task running. It may resume on its own.",
+            onclick: toggleDetails,
+          },
+          "armed",
+        )
+      : null,
     c.mode
       ? el(
           "span",
@@ -1295,7 +1322,8 @@ function renderQueueChip(entry: QueueEntry): Node {
       el(
         "span",
         null,
-        ahead === 1 ? "queued · waiting on 1 turn" : `queued · waiting on ${ahead} turns`,
+        (ahead === 1 ? "queued · waiting on 1 turn" : `queued · waiting on ${ahead} turns`) +
+          (entry.held ? " · held: agent resumed" : ""),
       ),
       el(
         "button",

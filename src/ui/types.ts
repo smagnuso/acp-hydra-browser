@@ -28,6 +28,11 @@ export interface SessionInfo {
   // populated and the session is treated as local-ish (showing up in
   // the "host: local" filter, getting a Slack thread, etc.).
   upstreamSessionId?: string;
+  // Count of background tasks (Monitor, backgrounded Bash) the agent
+  // has armed and not yet been seen to resolve. Nonzero means the
+  // session may restart itself with no prompt even while otherwise
+  // idle. See PROTOCOL.md's "Armed tasks (the third session state)".
+  armedTasks?: number;
 }
 
 export interface AgentInfo {
@@ -72,6 +77,12 @@ export interface QueueEntry {
   // Set when this entry's turn was cancelled by an amend pointed at
   // it (i.e. the M1 of an amend pair). Drives the "amended" chip.
   amendedByMessageId?: string;
+  // True while hydra-acp/prompt_queue/held is in effect for this entry
+  // (an agent-initiated turn is running and this entry is the head
+  // waiting to be dispatched). Cleared by the matching .../released.
+  // The entry stays "queued" in status the whole time: this only
+  // changes how the chip reads.
+  held?: boolean;
 }
 
 export interface ToolCallState {
@@ -225,6 +236,20 @@ export interface ChatState {
   // Whether the chat-header's detail panel (full title/cwd/agent/model,
   // untruncated) is expanded. Toggled by clicking the header's info block.
   headerExpanded: boolean;
+  // True while an agent-initiated (unsolicited) turn is open server-side:
+  // the agent restarted itself off a finished background task, not a
+  // session/prompt we sent. Tracked locally (not inferred purely from
+  // messageId pairing) so a replayed or unpaired turn_ended (e.g. after
+  // a daemon restart) can't double-close or close a turn we never saw
+  // open. Mirrors cli's tui/app.ts and slack's acp/session.ts.
+  unsolicitedTurnOpen: boolean;
+  // Count of background tasks armed but not yet resolved, and when the
+  // oldest of them was armed. Seeded from bridge/ready's forwarded
+  // session/attach _meta and kept live by
+  // hydra-acp/session/armed_tasks_updated (REPLACE semantics, see
+  // onArmedTasksUpdated).
+  armedTasks?: number;
+  armedSince?: number;
 }
 
 export interface SessionModalData {

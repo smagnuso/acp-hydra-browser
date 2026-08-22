@@ -617,6 +617,46 @@ function onPromptQueueRemoved(params: AnyRecord): void {
   }
 }
 
+// hydra-acp/prompt_queue/held: the daemon is holding this entry at the
+// head of the queue rather than dispatching it, because an
+// agent-initiated turn is running (see turn_started/turn_ended above).
+// The entry stays in the queue the whole time (cancel/amend still
+// work); this only changes how the chip reads, via entry.held.
+function onPromptQueueHeld(params: AnyRecord): void {
+  if (!state.current) return;
+  const messageId = typeof params.messageId === "string" ? params.messageId : "";
+  if (!messageId) return;
+  const entry = state.current.queueByMessageId.get(messageId);
+  if (!entry) return;
+  entry.held = true;
+}
+
+// hydra-acp/prompt_queue/released: the hold is over. Does NOT imply the
+// entry started running: a separate prompt_queue/removed{started}
+// still follows for that, handled by onPromptQueueRemoved above.
+function onPromptQueueReleased(params: AnyRecord): void {
+  if (!state.current) return;
+  const messageId = typeof params.messageId === "string" ? params.messageId : "";
+  if (!messageId) return;
+  const entry = state.current.queueByMessageId.get(messageId);
+  if (!entry) return;
+  entry.held = false;
+}
+
+// hydra-acp/session/armed_tasks_updated: the complete live set of armed
+// background tasks (Monitor, backgrounded Bash) after every membership
+// change. REPLACE semantics, never merge. count: 0 is meaningful
+// ("nothing armed now") and must actively clear any prior badge.
+function onArmedTasksUpdated(params: AnyRecord): void {
+  if (!state.current) return;
+  if (typeof params.count !== "number") return;
+  state.current.armedTasks = params.count;
+  state.current.armedSince =
+    params.count > 0 && typeof params.since === "number"
+      ? params.since
+      : undefined;
+}
+
 // hydra-acp/prompt/amended is the M1→M2 linkage event. We may have
 // already tagged the pair via the amending _meta hint on M2's
 // prompt_queue_added, but this notification is the authoritative
@@ -733,6 +773,18 @@ export function handleNotification(frame: JsonRpcFrame): void {
   }
   if (frame.method === "hydra-acp/prompt_queue/removed") {
     onPromptQueueRemoved((frame.params ?? {}) as AnyRecord);
+    return;
+  }
+  if (frame.method === "hydra-acp/prompt_queue/held") {
+    onPromptQueueHeld((frame.params ?? {}) as AnyRecord);
+    return;
+  }
+  if (frame.method === "hydra-acp/prompt_queue/released") {
+    onPromptQueueReleased((frame.params ?? {}) as AnyRecord);
+    return;
+  }
+  if (frame.method === "hydra-acp/session/armed_tasks_updated") {
+    onArmedTasksUpdated((frame.params ?? {}) as AnyRecord);
     return;
   }
   if (frame.method === "hydra-acp/prompt/amended") {
@@ -862,6 +914,43 @@ export function handleNotification(frame: JsonRpcFrame): void {
           tagAmendedM1(cancelledId, newId);
         }
       }
+      finalizeTurn();
+      break;
+    }
+    // Agent-initiated ("unsolicited") turn: the agent restarted itself
+    // off a finished background task, not a session/prompt we sent.
+    // Deliberately NOT turn_complete (see PROTOCOL.md's "Agent-initiated
+    // turns"), so we track it via a dedicated flag rather than folding
+    // it into the normal turn_complete pairing.
+    case "turn_started": {
+      if (!state.current) break;
+      const meta = (update._meta ?? {}) as AnyRecord;
+      const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
+      if (hydraMeta.unsolicited !== true) break;
+      if (state.current.unsolicitedTurnOpen) break;
+      state.current.unsolicitedTurnOpen = true;
+      markActive();
+      const cause = (hydraMeta.cause ?? {}) as AnyRecord;
+      const label = typeof cause.label === "string" ? cause.label : undefined;
+      insertAboveQueued({
+        kind: "system",
+        text: label
+          ? `agent resumed on its own: background task finished (${label})`
+          : "agent resumed on its own",
+      });
+      break;
+    }
+    case "turn_ended": {
+      if (!state.current) break;
+      const meta = (update._meta ?? {}) as AnyRecord;
+      const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
+      if (hydraMeta.unsolicited !== true) break;
+      if (!state.current.unsolicitedTurnOpen) break;
+      state.current.unsolicitedTurnOpen = false;
+      // "superseded" means a prompt took over the still-running agent:
+      // it isn't actually done, so don't finalize. The real end arrives
+      // via that prompt's own turn_complete (or a later salvage).
+      if (hydraMeta.reason === "superseded") break;
       finalizeTurn();
       break;
     }

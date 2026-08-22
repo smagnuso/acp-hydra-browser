@@ -90,6 +90,20 @@ export function handleFrame(frame: JsonRpcFrame): void {
     if (promptCaps?.amending === true) {
       state.current.daemonSupportsAmend = true;
     }
+    // Seed the armed-tasks badge from this attach/reattach's snapshot.
+    // The armed set lives in-memory on the daemon's Session object only:
+    // a resurrect or agent swap can silently reset it to empty with
+    // no notification, so re-seeding on every attach (not just the
+    // first) is what keeps this from going stale after a daemon
+    // restart. A present armedTasks (including 0) always overwrites; a
+    // genuinely absent field (older daemon) leaves prior state as-is.
+    if (typeof hydraMeta?.armedTasks === "number") {
+      state.current.armedTasks = hydraMeta.armedTasks;
+      state.current.armedSince =
+        hydraMeta.armedTasks > 0 && typeof hydraMeta.armedSince === "number"
+          ? hydraMeta.armedSince
+          : undefined;
+    }
     // Wake any queued prompt that was waiting for the bridge handshake.
     const listeners = state.current.readyListeners;
     state.current.readyListeners = [];
