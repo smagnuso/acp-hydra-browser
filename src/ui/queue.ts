@@ -456,6 +456,31 @@ export function sendSetModel(modelId: string): void {
   send("session/set_model", { sessionId: state.current.sessionId, modelId });
 }
 
+// Generic config-option setter (model/mode/agent, or whatever the agent
+// advertises on its own, e.g. effort). The reply carries the full
+// rebuilt configOptions snapshot, but no config_option_update follows
+// it (see PROTOCOL.md's "A setter reply is state, not news about the
+// id you set"), so we apply the reply here rather than waiting on a
+// notification.
+export function sendSetConfigOption(configId: string, value: string): void {
+  const c = state.current;
+  if (!c) return;
+  const id = send("session/set_config_option", {
+    sessionId: c.sessionId,
+    configId,
+    value,
+  });
+  if (id === undefined) return;
+  c.responseHandlers.set(String(id), (frame) => {
+    const list = (frame.result as { configOptions?: unknown } | undefined)
+      ?.configOptions;
+    if (Array.isArray(list) && state.current === c) {
+      c.configOptions = list as ChatState["configOptions"];
+      render();
+    }
+  });
+}
+
 // Drop any locally-tracked own entries on WS close. The daemon's
 // prompt_queue_removed(abandoned) would normally arrive for these, but
 // if the WS is gone we'll never see it — clear the chips locally so

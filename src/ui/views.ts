@@ -21,6 +21,7 @@ import {
   cancelQueuedPrompt,
   sendCancel,
   sendPrompt,
+  sendSetConfigOption,
   sendSetMode,
   sendSetModel,
   sendWorkspaceCommand,
@@ -30,6 +31,7 @@ import { openChat } from "./routing.js";
 import type {
   AppState,
   ChatState,
+  ConfigOption,
   FileEntry,
   PermissionEntry,
   QueueEntry,
@@ -385,6 +387,34 @@ function workspaceRow(workspace: SessionInfo["workspace"]): HTMLElement {
     button("sync", "Sync"),
     button("stop", "Stop"),
     button("apply", "Apply"),
+  );
+}
+
+// One row per config-option dimension (hydra's own model/mode/agent
+// plus whatever the agent advertises on its own, e.g. effort) in the
+// expanded chat-details panel. A native <select> beats cycling/modal
+// pickers here since there can be an arbitrary, agent-defined number of
+// these and the user just wants to jump straight to a value.
+function configOptionRow(option: ConfigOption): HTMLElement {
+  const select = el(
+    "select",
+    {
+      onchange: (e: Event) => {
+        sendSetConfigOption(option.id, (e.target as HTMLSelectElement).value);
+      },
+    },
+    ...option.options.map((v) => {
+      const opt = el("option", { value: v.value }, v.name || v.value);
+      if (v.value === option.currentValue) opt.setAttribute("selected", "");
+      return opt;
+    }),
+  ) as HTMLSelectElement;
+  select.value = option.currentValue;
+  return el(
+    "div",
+    { class: "detail" },
+    el("span", { class: "k", title: option.description ?? "" }, option.name || option.id),
+    select,
   );
 }
 
@@ -816,17 +846,7 @@ function closeModal(): void {
   setState({ modal: null });
 }
 
-// ---- Mode / model picker -----------------------------------------
-
-function cycleMode(): void {
-  const c = state.current;
-  if (!c?.modes || c.modes.length === 0) return;
-  const idx = c.modes.findIndex((m) => m.id === c.mode);
-  const next = c.modes[(idx + 1) % c.modes.length];
-  c.mode = next.id;
-  render();
-  sendSetMode(next.id);
-}
+// ---- Model picker --------------------------------------------------
 
 function openModelPicker(): void {
   if (!state.current?.models || state.current.models.length === 0) return;
@@ -965,13 +985,6 @@ function renderChat(c: ChatState): HTMLElement {
           "⎇ " + live.workspace.label,
         )
       : null,
-    c.mode
-      ? el(
-          "span",
-          { class: "pill clickable", title: "Mode (click to cycle)", onclick: cycleMode },
-          c.mode,
-        )
-      : null,
     c.model
       ? el(
           "span",
@@ -1013,9 +1026,9 @@ function renderChat(c: ChatState): HTMLElement {
         { class: "chat-details" },
         detailRow("title", title),
         detailRow("session", c.sessionId),
-        detailRow("agent", agentWithModel(agentId, model)),
         detailRow("cwd", cwd || "?"),
         workspaceRow(live?.workspace),
+        ...c.configOptions.map(configOptionRow),
       )
     : null;
 

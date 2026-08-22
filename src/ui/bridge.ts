@@ -13,7 +13,7 @@ import {
   pushLog,
 } from "./acp.js";
 import { cancelAllQueued } from "./queue.js";
-import type { PermissionEntry } from "./types.js";
+import type { ChatState, PermissionEntry } from "./types.js";
 
 interface JsonRpcFrame {
   method?: string;
@@ -69,6 +69,14 @@ export function handleFrame(frame: JsonRpcFrame): void {
     const params = (frame.params ?? {}) as Record<string, unknown>;
     if (typeof params.clientId === "string") {
       state.current.ownClientId = params.clientId;
+    }
+    // Initial config-option snapshot (model/mode/agent plus whatever the
+    // agent advertises, e.g. effort). Only rides on the attach response
+    // itself — a bare reattach doesn't get a config_option_update
+    // notification, so this is the sole source until the next live
+    // change (see acp.ts's config_option_update handling for that).
+    if (Array.isArray(params.configOptions)) {
+      state.current.configOptions = params.configOptions as ChatState["configOptions"];
     }
     // Hydrate from the attach-response queue snapshot so a fresh
     // attach paints existing queued/running prompts immediately

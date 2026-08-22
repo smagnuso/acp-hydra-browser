@@ -2,6 +2,28 @@
 // data is variable (ACP notifications, agents, etc.) and tighter where
 // behavior depends on it (queue entries, log items).
 
+// Spec shape for a session config option (ConfigOption) and its values,
+// mirroring cli/src/core/hydra-commands.ts. Delivered on session/attach
+// (top-level configOptions) and via config_option_update notifications.
+// Always includes hydra's own model/mode/agent dimensions, plus whatever
+// the underlying agent advertises on its own (e.g. claude-agent-acp's
+// reasoning-effort picker, category "thought_level").
+export interface ConfigOptionValue {
+  value: string;
+  name: string;
+  description?: string;
+}
+
+export interface ConfigOption {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  type: "select";
+  currentValue: string;
+  options: ConfigOptionValue[];
+}
+
 export interface SessionInfo {
   sessionId: string;
   cwd: string;
@@ -273,6 +295,10 @@ export interface ChatState {
   // onArmedTasksUpdated).
   armedTasks?: number;
   armedSince?: number;
+  // Full config-option snapshot (model/mode/agent plus whatever the
+  // agent advertises, e.g. effort). See config_option_update handling
+  // in acp.ts. Empty until the first snapshot arrives.
+  configOptions: ConfigOption[];
 }
 
 export interface SessionModalData {

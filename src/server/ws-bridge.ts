@@ -29,6 +29,11 @@ const ALLOWED_BROWSER_REQUEST_METHODS = new Set<string>([
   "session/cancel",
   "session/set_mode",
   "session/set_model",
+  // Generic config-option setter (model/mode/agent plus whatever the
+  // agent advertises on its own, e.g. effort). Targets configId/value
+  // pairs the daemon already validated as advertised, so it's as
+  // harmless to forward as the two verbs above.
+  "session/set_config_option",
   // Hydra-side queue control. cancel_prompt drops a queued entry
   // before it runs; update_prompt rewrites a queued entry's content.
   // Both target a specific messageId so they're harmless to forward
@@ -385,6 +390,7 @@ function handleConnection(
       sessionId?: string;
       clientId?: string;
       _meta?: Record<string, unknown>;
+      configOptions?: unknown[];
     };
     // Pass through clientId and _meta from the attach response so the
     // browser can recognize its own prompt_queue_added broadcasts (by
@@ -393,6 +399,14 @@ function handleConnection(
     const readyParams: Record<string, unknown> = { sessionId };
     if (typeof attachResp?.clientId === "string") {
       readyParams.clientId = attachResp.clientId;
+    }
+    // configOptions (model/mode/agent plus whatever the agent advertises,
+    // e.g. effort) rides at the top level of the attach response, not
+    // under _meta — it isn't re-synthesized via session/update on a bare
+    // reattach, so this is the only source for the initial snapshot. A
+    // config_option_update notification still covers live changes after.
+    if (Array.isArray(attachResp?.configOptions)) {
+      readyParams.configOptions = attachResp.configOptions;
     }
     if (attachResp?._meta && typeof attachResp._meta === "object") {
       readyParams._meta = attachResp._meta;

@@ -6,6 +6,7 @@ import { state } from "./state.js";
 import { render } from "./renderer.js";
 import { contentToText } from "./markdown.js";
 import type {
+  ConfigOption,
   ExitPlanLogItem,
   LogItem,
   PermissionEntry,
@@ -916,6 +917,12 @@ export function handleNotification(frame: JsonRpcFrame): void {
         if (Array.isArray(update.availableModels)) {
           state.current.models = update.availableModels as never;
         }
+        render();
+      }
+      break;
+    case "config_option_update":
+      if (state.current && Array.isArray(update.configOptions)) {
+        state.current.configOptions = update.configOptions as ConfigOption[];
         render();
       }
       break;

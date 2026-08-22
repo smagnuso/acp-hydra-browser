@@ -8,6 +8,9 @@ test("browser request whitelist matches plan", () => {
     "session/cancel",
     "session/set_mode",
     "session/set_model",
+    // Generic config-option setter (model/mode/agent, or whatever the
+    // agent advertises on its own, e.g. effort).
+    "session/set_config_option",
     // Hydra-side queue control: drop or rewrite a queued prompt by
     // messageId. Safe to allow — hydra structurally rejects invalid /
     // already-running ids with a typed result, never crashes.

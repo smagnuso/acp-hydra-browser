@@ -118,6 +118,7 @@ export function openChat(sessionId: string, load: boolean): void {
     reconnectAttempt: 0,
     headerExpanded: false,
     unsolicitedTurnOpen: false,
+    configOptions: [],
   };
   state.current = initial;
   setState({ view: "chat" });
