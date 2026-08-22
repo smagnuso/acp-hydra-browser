@@ -152,12 +152,17 @@ export function handleFrame(frame: JsonRpcFrame): void {
   }
   if (frame.method && "id" in frame) {
     handleAgentRequest(frame);
-    render();
+    // Before bridge/ready, this is part of session/attach's full-history
+    // replay — skip the paint so a long session doesn't grow the chat
+    // body (and re-snap scroll to bottom) once per replayed frame. The
+    // bridge/ready handler above does one final render() once the whole
+    // backlog is in state.
+    if (state.current.ready) render();
     return;
   }
   if (frame.method) {
     handleNotification(frame);
-    render();
+    if (state.current.ready) render();
     return;
   }
   // It's a JSON-RPC response. Most replies we don't track (we observe
