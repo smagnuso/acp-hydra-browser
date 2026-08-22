@@ -367,7 +367,7 @@ function workspaceRow(workspace: SessionInfo["workspace"]): HTMLElement {
   const button = (verb: "start" | "sync" | "stop" | "apply", label: string) =>
     el(
       "button",
-      { class: "ghost", onclick: () => sendWorkspaceCommand(verb) },
+      { class: "ghost", ...tapHandler(() => sendWorkspaceCommand(verb)) },
       label,
     );
   if (!workspace) {
