@@ -225,7 +225,12 @@ pre code { background: transparent; padding: 0; }
 .queue-editor textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 0.4rem 0.5rem; box-sizing: border-box; }
 
 /* Composer */
-.composer { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)) calc(0.6rem + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--panel); }
+/* Bottom padding encroaches ~12px into the home-indicator inset (34pt
+   on notch devices): the indicator bar itself is a thin strip centered
+   in that inset, so the button row can sit this much closer to the
+   screen edge without landing in the swipe-up gesture zone. The max()
+   keeps the normal 0.6rem when there's no inset (browser tabs). */
+.composer { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)) max(0.6rem, calc(env(safe-area-inset-bottom) - 0.75rem)); border-top: 1px solid var(--border); background: var(--panel); }
 /* The keyboard already bounds the composer's bottom edge, so the
    safe-area reserve (there for the home indicator when it's not up)
    would just leave a dead gap above it — see viewport.ts. */
