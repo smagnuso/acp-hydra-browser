@@ -17,6 +17,13 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
+// A no-op passthrough. Chrome's install-eligibility check wants a
+// fetch handler present, even though this worker does no offline
+// caching; without one, the install prompt doesn't show.
+self.addEventListener("fetch", (event) => {
+  event.respondWith(fetch(event.request));
+});
+
 // A notification is owned by the worker, not the page that created it,
 // so bringing the tab to front on click has to happen here rather than
 // via a plain onclick back in page script.

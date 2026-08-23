@@ -6,6 +6,7 @@ import { render } from "./renderer.js";
 import { initPullToRefresh } from "./pull-refresh.js";
 import { initSwipeBack } from "./swipe-nav.js";
 import { initViewportHeight } from "./viewport.js";
+import { ensureServiceWorker } from "./notifications.js";
 
 initViewportHeight();
 
@@ -13,6 +14,7 @@ window.addEventListener("DOMContentLoaded", () => {
   startPolling();
   void loadAgents();
   void loadConfig();
+  void ensureServiceWorker();
   applyHashRoute();
   render();
   initPullToRefresh();

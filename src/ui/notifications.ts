@@ -18,7 +18,11 @@ import type { ChatState } from "./types.js";
 
 let swRegistration: ServiceWorkerRegistration | null = null;
 
-async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+// Also called eagerly from main.ts at boot (not just lazily here when
+// notifications are enabled) — Chrome's install-prompt eligibility
+// requires an active service worker at page load, not one registered
+// later on demand.
+export async function ensureServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (swRegistration) return swRegistration;
   if (!("serviceWorker" in navigator)) return null;
   try {
