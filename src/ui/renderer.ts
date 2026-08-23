@@ -8,6 +8,25 @@ import { renderApp } from "./views.js";
 
 let scheduled = false;
 
+// actuallyRender() rebuilds the WHOLE tree from scratch every time,
+// including a full markdown re-parse of every currently-streaming
+// message bubble's full accumulated text (see markdown.ts — there's no
+// incremental append path). A fast turn fires agent_message_chunk many
+// times a second, each one landing on its own animation frame (the
+// rAF-based coalescing above only merges calls within the SAME frame,
+// not across consecutive ones), so a long response reparses its own
+// growing text from scratch dozens of times a second — O(n^2) in the
+// final message length, and each individual rebuild gets slower as the
+// message grows. That's expensive enough on its own to block the main
+// thread for a real stretch regardless of touch timing, which is why
+// gating on pointer state (above) didn't fully fix reported hangs: it
+// only avoids racing a rebuild against a gesture, not the rebuild's own
+// cost. Throttling to at most one rebuild per MIN_RENDER_INTERVAL_MS
+// caps how often that O(n^2) cost gets paid without hurting perceived
+// liveness — a chat updating every 100ms still reads as live streaming.
+const MIN_RENDER_INTERVAL_MS = 100;
+let lastRenderAt = 0;
+
 // A full render() tears down and rebuilds the whole #app tree (see
 // actuallyRender() below), which destroys any DOM node mid-gesture. A
 // button press spans mousedown/touchstart -> mouseup/touchend -> click,
@@ -71,15 +90,23 @@ document.addEventListener(
 export function render(): void {
   if (scheduled) return;
   scheduled = true;
-  requestAnimationFrame(() => {
+  const sinceLast = performance.now() - lastRenderAt;
+  const delay = Math.max(0, MIN_RENDER_INTERVAL_MS - sinceLast);
+  const fire = (): void => {
     scheduled = false;
     if (pointerDown) {
       // Defer until the press/drag releases instead of dropping the render.
       render();
       return;
     }
+    lastRenderAt = performance.now();
     actuallyRender();
-  });
+  };
+  if (delay > 0) {
+    setTimeout(() => requestAnimationFrame(fire), delay);
+  } else {
+    requestAnimationFrame(fire);
+  }
 }
 
 function actuallyRender(): void {
