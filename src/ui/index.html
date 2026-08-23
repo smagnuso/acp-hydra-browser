@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>hydra-acp-browser</title>
 <!-- Everything ships as one self-contained HTML file (see
      scripts/build-ui.mjs), so the manifest and icon are inlined as data
@@ -42,7 +42,11 @@
   font-size: 15px;
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+/* touch-action: manipulation disables iOS Safari's double-tap-to-zoom
+   (and the ~300ms tap-to-click delay that comes with it) without
+   touching the viewport meta tag, so pinch-zoom stays available for
+   anyone who needs it. */
+html, body { height: 100%; margin: 0; touch-action: manipulation; }
 /* Three deliberate iOS accommodations here (see viewport.ts for the
    JS half of each):
    - position:fixed pins the document so iOS can't drag the whole page
@@ -322,6 +326,29 @@ html.keyboard-open .composer { padding-bottom: 0.6rem; }
   pointer-events: none;
   white-space: nowrap;
   transition: opacity 0.1s linear;
+}
+
+/* Swipe-back-to-last-session hint (session list only, see swipe-nav.ts) */
+.swipe-back-hint {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translate(0, -50%);
+  z-index: 60;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 999px 0 0 999px;
+  padding: 0.4rem 1rem 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  color: var(--fg);
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 70vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.15s linear;
 }
 </style>
 </head>
