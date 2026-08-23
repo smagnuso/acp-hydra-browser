@@ -1598,6 +1598,23 @@ export function resyncChatScroll(c: ChatState): void {
   }
 }
 
+// Re-arm sticky-follow and immediately try to pin to the bottom.
+// Called from queue.ts whenever the user sends a prompt — reading
+// history and then firing one off should always bring you back down
+// to see it land, the same way sending a message does in any other
+// chat app, regardless of where stickToBottom's own scroll-driven
+// tracking last left it. Still goes through the normal gated pin
+// (touch/quiet checks), not a raw scrollTop write, so it can't collide
+// with an in-progress touch the same way every other pin path avoids —
+// in practice that only matters if send is somehow fired mid-drag,
+// which the composer's tapHandler doesn't allow.
+export function jumpToBottom(c: ChatState): void {
+  const view = chatViews.get(c);
+  if (!view) return;
+  view.stickToBottom = true;
+  pinIfDue(view);
+}
+
 function renderChat(c: ChatState): HTMLElement {
   // Pull fresh metadata from the session list each render so a
   // deep-link reload (where the SPA opened the chat before any poll
