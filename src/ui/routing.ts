@@ -231,7 +231,11 @@ function resetConnectionStateForReconnect(chat: ChatState): void {
 export function closeChat(): void {
   setLocationHash("");
   closeChatSocket();
-  setState({ view: "list", current: null });
+  setState({
+    view: "list",
+    current: null,
+    lastSessionId: state.current?.sessionId ?? state.lastSessionId,
+  });
 }
 
 function closeChatSocket(): void {

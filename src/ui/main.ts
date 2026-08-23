@@ -4,6 +4,7 @@ import { startPolling, loadAgents, loadConfig } from "./api.js";
 import { applyHashRoute } from "./routing.js";
 import { render } from "./renderer.js";
 import { initPullToRefresh } from "./pull-refresh.js";
+import { initSwipeBack } from "./swipe-nav.js";
 import { initViewportHeight } from "./viewport.js";
 
 initViewportHeight();
@@ -15,6 +16,7 @@ window.addEventListener("DOMContentLoaded", () => {
   applyHashRoute();
   render();
   initPullToRefresh();
+  initSwipeBack();
 });
 
 window.addEventListener("hashchange", () => {

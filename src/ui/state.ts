@@ -55,6 +55,7 @@ export const state: AppState = {
   banner: null,
   modal: null,
   current: null,
+  lastSessionId: null,
   ...loadPersistedFilters(),
 };
 
