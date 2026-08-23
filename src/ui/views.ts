@@ -1433,6 +1433,24 @@ export function tryPatchChat(root: HTMLElement, s: AppState): boolean {
   return true;
 }
 
+// Called by renderer.ts's teardown path (banner/modal/file-overlay cases,
+// where tryPatchChat bails and .chat-body gets detached-then-reattached
+// within the same render) AFTER the reattach, once layout metrics are
+// valid again. renderChat's own internal reconcileChatBody call happens
+// mid-teardown while the node is still detached — scrollHeight/
+// clientHeight both read 0 there, so its pin attempt is a no-op. This is
+// the one that actually runs the gated pin (same touch/quiet checks as
+// every other path) once the DOM is real again. Auto-triggered banners
+// (compaction finishing, a reconnect notice) can land mid-scroll same as
+// anything else, so this path needs the same protection or it reproduces
+// the exact wedge the gating exists to prevent.
+export function resyncChatScroll(c: ChatState): void {
+  const view = chatViews.get(c);
+  if (view) {
+    pinIfDue(view);
+  }
+}
+
 function renderChat(c: ChatState): HTMLElement {
   // Pull fresh metadata from the session list each render so a
   // deep-link reload (where the SPA opened the chat before any poll

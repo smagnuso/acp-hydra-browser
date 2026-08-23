@@ -4,7 +4,7 @@
 // don't blow away the user's typing position.
 
 import { state } from "./state.js";
-import { renderApp, tryPatchChat } from "./views.js";
+import { renderApp, resyncChatScroll, tryPatchChat } from "./views.js";
 
 let scheduled = false;
 
@@ -177,20 +177,19 @@ function actuallyRender(): void {
     return;
   }
 
-  // Capture chat-body scroll state. If the user was within ~50px of
-  // the bottom we'll snap to the new bottom (so streaming text stays
-  // visible); otherwise we restore their exact scrollTop so reading
-  // history isn't disrupted by every render. Doing this synchronously
-  // (no setTimeout) avoids the one-frame "scroll-from-zero" flash that
-  // showed up as text shifting around.
+  // Capture chat-body's scrollTop so a teardown-then-reattach (this path
+  // runs whenever a banner/modal/file-overlay makes tryPatchChat bail —
+  // e.g. an auto-triggered "Context compacted" banner or a reconnect
+  // notice, which can land mid-scroll same as anything else) doesn't
+  // lose the user's read position even if the browser resets scrollTop
+  // on detach. Whether to additionally snap to bottom is NOT decided
+  // here — that's resyncChatScroll's job below, gated the same way as
+  // every other scroll-pin path (no finger down, scroller settled). An
+  // earlier version snapped unconditionally whenever the OLD body read
+  // "near bottom," with no such gating, and reproduced the exact
+  // scroll-wedge bug this file spent a whole pass fixing elsewhere.
   const oldBody = root.querySelector<HTMLElement>(".chat-body");
-  let oldScrollTop: number | null = null;
-  let oldWasAtBottom = true;
-  if (oldBody) {
-    oldScrollTop = oldBody.scrollTop;
-    oldWasAtBottom =
-      oldBody.scrollHeight - oldBody.scrollTop - oldBody.clientHeight < 50;
-  }
+  const oldScrollTop = oldBody ? oldBody.scrollTop : null;
   const oldList = root.querySelector<HTMLElement>(".list");
   const oldListScrollTop = oldList ? oldList.scrollTop : null;
   const oldFilesBody = root.querySelector<HTMLElement>(".files .body");
@@ -203,10 +202,11 @@ function actuallyRender(): void {
 
   const newBody = root.querySelector<HTMLElement>(".chat-body");
   if (newBody) {
-    if (oldScrollTop === null || oldWasAtBottom) {
-      newBody.scrollTop = newBody.scrollHeight;
-    } else {
+    if (oldScrollTop !== null) {
       newBody.scrollTop = oldScrollTop;
+    }
+    if (state.current) {
+      resyncChatScroll(state.current);
     }
     // The jump-to-latest button only updates its own visibility on a
     // "scroll" event, which a scrollTop assignment doesn't reliably fire
