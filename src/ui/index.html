@@ -328,7 +328,9 @@ html.keyboard-open .composer { padding-bottom: 0.6rem; }
   transition: opacity 0.1s linear;
 }
 
-/* Swipe-back-to-last-session hint (session list only, see swipe-nav.ts) */
+/* Swipe-nav hint (list<->chat, see swipe-nav.ts). Base styling anchors
+   it to the right edge (list -> last chat); .left mirrors it to the
+   left edge (chat -> list). */
 .swipe-back-hint {
   position: fixed;
   top: 50%;
@@ -349,6 +351,14 @@ html.keyboard-open .composer { padding-bottom: 0.6rem; }
   overflow: hidden;
   text-overflow: ellipsis;
   transition: opacity 0.15s linear;
+}
+.swipe-back-hint.left {
+  right: auto;
+  left: 0;
+  border-right: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 999px 999px 0;
+  padding: 0.4rem 0.9rem 0.4rem 1rem;
 }
 </style>
 </head>
