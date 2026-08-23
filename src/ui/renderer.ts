@@ -116,6 +116,16 @@ function actuallyRender(): void {
     } else {
       newBody.scrollTop = oldScrollTop;
     }
+    // The jump-to-latest button only updates its own visibility on a
+    // "scroll" event, which a scrollTop assignment doesn't reliably fire
+    // synchronously — sync it here so a re-render that lands while
+    // scrolled up doesn't show the button late (or hide it early once
+    // snapped to bottom).
+    const jumpToLatest = newBody.querySelector<HTMLElement>(".jump-to-latest");
+    if (jumpToLatest) {
+      const atBottom = newBody.scrollHeight - newBody.scrollTop - newBody.clientHeight < 50;
+      jumpToLatest.classList.toggle("visible", !atBottom);
+    }
   }
   const newList = root.querySelector<HTMLElement>(".list");
   if (newList && oldListScrollTop !== null) {

@@ -1288,6 +1288,31 @@ function renderChat(c: ChatState): HTMLElement {
     }
     body.appendChild(renderLogItem(item));
   }
+  // Sticky as the last flex item so it floats at the bottom of the
+  // visible scroll area without needing to track the composer's
+  // (variable) height. Toggled on scroll directly — not through a full
+  // render(), which would tank scroll responsiveness the same way it
+  // did for the composer's oninput (see the "text entry feels slow" fix).
+  const jumpToLatest = el(
+    "button",
+    {
+      class: "jump-to-latest",
+      ...tapHandler(() => {
+        body.scrollTop = body.scrollHeight;
+        jumpToLatest.classList.remove("visible");
+      }),
+    },
+    "↓ Jump to latest",
+  ) as HTMLButtonElement;
+  body.appendChild(jumpToLatest);
+  body.addEventListener(
+    "scroll",
+    () => {
+      const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
+      jumpToLatest.classList.toggle("visible", !atBottom);
+    },
+    { passive: true },
+  );
 
   const autosize = (t: HTMLTextAreaElement): void => {
     t.style.height = "auto";

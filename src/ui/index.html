@@ -148,6 +148,9 @@ pre code { background: transparent; padding: 0; }
 .armed-tasks-more { color: var(--muted); font-size: 0.78rem; padding-left: 1.1rem; }
 .chat-header .info .row2 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-body { flex: 1; overflow-y: auto; padding: 1rem max(1rem, calc(50% - 28rem)); display: flex; flex-direction: column; gap: 0.65rem; }
+.jump-to-latest { display: none; position: sticky; bottom: 0.5rem; align-self: center; margin-top: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.82rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
+.jump-to-latest.visible { display: inline-flex; align-items: center; }
+.jump-to-latest:hover { background: var(--panel); }
 .msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }
 .msg.user { background: var(--user-bg); border: 1px solid var(--border); align-self: flex-end; max-width: 70%; }
 .msg.agent { background: var(--agent-bg); border: 1px solid var(--border); align-self: flex-start; max-width: 90%; }
