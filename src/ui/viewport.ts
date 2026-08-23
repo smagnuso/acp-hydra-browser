@@ -197,10 +197,40 @@ export function initViewportHeight(): void {
   window.addEventListener("pageshow", apply);
   window.addEventListener("focus", apply);
   document.addEventListener("visibilitychange", apply);
+  // A fixed handful of setTimeout checkpoints (the previous approach)
+  // guesses at how long the keyboard's show/hide animation takes; guess
+  // too short and #app's height sits stuck at the old (small) value for
+  // a visible beat after the keyboard's already settled, guess too long
+  // and there's needless polling. Track visualViewport.height directly
+  // instead: re-apply every frame until it stops moving (two
+  // consecutive unchanged frames) or a generous ceiling is hit, so
+  // #app's height follows the actual animation rather than a fixed
+  // schedule — the chat area no longer reads as "stuck small, then
+  // snaps" after dismissing the keyboard (composer swipe-to-dismiss
+  // made this very visible, but it applies to any focus change).
+  const SETTLE_CEILING_MS = 1200;
+  let settleRaf = 0;
   const settle = (): void => {
-    for (const ms of [50, 150, 300, 600]) {
-      setTimeout(apply, ms);
-    }
+    if (settleRaf) cancelAnimationFrame(settleRaf);
+    const deadline = performance.now() + SETTLE_CEILING_MS;
+    let lastH: number | null = null;
+    let stableFrames = 0;
+    const tick = (): void => {
+      apply();
+      const h = window.visualViewport?.height ?? window.innerHeight;
+      if (lastH !== null && Math.abs(h - lastH) < 0.5) {
+        stableFrames++;
+      } else {
+        stableFrames = 0;
+      }
+      lastH = h;
+      if (stableFrames >= 2 || performance.now() >= deadline) {
+        settleRaf = 0;
+        return;
+      }
+      settleRaf = requestAnimationFrame(tick);
+    };
+    settleRaf = requestAnimationFrame(tick);
   };
   document.addEventListener("focusin", settle);
   document.addEventListener("focusout", settle);

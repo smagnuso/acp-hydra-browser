@@ -84,14 +84,14 @@ export function el(tag: string, attrs?: Attrs, ...children: Child[]): HTMLElemen
 // focuses and the mobile keyboard never opens. Bypass entirely — no
 // preventDefault, no stopPropagation, no fn() — whenever the tap actually
 // landed on a form control, so it gets fully native behavior.
-const TAP_MOVE_THRESHOLD = 10;
+export const TAP_MOVE_THRESHOLD = 10;
 
 function hasActiveSelection(): boolean {
   const sel = window.getSelection();
   return !!sel && !sel.isCollapsed && sel.toString().length > 0;
 }
 
-function isFormControl(target: EventTarget | null): boolean {
+export function isFormControl(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   return (
     target.tagName === "INPUT" ||

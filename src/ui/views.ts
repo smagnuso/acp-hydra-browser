@@ -5,7 +5,7 @@
 
 import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
-import { el, tapHandler } from "./dom.js";
+import { el, tapHandler, isFormControl, TAP_MOVE_THRESHOLD } from "./dom.js";
 import { renderMarkdown, escapeHtml } from "./markdown.js";
 import { highlightCode } from "./hljs.js";
 import {
@@ -1306,6 +1306,41 @@ function ensureChatView(c: ChatState): ChatView {
   };
   body.addEventListener("touchend", touchDone, { passive: true });
   body.addEventListener("touchcancel", touchDone, { passive: true });
+  // Tapping anywhere in the history dismisses the keyboard (same
+  // pattern as most chat apps, and as the composer's own swipe-down
+  // gesture above). Commits on pointerup only, gated by a move
+  // threshold to tell a tap from the start of a scroll drag — blurring
+  // on pointerdown (or mid-drag) would kick off viewport.ts's height
+  // recovery loop while a scroll gesture might still be starting,
+  // which is the same class of mid-gesture DOM mutation that wedges
+  // the scroller elsewhere in this file. No preventDefault or
+  // stopPropagation, so a tap landing on an interactive bubble (a
+  // thought toggle, a tool card) still runs its own handler normally —
+  // this only adds the blur as a side effect.
+  let dismissStartX = 0;
+  let dismissStartY = 0;
+  body.addEventListener(
+    "pointerdown",
+    (e: PointerEvent) => {
+      dismissStartX = e.clientX;
+      dismissStartY = e.clientY;
+    },
+    { passive: true },
+  );
+  body.addEventListener(
+    "pointerup",
+    (e: PointerEvent) => {
+      if (isFormControl(e.target)) return;
+      if (Math.hypot(e.clientX - dismissStartX, e.clientY - dismissStartY) > TAP_MOVE_THRESHOLD) {
+        return;
+      }
+      const active = document.activeElement;
+      if (active instanceof HTMLTextAreaElement || active instanceof HTMLInputElement) {
+        active.blur();
+      }
+    },
+    { passive: true },
+  );
   const headerSlot = el("div", { class: "chat-slot" });
   const detailsSlot = el("div", { class: "chat-slot" });
   const armedSlot = el("div", { class: "chat-slot" });
@@ -1758,6 +1793,78 @@ function renderChat(c: ChatState): HTMLElement {
   ) as HTMLTextAreaElement;
   if (c.composerValue && c.composerValue.length > 0) {
     queueMicrotask(() => autosize(textarea));
+  }
+  // Swipe down on the composer to dismiss the keyboard. Entirely
+  // passive — no preventDefault anywhere — so it can never block the
+  // textarea's own native caret/selection touch handling; a downward
+  // drag just also calls blur() once it clearly reads as "dismiss"
+  // rather than "position the caret." Direction-locked the same way as
+  // swipe-nav.ts's list gesture: undecided until the drag clears a
+  // small deadzone, then committed to whichever axis dominated.
+  //
+  // blur() only fires on touchend, never from inside touchmove: calling
+  // it while the finger is still down defers iOS's own visualViewport
+  // resize reporting (viewport.ts's apply()/settle()) until the touch
+  // sequence ends anyway, so the keyboard visually closes but #app's
+  // height doesn't catch up until release — the chat area reads
+  // "stuck small, then snaps" for however long the finger stays down.
+  // Same class of "don't mutate mid-gesture" issue as the scroll-wedge
+  // fix elsewhere in this file; committing on touchend instead means
+  // the resize reporting is never blocked in the first place.
+  {
+    const DISMISS_THRESHOLD_PX = 50;
+    const DIRECTION_LOCK_PX = 10;
+    let startX: number | null = null;
+    let startY: number | null = null;
+    let locked = false;
+    let committed = false;
+    const finish = (): void => {
+      if (committed) textarea.blur();
+      startX = null;
+      startY = null;
+      locked = false;
+      committed = false;
+    };
+    textarea.addEventListener(
+      "touchstart",
+      (e: TouchEvent) => {
+        startX = null;
+        startY = null;
+        locked = false;
+        committed = false;
+        if (document.activeElement !== textarea) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        startX = touch.clientX;
+        startY = touch.clientY;
+      },
+      { passive: true },
+    );
+    textarea.addEventListener(
+      "touchmove",
+      (e: TouchEvent) => {
+        if (startX === null || startY === null) return;
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dx = touch.clientX - startX;
+        const dy = touch.clientY - startY;
+        if (!locked) {
+          if (Math.abs(dx) < DIRECTION_LOCK_PX && Math.abs(dy) < DIRECTION_LOCK_PX) {
+            return;
+          }
+          if (Math.abs(dx) > Math.abs(dy) || dy < 0) {
+            startX = null;
+            startY = null;
+            return;
+          }
+          locked = true;
+        }
+        committed = dy >= DISMISS_THRESHOLD_PX;
+      },
+      { passive: true },
+    );
+    textarea.addEventListener("touchend", finish, { passive: true });
+    textarea.addEventListener("touchcancel", finish, { passive: true });
   }
 
   // While a turn is in flight, split the lone Send button into two:
