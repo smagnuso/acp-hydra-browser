@@ -1129,6 +1129,14 @@ function renderArmedTasksBlock(c: ChatState): Node {
 
 // ---- Chat view ---------------------------------------------------
 
+// A long-running session's full log can run into the thousands of
+// items, each markdown-rendered into DOM on attach — building all of it
+// synchronously in one render() is what makes entering a big session
+// feel frozen with scrolling unresponsive. Cap the initial paint to the
+// recent tail; "show earlier" (renderAllHistory) opts back into the
+// full log for the rest of this ChatState's life.
+const CHAT_LOG_RENDER_WINDOW = 200;
+
 function renderChat(c: ChatState): HTMLElement {
   // Pull fresh metadata from the session list each render so a
   // deep-link reload (where the SPA opened the chat before any poll
@@ -1279,7 +1287,25 @@ function renderChat(c: ChatState): HTMLElement {
     : null;
 
   const body = el("div", { class: "chat-body" });
-  for (const item of c.log) {
+  const capped = !c.renderAllHistory && c.log.length > CHAT_LOG_RENDER_WINDOW;
+  const visibleLog = capped ? c.log.slice(c.log.length - CHAT_LOG_RENDER_WINDOW) : c.log;
+  if (capped) {
+    const hiddenCount = c.log.length - CHAT_LOG_RENDER_WINDOW;
+    body.appendChild(
+      el(
+        "button",
+        {
+          class: "show-earlier",
+          ...tapHandler(() => {
+            c.renderAllHistory = true;
+            render();
+          }),
+        },
+        `Show ${hiddenCount} earlier message${hiddenCount === 1 ? "" : "s"}`,
+      ),
+    );
+  }
+  for (const item of visibleLog) {
     // hideThoughts skips agent_thought_chunk bubbles at render time
     // only — they stay in c.log so toggling the preference back on
     // (or exporting the session) still shows/keeps them.

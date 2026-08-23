@@ -339,6 +339,14 @@ export interface ChatState {
   // Whether the chat-header's detail panel (full title/cwd/agent/model,
   // untruncated) is expanded. Toggled by clicking the header's info block.
   headerExpanded: boolean;
+  // Whether to render the full log rather than just the most recent
+  // window (see CHAT_LOG_RENDER_WINDOW in views.ts). A long-running
+  // session's full history is thousands of markdown-rendered DOM nodes,
+  // and building all of it synchronously on attach is what made entering
+  // a big session feel frozen with scrolling unresponsive — capping the
+  // initial paint to the recent tail avoids that; "show earlier" flips
+  // this to true for the rest of the ChatState's life.
+  renderAllHistory?: boolean;
   // messageIds of agent-initiated (unsolicited) turns currently open
   // server-side: the agent restarted itself off a finished background
   // task, not a session/prompt we sent. Keyed by messageId (turn_started's

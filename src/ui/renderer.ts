@@ -14,24 +14,48 @@ let scheduled = false;
 // and WS traffic (e.g. agent_message_chunk while a turn is streaming)
 // can trigger a render() at any point in that window — tearing out the
 // pressed button before the click event has a chance to fire on it. So
-// while a button is physically held down we hold off on the actual
-// rebuild; the deferred render flushes on release, just before the
-// browser dispatches click, so the still-live node handles it normally.
-let buttonPressed = false;
+// while a pointer is physically down we hold off on the actual rebuild;
+// the deferred render flushes on release.
+//
+// Originally scoped to button presses only, but the same teardown hits
+// touch-scrolling just as hard: a fast-streaming turn fires
+// agent_message_chunk many times a second, each one tearing out and
+// recreating .chat-body out from under an in-progress touch-drag, which
+// is what made scrolling go dead for a few seconds during bursty agent
+// output — not just on session attach. Gating on ANY pointerdown (not
+// only ones that hit a <button>) covers that: a touch-driven scroll
+// gesture fires pointerdown/pointermove/pointerup the same as a tap, so
+// this defers the rebuild for the gesture's whole duration and lets it
+// catch up in one shot on release instead of yanking the scroll
+// container out from under every finger movement.
+let pointerDown = false;
 document.addEventListener(
   "pointerdown",
-  (e) => {
-    if ((e.target as HTMLElement | null)?.closest("button")) {
-      buttonPressed = true;
-    }
+  () => {
+    pointerDown = true;
   },
   true,
 );
 document.addEventListener(
   "pointerup",
-  () => {
-    if (!buttonPressed) return;
-    buttonPressed = false;
+  (e) => {
+    if (!pointerDown) return;
+    pointerDown = false;
+    const target = e.target as HTMLElement | null;
+    if (target?.tagName === "TEXTAREA" || target?.tagName === "INPUT") {
+      // A tap on a text input's native focus-and-open-keyboard sequence
+      // can trail the touch by a frame or more (same story as
+      // tapHandler's synthetic click). If a render lands in that gap it
+      // tears down and recreates the input, and the focus restore below
+      // calls .focus() from a deferred rAF callback rather than directly
+      // inside the tap's own handler — WebKit in particular only opens
+      // the on-screen keyboard for a focus() trusted-gesture callstack,
+      // so the DOM focus "succeeds" but the keyboard never shows,
+      // and the user has to tap again. Give the native sequence a beat
+      // to finish before tearing the node down again.
+      setTimeout(render, 300);
+      return;
+    }
     render();
   },
   true,
@@ -39,7 +63,7 @@ document.addEventListener(
 document.addEventListener(
   "pointercancel",
   () => {
-    buttonPressed = false;
+    pointerDown = false;
   },
   true,
 );
@@ -49,8 +73,8 @@ export function render(): void {
   scheduled = true;
   requestAnimationFrame(() => {
     scheduled = false;
-    if (buttonPressed) {
-      // Defer until the press releases instead of dropping the render.
+    if (pointerDown) {
+      // Defer until the press/drag releases instead of dropping the render.
       render();
       return;
     }
