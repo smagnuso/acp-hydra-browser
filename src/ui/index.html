@@ -102,7 +102,7 @@ pre code { background: transparent; padding: 0; }
 @keyframes pill-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 /* Session list */
-.list { flex: 1; overflow-y: auto; padding: 1rem; }
+.list { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 1rem; }
 .list .group { margin-bottom: 1.25rem; }
 .list .group h2 { font-size: 0.85rem; color: var(--muted); margin: 0 0 0.5rem; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; cursor: pointer; }
@@ -151,7 +151,16 @@ pre code { background: transparent; padding: 0; }
 .armed-task .elapsed { color: var(--muted); font-variant-numeric: tabular-nums; }
 .armed-tasks-more { color: var(--muted); font-size: 0.78rem; padding-left: 1.1rem; }
 .chat-header .info .row2 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-body { flex: 1; overflow-y: auto; padding: 1rem max(1rem, calc(50% - 28rem)); display: flex; flex-direction: column; gap: 0.65rem; }
+/* overscroll-behavior-y: contain — .chat-body's scroll ancestors (.chat,
+   #app) are overflow:hidden and body is position:fixed, none of them
+   scrollable. Without this, iOS Safari's rubber-band bounce at
+   .chat-body's boundary tries to chain the remaining overscroll
+   momentum to one of those non-scrolling ancestors, and the failed
+   handoff can leave .chat-body itself unresponsive to further scroll
+   gestures until an unrelated touch resets its internal state
+   (scrolling dead, taps still fine). Reproduces with zero app JS
+   involved — pure scroll-chaining, not a render/pin timing bug. */
+.chat-body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 1rem max(1rem, calc(50% - 28rem)); display: flex; flex-direction: column; gap: 0.65rem; }
 .jump-to-latest { display: none; position: sticky; bottom: 0.5rem; align-self: center; margin-top: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.82rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
 .jump-to-latest.visible { display: inline-flex; align-items: center; }
 .jump-to-latest:hover { background: var(--panel); }
@@ -275,13 +284,13 @@ html.keyboard-open .composer { padding-bottom: 0.6rem; }
 .files .crumbs { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-x: auto; white-space: nowrap; }
 .files .crumb { color: var(--accent); cursor: pointer; }
 .files .crumb:hover { text-decoration: underline; }
-.files .body { flex: 1; overflow-y: auto; padding: 0.5rem 0; }
+.files .body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 0.5rem 0; }
 .files .entry { display: flex; gap: 0.5rem; align-items: center; padding: 0.35rem 0.75rem; cursor: pointer; }
 .files .entry:hover { background: var(--panel-2); }
 .files .entry .icon { width: 1.2rem; text-align: center; color: var(--muted); }
 .files .entry .name { flex: 1; }
 .files .entry .size { color: var(--muted); font-size: 0.8rem; }
-.files .preview { flex: 1; overflow: auto; padding: 0; }
+.files .preview { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 0; }
 .code-view { display: flex; align-items: flex-start; min-width: max-content; }
 .code-gutter { position: sticky; left: 0; z-index: 1; background: var(--code-bg); border-right: 1px solid var(--border); padding: 0.75rem 0; user-select: none; flex-shrink: 0; }
 .ln { display: block; padding: 0 0.75rem; line-height: 1.45; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.88em; color: var(--muted); cursor: pointer; text-align: right; min-width: 2.5rem; }

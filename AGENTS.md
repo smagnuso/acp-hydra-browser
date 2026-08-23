@@ -99,6 +99,19 @@ Ships as `hydra-acp-browser` on PATH. Registered via
   clickable element must use `tapHandler`, not a plain `onclick` — a
   plain `onclick` will "mostly work" in testing and then flake on real
   phones under load.
+- **Any independently-scrolling container nested inside the fixed-position
+  app shell needs `overscroll-behavior: contain`** (`index.html`:
+  `.chat-body`, `.list`, `.files .body`/`.preview`). `body` is
+  `position: fixed` and its ancestors (`#app`, `.chat`) are
+  `overflow: hidden`, so none of them can actually scroll. Without
+  `overscroll-behavior`, iOS Safari's rubber-band bounce at a scroll
+  container's boundary tries to chain the remaining overscroll momentum
+  to the next scrollable ancestor; the failed handoff can leave that
+  container's own scrolling unresponsive (taps still fine) until an
+  unrelated touch resets its internal state. Reproduces with zero app
+  JS involved — a pure CSS/scroll-chaining bug, not a render or pin
+  timing issue. Any new independently-scrolling panel needs the same
+  property.
 
 ## Updating this file
 

@@ -124,11 +124,27 @@ export function initViewportHeight(): void {
   // rotation starts a fresh baseline instead of comparing portrait
   // heights against a landscape ceiling.
   const maxHeightByWidth = new Map<number, number>();
+  // Last-applied values, so a no-op apply() (same numbers) skips the
+  // actual style/class writes. visualViewport fires "scroll" during a
+  // .chat-body touch-drag (see below), which without this ran apply()
+  // — and its unconditional setProperty/classList.toggle calls — on
+  // every tick of the gesture and its rubber-band settle. Mutating an
+  // ancestor's layout-affecting style while a nested scroller is mid-
+  // momentum is a known way to wedge iOS Safari's compositor scroll
+  // layer (scrolling dead, taps fine, until another gesture resets
+  // it) — this reproduced with no streaming or app-render activity at
+  // all, purely from the visualViewport scroll noise.
+  let lastH: number | null = null;
+  let lastKeyboardOpen: boolean | null = null;
+  let lastOffsetTop: number | null = null;
   const apply = (): void => {
     const vv = window.visualViewport;
     const h = (vv?.height ?? window.innerHeight) + topInsetPx();
     const rawOffsetTop = vv?.offsetTop ?? 0;
-    root.style.setProperty("--app-height", `${h}px`);
+    if (h !== lastH) {
+      lastH = h;
+      root.style.setProperty("--app-height", `${h}px`);
+    }
     // env(safe-area-inset-bottom) is a static device property — it
     // doesn't shrink to 0 just because the keyboard now occupies that
     // strip of the screen instead of the home-indicator gesture area.
@@ -143,7 +159,10 @@ export function initViewportHeight(): void {
     const ceiling = Math.max(h, maxHeightByWidth.get(widthKey) ?? 0);
     maxHeightByWidth.set(widthKey, ceiling);
     const keyboardOpen = ceiling - h > KEYBOARD_HEIGHT_THRESHOLD_PX;
-    root.classList.toggle("keyboard-open", keyboardOpen);
+    if (keyboardOpen !== lastKeyboardOpen) {
+      lastKeyboardOpen = keyboardOpen;
+      root.classList.toggle("keyboard-open", keyboardOpen);
+    }
     // visualViewport fires "scroll" for more than the keyboard pan this
     // is meant to counter — a touch-drag inside a scrollable div (e.g.
     // .chat-body) can make WebKit pan the visual viewport itself instead
@@ -153,7 +172,10 @@ export function initViewportHeight(): void {
     // the offset while the keyboard is actually open, which is the one
     // case this compensates for.
     const offsetTop = keyboardOpen ? rawOffsetTop : 0;
-    root.style.setProperty("--app-offset-top", `${offsetTop}px`);
+    if (offsetTop !== lastOffsetTop) {
+      lastOffsetTop = offsetTop;
+      root.style.setProperty("--app-offset-top", `${offsetTop}px`);
+    }
     if (DEBUG_VIEWPORT) updateDebugOverlay(h, offsetTop, keyboardOpen);
   };
   apply();

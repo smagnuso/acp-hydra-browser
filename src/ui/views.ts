@@ -1242,23 +1242,38 @@ function ensureChatView(c: ChatState): ChatView {
     },
     "↓ Jump to latest",
   ) as HTMLButtonElement;
+  let jumpVisibilityRaf = 0;
   body.addEventListener(
     "scroll",
     () => {
       view!.lastScrollAt = performance.now();
       const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
-      jump.classList.toggle("visible", !atBottom);
       // Programmatic pins only ever scroll TO the bottom, so any event
       // away from it is the user scrolling — stop following until they
       // come back down.
       view!.stickToBottom = atBottom;
+      // jump toggles `display` (index.html), which is layout-affecting.
+      // Flipping it synchronously from inside this handler lands the
+      // mutation on the exact frame a touch-driven scroll settles at
+      // the bottom edge — a DOM write right there is what wedged
+      // WebKit's momentum/rubber-band compositor state for the
+      // scroller (scrolling dead, taps fine, until another gesture
+      // reset it). Defer to the next frame so it never lands inside
+      // the scroll event's own call stack.
+      if (jumpVisibilityRaf) cancelAnimationFrame(jumpVisibilityRaf);
+      jumpVisibilityRaf = requestAnimationFrame(() => {
+        jumpVisibilityRaf = 0;
+        jump.classList.toggle("visible", !atBottom);
+      });
     },
     { passive: true },
   );
+  let scrollHeightAtTouchStart = 0;
   body.addEventListener(
     "touchstart",
     () => {
       view!.touchActive = true;
+      scrollHeightAtTouchStart = body.scrollHeight;
     },
     { passive: true },
   );
@@ -1268,6 +1283,19 @@ function ensureChatView(c: ChatState): ChatView {
     }
     view!.touchActive = false;
     view!.lastTouchEndAt = performance.now();
+    // If nothing grew while we were holding pins off, there's nothing to
+    // catch up to — a plain manual drag-to-bottom with no streaming in
+    // flight lands here with scrollHeight unchanged. Scheduling the
+    // pins anyway means writing scrollTop into iOS's own rubber-band
+    // settle animation for no reason, which is exactly what wedges the
+    // scroller (scrolling dead, taps still fine, until another gesture
+    // resets it). Any growth that happens AFTER release is already
+    // caught by the ordinary render-driven pinIfDue call in
+    // reconcileChatBody, so skipping here only drops the narrow case
+    // these timers exist for: content that grew DURING the touch.
+    if (body.scrollHeight === scrollHeightAtTouchStart) {
+      return;
+    }
     // Content may have grown while the pin was held off; catch up once
     // the rubber-band settle window has passed (pinning INTO the bounce
     // is what wedged the scroller). Timers, not immediate — the second
