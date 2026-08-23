@@ -15,7 +15,7 @@
 import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { notify, send } from "./bridge.js";
-import { ensureSpinner } from "./acp.js";
+import { ensureSpinner, markActive } from "./acp.js";
 import type { Attachment, ChatState, QueueEntry } from "./types.js";
 
 // Build an ACP ContentBlock[] for session/prompt et al. Text block is
@@ -138,6 +138,7 @@ function dispatchPrompt(
     c.ownPromptIds.add(String(promptId));
   }
   ensureSpinner();
+  markActive();
   if (opts.addToHistory ?? true) {
     pushHistory(c, text);
   }
@@ -279,6 +280,7 @@ export function amendPrompt(): void {
   const cutoff = Date.now() - 60_000;
   c.recentOwnPrompts = c.recentOwnPrompts.filter((p) => p.at >= cutoff).slice(-16);
   ensureSpinner();
+  markActive();
   sendSteerRequest(entry, draft, target, text);
   render();
 }
