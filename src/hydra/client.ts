@@ -81,7 +81,15 @@ export class HydraRestClient {
     if (r.status === 204) {
       return undefined as T;
     }
-    return (await r.json()) as T;
+    // Some endpoints (killSession has been observed doing this) reply
+    // success with an empty body on a status other than 204 — read as
+    // text first and only parse if there's actually something there,
+    // rather than assuming any non-204 2xx has a JSON body. r.json()
+    // on an empty string throws "Unexpected end of JSON input", which
+    // isn't a HydraRestError, so it was surfacing as a generic kill
+    // failure even though the operation had already succeeded.
+    const text = await r.text();
+    return (text ? JSON.parse(text) : undefined) as T;
   }
 
   async health(): Promise<{ status: string; version?: string }> {
