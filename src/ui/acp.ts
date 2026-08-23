@@ -1037,7 +1037,15 @@ export function handleNotification(frame: JsonRpcFrame): void {
   }
   // Most update kinds indicate the agent is mid-turn. Mode/model/usage
   // updates can fire outside of a turn (e.g. at attach), so we don't
-  // flip inTurn for those.
+  // flip inTurn for those. A synthetic agent_message_chunk (e.g. the
+  // "Compaction completed." notice session.ts broadcasts after an
+  // upstream swap) is likewise not tied to any turn_started/turn_complete
+  // pair — treating it as activity would set inTurn with nothing left to
+  // ever clear it.
+  const updateMeta = (update._meta ?? {}) as AnyRecord;
+  const updateHydraMeta = (updateMeta["hydra-acp"] ?? {}) as AnyRecord;
+  const isSyntheticChunk =
+    kind === "agent_message_chunk" && updateHydraMeta.synthetic === true;
   switch (kind) {
     case "prompt_received":
     case "user_message_chunk":
@@ -1046,7 +1054,9 @@ export function handleNotification(frame: JsonRpcFrame): void {
     case "tool_call":
     case "tool_call_update":
     case "plan":
-      markActive();
+      if (!isSyntheticChunk) {
+        markActive();
+      }
       break;
     default:
       break;
@@ -1057,9 +1067,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
       // for backwards compat. We render the sibling-client path via
       // prompt_received, so drop the compat copy. (Same handling
       // hydra-acp-slack uses.)
-      const meta = (update._meta ?? {}) as AnyRecord;
-      const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
-      if (hydraMeta.compatFor === "prompt_received") {
+      if (updateHydraMeta.compatFor === "prompt_received") {
         break;
       }
       // Streaming user message from a sibling that *isn't* using
@@ -1069,12 +1077,9 @@ export function handleNotification(frame: JsonRpcFrame): void {
       }
       break;
     }
-    case "agent_message_chunk": {
-      const meta = (update._meta ?? {}) as AnyRecord;
-      const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
-      pushChunk("agent", update.content, hydraMeta.synthetic === true);
+    case "agent_message_chunk":
+      pushChunk("agent", update.content, isSyntheticChunk);
       break;
-    }
     case "agent_thought_chunk":
       pushChunk("thought", update.content);
       break;
