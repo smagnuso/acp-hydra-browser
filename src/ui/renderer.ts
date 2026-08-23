@@ -48,6 +48,13 @@ let lastRenderAt = 0;
 // catch up in one shot on release instead of yanking the scroll
 // container out from under every finger movement.
 let pointerDown = false;
+// Set when a render() request arrived while the pointer was down and had
+// to be held. Release only flushes when this is set — an ordinary tap
+// with no render activity during the press must NOT trigger a render of
+// its own, because that rebuild lands exactly when the browser is
+// attaching native UI to the tapped element (a <select>'s picker, a text
+// input's keyboard) and kills it before it's visible.
+let renderHeldByPress = false;
 document.addEventListener(
   "pointerdown",
   () => {
@@ -60,18 +67,19 @@ document.addEventListener(
   (e) => {
     if (!pointerDown) return;
     pointerDown = false;
+    if (!renderHeldByPress) return;
+    renderHeldByPress = false;
     const target = e.target as HTMLElement | null;
-    if (target?.tagName === "TEXTAREA" || target?.tagName === "INPUT") {
-      // A tap on a text input's native focus-and-open-keyboard sequence
-      // can trail the touch by a frame or more (same story as
-      // tapHandler's synthetic click). If a render lands in that gap it
-      // tears down and recreates the input, and the focus restore below
-      // calls .focus() from a deferred rAF callback rather than directly
-      // inside the tap's own handler — WebKit in particular only opens
-      // the on-screen keyboard for a focus() trusted-gesture callstack,
-      // so the DOM focus "succeeds" but the keyboard never shows,
-      // and the user has to tap again. Give the native sequence a beat
-      // to finish before tearing the node down again.
+    const tag = target?.tagName;
+    if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") {
+      // A tap on a form control's native focus sequence (keyboard for
+      // text inputs, picker sheet for selects) can trail the touch by a
+      // frame or more. If a render lands in that gap it tears down and
+      // recreates the control, and the native UI attached to the old
+      // node dies before it's visible — WebKit in particular only opens
+      // the keyboard for a focus() inside a trusted-gesture callstack,
+      // so the rAF-deferred focus restore can't bring it back. Give the
+      // native sequence a beat to finish before rebuilding.
       setTimeout(render, 300);
       return;
     }
@@ -83,6 +91,12 @@ document.addEventListener(
   "pointercancel",
   () => {
     pointerDown = false;
+    // The browser took the gesture (native scroll, system sheet). Flush
+    // any held render; the patch path no longer disturbs the scroller.
+    if (renderHeldByPress) {
+      renderHeldByPress = false;
+      render();
+    }
   },
   true,
 );
@@ -95,8 +109,9 @@ export function render(): void {
   const fire = (): void => {
     scheduled = false;
     if (pointerDown) {
-      // Defer until the press/drag releases instead of dropping the render.
-      render();
+      // Park it; pointerup/pointercancel flushes. No rAF respin — that
+      // was a busy-loop for the whole duration of every press.
+      renderHeldByPress = true;
       return;
     }
     lastRenderAt = performance.now();

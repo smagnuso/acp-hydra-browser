@@ -1794,10 +1794,21 @@ function renderChat(c: ChatState): HTMLElement {
   // this; in the patch path (tryPatchChat) scroll is simply never
   // disturbed.
   view.headerSlot.replaceChildren(header);
-  if (details) {
-    view.detailsSlot.replaceChildren(details);
-  } else {
-    view.detailsSlot.replaceChildren();
+  // Don't rebuild the details panel out from under an interacting user:
+  // a focused <select> with its native picker open dies silently if its
+  // node is replaced (the picker is anchored to the element), and
+  // streaming/poll renders land often enough to hit that window nearly
+  // every time. The panel refreshes on the next render after blur.
+  const detailsActive =
+    details !== null &&
+    document.activeElement !== null &&
+    view.detailsSlot.contains(document.activeElement);
+  if (!detailsActive) {
+    if (details) {
+      view.detailsSlot.replaceChildren(details);
+    } else {
+      view.detailsSlot.replaceChildren();
+    }
   }
   view.armedSlot.replaceChildren(renderArmedTasksBlock(c));
   view.composerSlot.replaceChildren(composer);
