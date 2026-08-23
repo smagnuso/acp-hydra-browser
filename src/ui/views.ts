@@ -688,7 +688,6 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
               "blocked",
             )
           : null,
-        el("span", { class: "badge" }, `${s.attachedClients ?? 0} attached`),
         ...(s.importedFromMachine && !s.upstreamSessionId
           ? [
               el(
