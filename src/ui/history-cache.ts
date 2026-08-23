@@ -255,3 +255,15 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
     if (document.visibilityState === "hidden") flushHistoryCacheNow();
   });
 }
+
+// Ask the browser not to evict this origin's storage under disk
+// pressure — otherwise the whole point of this cache (surviving a cold
+// relaunch) can get silently defeated. Best-effort: Safari doesn't
+// implement the Storage API's persist() at all, and Chrome/Firefox may
+// grant or deny based on their own heuristics (often auto-granted for
+// an installed PWA) with no callback either way to react to — there's
+// nothing to do differently on failure, since the cache already
+// tolerates being empty.
+if (typeof navigator !== "undefined" && navigator.storage?.persist) {
+  void navigator.storage.persist();
+}
