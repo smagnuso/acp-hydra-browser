@@ -389,6 +389,14 @@ export interface ChatState {
   // bridge/replay_policy. Undefined until the first recordable update
   // arrives, which also means the very first attach always gets "full".
   lastSeenMessageId?: string;
+  // True when log[] was seeded from the local history-cache.ts cache
+  // rather than a full session/attach replay — meaning there may be
+  // older history on the daemon that we don't have, since the cache is
+  // itself capped (see history-cache.ts's MAX_BYTES_PER_SESSION). Drives
+  // the "load full history" button views.ts shows once the user has
+  // scrolled to the top of what's locally available. Cleared by
+  // routing.ts's requestFullHistory once a genuine full replay lands.
+  historyIsPartial?: boolean;
 }
 
 export interface SessionModalData {

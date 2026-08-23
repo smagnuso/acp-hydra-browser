@@ -6,6 +6,8 @@ import { setState, state } from "./state.js";
 import { handleFrame } from "./bridge.js";
 import { cancelUnboundQueued } from "./queue.js";
 import { render } from "./renderer.js";
+import { handleNotification, resetChatHistoryState } from "./acp.js";
+import { loadCachedSession } from "./history-cache.js";
 import type { ChatState, SessionInfo } from "./types.js";
 
 // Exponential backoff for WS reconnect: 1s, 2s, 4s, 8s, 16s, 30s cap.
@@ -155,7 +157,55 @@ export function openChat(sessionId: string, load: boolean): void {
   };
   state.current = initial;
   setState({ view: "chat" });
-  connectChatSocket(initial);
+  void hydrateFromCacheThenConnect(initial);
+}
+
+// Cache lookup is async, so the connect that needs lastSeenMessageId
+// (to request an afterMessageId delta instead of a full replay) has to
+// wait on it — an IndexedDB read is a few ms at most, worth it to avoid
+// re-fetching the whole transcript on every cold app launch. Replays
+// cached frames through the same handleNotification path live/replayed
+// frames go through, so coalescing (message chunks, tool_call_update
+// merges, …) stays identical either way.
+async function hydrateFromCacheThenConnect(chat: ChatState): Promise<void> {
+  const cached = await loadCachedSession(chat.sessionId);
+  // Bail if the user navigated away (or into a different session) while
+  // the cache read was in flight.
+  if (state.current !== chat) {
+    return;
+  }
+  if (cached) {
+    for (const frame of cached.frames) {
+      handleNotification(frame);
+    }
+    chat.lastSeenMessageId = chat.lastSeenMessageId ?? cached.lastSeenMessageId;
+    // The cache is byte-capped (history-cache.ts), so a hit doesn't
+    // guarantee we have this session's whole history — just render()
+    // returns you the "load full history" button once you scroll to the
+    // top of what we do have.
+    chat.historyIsPartial = true;
+    render();
+  }
+  connectChatSocket(chat);
+}
+
+// Discards whatever's loaded and forces a genuine full session/attach
+// replay, bypassing the afterMessageId delta path entirely — the
+// fallback for when the user scrolls past what the local cache (or a
+// prior delta reconnect) actually has. Mirrors what already happens on
+// a session's very first-ever open (lastSeenMessageId starts undefined
+// there too), just triggered explicitly instead of by having nothing
+// cached.
+export function requestFullHistory(chat: ChatState): void {
+  if (state.current !== chat) {
+    return;
+  }
+  closeChatSocket();
+  resetConnectionStateForReconnect(chat);
+  resetChatHistoryState(chat);
+  chat.historyIsPartial = false;
+  render();
+  connectChatSocket(chat);
 }
 
 // Open a WS to /ws for the given chat and wire its event listeners.

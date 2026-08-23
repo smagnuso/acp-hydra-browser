@@ -28,7 +28,7 @@ import {
   sendWorkspaceCommand,
   updateQueuedPrompt,
 } from "./queue.js";
-import { openChat, closeChat } from "./routing.js";
+import { openChat, closeChat, requestFullHistory } from "./routing.js";
 import { requestNotificationPermission } from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
@@ -1528,6 +1528,21 @@ function reconcileChatBody(c: ChatState, view: ChatView): void {
   const capped = !c.renderAllHistory && c.log.length > CHAT_LOG_RENDER_WINDOW;
   const visibleLog = capped ? c.log.slice(c.log.length - CHAT_LOG_RENDER_WINDOW) : c.log;
   const desired: Node[] = [];
+  // Only once the user has scrolled past everything locally available
+  // (the DOM window AND the cache-seeded log itself) — this is the true
+  // top, not just the render-window boundary "show earlier" handles.
+  if (c.historyIsPartial && !capped) {
+    desired.push(
+      el(
+        "button",
+        {
+          class: "show-earlier",
+          ...tapHandler(() => requestFullHistory(c)),
+        },
+        "Load full history",
+      ),
+    );
+  }
   if (capped) {
     const hiddenCount = c.log.length - CHAT_LOG_RENDER_WINDOW;
     desired.push(

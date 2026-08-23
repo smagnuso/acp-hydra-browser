@@ -6,6 +6,7 @@ import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { contentToText } from "./markdown.js";
 import { extractEditDiff } from "./edit-diff.js";
+import { queueFrameForCache } from "./history-cache.js";
 import type {
   ArmedTask,
   ChatState,
@@ -972,7 +973,7 @@ function maybeResolvePermissionByToolCall(
 
 // ---- Notification dispatcher ------------------------------------
 
-interface JsonRpcFrame {
+export interface JsonRpcFrame {
   method?: string;
   params?: AnyRecord;
   id?: number | string;
@@ -1019,7 +1020,9 @@ export function handleNotification(frame: JsonRpcFrame): void {
   // Track the last recordable messageId so a future reconnect can ask
   // the daemon for a delta replay (afterMessageId) instead of a full
   // one. State-kind updates are skipped — they aren't persisted, so the
-  // daemon can't use one as a replay cutoff.
+  // daemon can't use one as a replay cutoff. Mirror the same frame to
+  // the local history cache (history-cache.ts) so a cold page load gets
+  // the same benefit, not just a live socket drop within one tab session.
   if (
     state.current &&
     kind &&
@@ -1027,6 +1030,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
     typeof update.messageId === "string"
   ) {
     state.current.lastSeenMessageId = update.messageId;
+    queueFrameForCache(state.current.sessionId, frame, update.messageId);
   }
   // Sibling-resolved permission tear-down. Doesn't flip inTurn or
   // route through the per-case switch — it's a transient correlation
