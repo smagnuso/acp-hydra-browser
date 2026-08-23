@@ -4,7 +4,7 @@
 // don't blow away the user's typing position.
 
 import { state } from "./state.js";
-import { renderApp } from "./views.js";
+import { renderApp, tryPatchChat } from "./views.js";
 
 let scheduled = false;
 
@@ -135,6 +135,32 @@ function actuallyRender(): void {
       }
     }
   }
+  const restoreFocus = (): void => {
+    if (!focusKey) return;
+    const next = root.querySelector<HTMLElement>(
+      `[data-focus-key="${CSS.escape(focusKey)}"]`,
+    );
+    if (!next) return;
+    next.focus();
+    const inputLike = next as HTMLInputElement;
+    if (selStart !== null && typeof inputLike.setSelectionRange === "function") {
+      try {
+        inputLike.setSelectionRange(selStart, selEnd!);
+      } catch {
+        // Fall through silently.
+      }
+    }
+  };
+
+  // In-place patch for "same chat, nothing structural changed": the
+  // scroll container and unchanged bubbles are left alone entirely, so
+  // scroll momentum and in-progress taps survive streaming repaints.
+  // Falls through to the teardown path on view/session/banner/modal
+  // transitions.
+  if (tryPatchChat(root, state)) {
+    restoreFocus();
+    return;
+  }
 
   // Capture chat-body scroll state. If the user was within ~50px of
   // the bottom we'll snap to the new bottom (so streaming text stays
@@ -191,20 +217,5 @@ function actuallyRender(): void {
     newFilesPreview.scrollTop = oldFilesPreviewScrollTop;
   }
 
-  if (focusKey) {
-    const next = root.querySelector<HTMLElement>(
-      `[data-focus-key="${CSS.escape(focusKey)}"]`,
-    );
-    if (next) {
-      next.focus();
-      const inputLike = next as HTMLInputElement;
-      if (selStart !== null && typeof inputLike.setSelectionRange === "function") {
-        try {
-          inputLike.setSelectionRange(selStart, selEnd!);
-        } catch {
-          // Fall through silently.
-        }
-      }
-    }
-  }
+  restoreFocus();
 }

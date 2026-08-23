@@ -89,11 +89,20 @@ function diffLinePair(diff: EditDiff): { oldLines: string[]; newLines: string[] 
   return { oldLines, newLines };
 }
 
+// Ceiling on the LCS dp matrix. The prefix/suffix trim below protects a
+// small edit to a big file, but an edit whose changes touch both ends of a
+// large file still yields a huge differing middle — a ~3000×3000 matrix is
+// 9M cells allocated as arrays-of-arrays, seconds of main-thread work plus
+// GC pressure, and render-time callers run this on every repaint. Past the
+// cap, degrade to a plain delete-all/add-all diff: a worse hunk for a diff
+// that big is a fine trade for never freezing the UI.
+const MAX_LCS_CELLS = 1_000_000;
+
 // Quadratic LCS diff over the (already prefix/suffix-trimmed) slices.
 function lcsDiff(a: string[], b: string[]): DiffOp[] {
   const m = a.length;
   const n = b.length;
-  if (m === 0 || n === 0) {
+  if (m === 0 || n === 0 || m * n > MAX_LCS_CELLS) {
     const out: DiffOp[] = [];
     for (const text of a) out.push({ op: "-", text });
     for (const text of b) out.push({ op: "+", text });

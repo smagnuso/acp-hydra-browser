@@ -38,6 +38,7 @@ import type {
   Attachment,
   ChatState,
   ConfigOption,
+  EditDiff,
   EditDiffLogItem,
   FileEntry,
   PermissionEntry,
@@ -1137,6 +1138,301 @@ function renderArmedTasksBlock(c: ChatState): Node {
 // full log for the rest of this ChatState's life.
 const CHAT_LOG_RENDER_WINDOW = 200;
 
+// Persistent per-session chat scaffolding. The full-teardown render model
+// destroyed and recreated .chat-body (and every bubble in it) on every
+// repaint — up to 10x/s while streaming. Each teardown killed in-flight
+// scroll momentum and yanked tap targets out from under fingers, which on
+// a phone reads as "the app is frozen" for as long as the streaming burst
+// lasts, even though the main thread is mostly idle (confirmed via the
+// perf overlay: no long tasks during the freezes). So the chat view keeps
+// ONE .chat-body element alive for the life of the ChatState and
+// reconciles its children in place; the light chrome around it (header,
+// details, armed block, composer) still rebuilds each render into
+// display:contents slots so it stays dumb and cheap.
+interface ChatView {
+  root: HTMLElement;
+  body: HTMLElement;
+  jump: HTMLButtonElement;
+  headerSlot: HTMLElement;
+  detailsSlot: HTMLElement;
+  armedSlot: HTMLElement;
+  composerSlot: HTMLElement;
+  // Follow-the-stream flag, owned by the body's scroll listener. Repaints
+  // must NOT re-measure "is the user near the bottom?" themselves: during
+  // streaming a repaint lands every ~100ms, and a user who just started
+  // dragging up is still within the proximity threshold, so measure-and-pin
+  // snapped them back down on every repaint — native scrolling lost the
+  // fight for the whole turn ("can't scroll, but taps work, and the
+  // thinking pill still pulses"). Scroll events are the user's voice:
+  // any event away from the bottom unsticks, reaching the bottom
+  // re-sticks, and reconcile only pins while stuck.
+  stickToBottom: boolean;
+  // True while at least one finger is on the scroller. A programmatic
+  // scrollTop assignment landing during an active iOS touch-drag KILLS
+  // the native gesture (the finger keeps moving, the browser has given
+  // up on the scroll) — and repaints happen often enough (streaming
+  // chunks in a turn, session polls outside one) that a drag started
+  // from the bottom, while stickToBottom was still true, almost always
+  // died to a mid-gesture pin. So the pin is deferred entirely while
+  // touching.
+  touchActive: boolean;
+  // When the last touch lifted. Pinning right AT release is as bad as
+  // mid-drag: a release at the bottom edge typically overscrolls into
+  // the rubber-band, and a programmatic scroll colliding with the
+  // bounce-back animation can wedge the WebKit scroller for seconds
+  // (scrolling dead, taps fine). All pins hold off until the bounce has
+  // settled (PIN_HOLDOFF_MS past this stamp).
+  lastTouchEndAt: number;
+  // When the scroller last emitted a scroll event. Momentum and the
+  // rubber-band keep emitting these the whole time the scroller is
+  // physically moving, so "quiet for SCROLL_QUIET_MS" is the ground
+  // truth for "actually settled" — a fixed post-release delay isn't,
+  // because back-to-back flicks stack momentum well past any constant
+  // (observed: two quick scrolls to the bottom wedged it again). Our own
+  // pins also emit scroll events, so this doubles as a self-debounce on
+  // pin frequency.
+  lastScrollAt: number;
+}
+
+const PIN_HOLDOFF_MS = 450;
+const SCROLL_QUIET_MS = 250;
+
+// Pin to the bottom only when following, no finger is down, the scroller
+// has been quiet long enough to be truly settled, and the position would
+// actually change — a same-position assignment still disturbs iOS
+// gesture state.
+function pinIfDue(view: ChatView): void {
+  if (!view.stickToBottom || view.touchActive) {
+    return;
+  }
+  const now = performance.now();
+  if (now - view.lastTouchEndAt < PIN_HOLDOFF_MS) {
+    return;
+  }
+  if (now - view.lastScrollAt < SCROLL_QUIET_MS) {
+    return;
+  }
+  const body = view.body;
+  const target = body.scrollHeight - body.clientHeight;
+  if (Math.abs(body.scrollTop - target) > 1) {
+    body.scrollTop = body.scrollHeight;
+  }
+}
+
+const chatViews = new WeakMap<ChatState, ChatView>();
+
+function ensureChatView(c: ChatState): ChatView {
+  let view = chatViews.get(c);
+  if (view) {
+    return view;
+  }
+  const body = el("div", { class: "chat-body" });
+  // Sticky as the last flex item so it floats at the bottom of the
+  // visible scroll area without needing to track the composer's
+  // (variable) height. Toggled on scroll directly — not through a full
+  // render(), which would tank scroll responsiveness.
+  const jump = el(
+    "button",
+    {
+      class: "jump-to-latest",
+      ...tapHandler(() => {
+        body.scrollTop = body.scrollHeight;
+        jump.classList.remove("visible");
+      }),
+    },
+    "↓ Jump to latest",
+  ) as HTMLButtonElement;
+  body.addEventListener(
+    "scroll",
+    () => {
+      view!.lastScrollAt = performance.now();
+      const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
+      jump.classList.toggle("visible", !atBottom);
+      // Programmatic pins only ever scroll TO the bottom, so any event
+      // away from it is the user scrolling — stop following until they
+      // come back down.
+      view!.stickToBottom = atBottom;
+    },
+    { passive: true },
+  );
+  body.addEventListener(
+    "touchstart",
+    () => {
+      view!.touchActive = true;
+    },
+    { passive: true },
+  );
+  const touchDone = (e: TouchEvent): void => {
+    if (e.touches.length > 0) {
+      return;
+    }
+    view!.touchActive = false;
+    view!.lastTouchEndAt = performance.now();
+    // Content may have grown while the pin was held off; catch up once
+    // the rubber-band settle window has passed (pinning INTO the bounce
+    // is what wedged the scroller). Timers, not immediate — the second
+    // covers a release whose momentum outlasts the first attempt's
+    // quiet check.
+    setTimeout(() => pinIfDue(view!), PIN_HOLDOFF_MS + 50);
+    setTimeout(() => pinIfDue(view!), PIN_HOLDOFF_MS + 900);
+  };
+  body.addEventListener("touchend", touchDone, { passive: true });
+  body.addEventListener("touchcancel", touchDone, { passive: true });
+  const headerSlot = el("div", { class: "chat-slot" });
+  const detailsSlot = el("div", { class: "chat-slot" });
+  const armedSlot = el("div", { class: "chat-slot" });
+  const composerSlot = el("div", { class: "chat-slot" });
+  const root = el(
+    "div",
+    { class: "chat" },
+    headerSlot,
+    detailsSlot,
+    armedSlot,
+    body,
+    composerSlot,
+  );
+  view = {
+    root,
+    body,
+    jump,
+    headerSlot,
+    detailsSlot,
+    armedSlot,
+    composerSlot,
+    stickToBottom: true,
+    touchActive: false,
+    lastTouchEndAt: 0,
+    lastScrollAt: 0,
+  };
+  chatViews.set(c, view);
+  return view;
+}
+
+// Per-item node cache: a bubble whose inputs haven't changed keeps its
+// exact DOM node across renders, so reconciliation leaves it untouched.
+// The sig array snapshots every input renderLogItem reads for that item
+// kind; element-wise === is enough because text strings are only replaced
+// (never mutated), so an unchanged bubble compares by reference in O(1).
+// Kinds that return null (spinner, perm, plan) are volatile or read
+// external state — they rebuild every render and get swapped in place.
+const logNodeCache = new WeakMap<object, { node: Node; sig: unknown[] }>();
+
+function logItemSig(item: ChatState["log"][number]): unknown[] | null {
+  if (item.kind === "stream") {
+    const qe = item.queueEntry;
+    return [
+      item.text,
+      item.role,
+      item.synthetic ?? false,
+      item.closed ?? false,
+      collapsedThoughts.has(item),
+      qe?.status,
+      qe?.amendedByMessageId,
+      qe?.amendsMessageId,
+      item.attachments?.length ?? 0,
+    ];
+  }
+  if (item.kind === "system" || item.kind === "error") {
+    return [item.text];
+  }
+  if (item.kind === "edit-diff") {
+    return [item.diff, item.expanded, item.status];
+  }
+  if (item.kind === "exit-plan-mode") {
+    return [item.plan, item.status];
+  }
+  return null;
+}
+
+function cachedLogNode(item: ChatState["log"][number]): Node {
+  const sig = logItemSig(item);
+  if (sig === null) {
+    return renderLogItem(item);
+  }
+  const hit = logNodeCache.get(item);
+  if (hit && hit.sig.length === sig.length && hit.sig.every((v, i) => v === sig[i])) {
+    return hit.node;
+  }
+  const node = renderLogItem(item);
+  logNodeCache.set(item, { node, sig });
+  return node;
+}
+
+// Minimal child sync: walks the desired list, moving/inserting only
+// nodes that differ from what's already at that position, then trims
+// leftovers. Unchanged nodes are identity-stable (cachedLogNode), so a
+// typical streaming repaint touches exactly one child — the growing
+// bubble — and the scroll container itself is never rebuilt.
+function syncChildren(parent: HTMLElement, desired: Node[]): void {
+  for (let i = 0; i < desired.length; i++) {
+    const want = desired[i]!;
+    const have = parent.childNodes[i] ?? null;
+    if (have !== want) {
+      parent.insertBefore(want, have);
+    }
+  }
+  while (parent.childNodes.length > desired.length) {
+    parent.removeChild(parent.lastChild!);
+  }
+}
+
+function reconcileChatBody(c: ChatState, view: ChatView): void {
+  const body = view.body;
+  const capped = !c.renderAllHistory && c.log.length > CHAT_LOG_RENDER_WINDOW;
+  const visibleLog = capped ? c.log.slice(c.log.length - CHAT_LOG_RENDER_WINDOW) : c.log;
+  const desired: Node[] = [];
+  if (capped) {
+    const hiddenCount = c.log.length - CHAT_LOG_RENDER_WINDOW;
+    desired.push(
+      el(
+        "button",
+        {
+          class: "show-earlier",
+          ...tapHandler(() => {
+            c.renderAllHistory = true;
+            render();
+          }),
+        },
+        `Show ${hiddenCount} earlier message${hiddenCount === 1 ? "" : "s"}`,
+      ),
+    );
+  }
+  for (const item of visibleLog) {
+    // hideThoughts skips agent_thought_chunk bubbles at render time
+    // only — they stay in c.log so toggling the preference back on
+    // (or exporting the session) still shows/keeps them.
+    if (state.hideThoughts && item.kind === "stream" && item.role === "thought") {
+      continue;
+    }
+    desired.push(cachedLogNode(item));
+  }
+  desired.push(view.jump);
+  syncChildren(body, desired);
+  pinIfDue(view);
+}
+
+// In-place repaint for the common case: already showing this chat, no
+// banner/modal/overlay in play. Skips the renderer's full teardown so
+// .chat-body (and scroll momentum, and any in-progress tap) survives.
+// Returns false when the situation calls for the teardown path.
+export function tryPatchChat(root: HTMLElement, s: AppState): boolean {
+  if (s.view !== "chat" || !s.current) {
+    return false;
+  }
+  if (s.banner || s.modal || s.current.fileOverlay) {
+    return false;
+  }
+  const view = chatViews.get(s.current);
+  if (!view) {
+    return false;
+  }
+  if (root.childNodes.length !== 1 || root.firstChild !== view.root) {
+    return false;
+  }
+  renderChat(s.current);
+  return true;
+}
+
 function renderChat(c: ChatState): HTMLElement {
   // Pull fresh metadata from the session list each render so a
   // deep-link reload (where the SPA opened the chat before any poll
@@ -1286,59 +1582,7 @@ function renderChat(c: ChatState): HTMLElement {
       )
     : null;
 
-  const body = el("div", { class: "chat-body" });
-  const capped = !c.renderAllHistory && c.log.length > CHAT_LOG_RENDER_WINDOW;
-  const visibleLog = capped ? c.log.slice(c.log.length - CHAT_LOG_RENDER_WINDOW) : c.log;
-  if (capped) {
-    const hiddenCount = c.log.length - CHAT_LOG_RENDER_WINDOW;
-    body.appendChild(
-      el(
-        "button",
-        {
-          class: "show-earlier",
-          ...tapHandler(() => {
-            c.renderAllHistory = true;
-            render();
-          }),
-        },
-        `Show ${hiddenCount} earlier message${hiddenCount === 1 ? "" : "s"}`,
-      ),
-    );
-  }
-  for (const item of visibleLog) {
-    // hideThoughts skips agent_thought_chunk bubbles at render time
-    // only — they stay in c.log so toggling the preference back on
-    // (or exporting the session) still shows/keeps them.
-    if (state.hideThoughts && item.kind === "stream" && item.role === "thought") {
-      continue;
-    }
-    body.appendChild(renderLogItem(item));
-  }
-  // Sticky as the last flex item so it floats at the bottom of the
-  // visible scroll area without needing to track the composer's
-  // (variable) height. Toggled on scroll directly — not through a full
-  // render(), which would tank scroll responsiveness the same way it
-  // did for the composer's oninput (see the "text entry feels slow" fix).
-  const jumpToLatest = el(
-    "button",
-    {
-      class: "jump-to-latest",
-      ...tapHandler(() => {
-        body.scrollTop = body.scrollHeight;
-        jumpToLatest.classList.remove("visible");
-      }),
-    },
-    "↓ Jump to latest",
-  ) as HTMLButtonElement;
-  body.appendChild(jumpToLatest);
-  body.addEventListener(
-    "scroll",
-    () => {
-      const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
-      jumpToLatest.classList.toggle("visible", !atBottom);
-    },
-    { passive: true },
-  );
+  const view = ensureChatView(c);
 
   const autosize = (t: HTMLTextAreaElement): void => {
     t.style.height = "auto";
@@ -1543,21 +1787,41 @@ function renderChat(c: ChatState): HTMLElement {
     ),
   );
 
-  // Auto-scroll is owned by renderer.ts now (it captures the previous
-  // chat-body's scroll state and restores synchronously on the new
-  // one) so we don't get a one-frame "scroll-from-zero" flash. The
-  // renderer also respects the user's scrollTop when they're not at
-  // the bottom.
+  // Chrome subtrees rebuild wholesale into their display:contents slots
+  // (small and cheap); the body reconciles in place so the scroll
+  // container and unchanged bubbles survive the repaint. In the
+  // teardown path the renderer still captures/restores scroll around
+  // this; in the patch path (tryPatchChat) scroll is simply never
+  // disturbed.
+  view.headerSlot.replaceChildren(header);
+  if (details) {
+    view.detailsSlot.replaceChildren(details);
+  } else {
+    view.detailsSlot.replaceChildren();
+  }
+  view.armedSlot.replaceChildren(renderArmedTasksBlock(c));
+  view.composerSlot.replaceChildren(composer);
+  reconcileChatBody(c, view);
+  return view.root;
+}
 
-  return el(
-    "div",
-    { class: "chat" },
-    header,
-    details,
-    renderArmedTasksBlock(c),
-    body,
-    composer,
-  );
+// render() rebuilds every visible bubble from scratch, which re-ran the
+// markdown parser over every message's full text on every repaint — for a
+// 200-item window during streaming that's the same few hundred KB of text
+// re-parsed up to 10x a second, almost all of it for closed bubbles whose
+// text can never change again. Keyed by the log item, validated by text:
+// a streaming bubble whose text grew misses and re-parses (correct), an
+// unchanged one hits.
+const markdownHtmlCache = new WeakMap<object, { text: string; html: string }>();
+
+function cachedMarkdown(key: object, text: string): string {
+  const hit = markdownHtmlCache.get(key);
+  if (hit && hit.text === text) {
+    return hit.html;
+  }
+  const html = renderMarkdown(text);
+  markdownHtmlCache.set(key, { text, html });
+  return html;
 }
 
 function renderLogItem(item: ChatState["log"][number]): Node {
@@ -1666,7 +1930,7 @@ function renderLogItem(item: ChatState["log"][number]): Node {
       if (item.synthetic) {
         body.textContent = item.text;
       } else {
-        body.innerHTML = renderMarkdown(item.text);
+        body.innerHTML = cachedMarkdown(item, item.text);
       }
       if (qe && qe.status === "cancelled") {
         body.style.textDecoration = "line-through";
@@ -1723,8 +1987,33 @@ function diffLinePrefix(op: DiffDisplayLine["op"]): string {
   return "  ";
 }
 
+// The LCS diff behind countDiffChanges/buildDiffDisplayLines is quadratic,
+// and render() rebuilds every visible log item from scratch — without this
+// cache every repaint (up to 10/s while streaming) re-diffed every visible
+// edit card, collapsed or not, which was a main-thread hog on sessions with
+// big edits. Keyed by the EditDiff object itself: acp.ts replaces item.diff
+// wholesale when a tool_call_update revises it, so object identity is a
+// correct (and free) invalidation signal.
+const diffComputeCache = new WeakMap<
+  EditDiff,
+  { counts: { added: number; removed: number }; lines?: DiffDisplayLine[] }
+>();
+
+function diffCacheFor(diff: EditDiff): {
+  counts: { added: number; removed: number };
+  lines?: DiffDisplayLine[];
+} {
+  let hit = diffComputeCache.get(diff);
+  if (!hit) {
+    hit = { counts: countDiffChanges(diff) };
+    diffComputeCache.set(diff, hit);
+  }
+  return hit;
+}
+
 function renderEditDiff(item: EditDiffLogItem): HTMLElement {
-  const counts = countDiffChanges(item.diff);
+  const cached = diffCacheFor(item.diff);
+  const counts = cached.counts;
   const shownPath = item.diff.path ? shortenCwd(item.diff.path) : "file";
   const summary: HTMLElement[] = [];
   if (counts.added > 0) {
@@ -1752,7 +2041,7 @@ function renderEditDiff(item: EditDiffLogItem): HTMLElement {
     head,
   );
   if (item.expanded) {
-    const lines = buildDiffDisplayLines(item.diff);
+    const lines = cached.lines ?? (cached.lines = buildDiffDisplayLines(item.diff));
     node.appendChild(
       el(
         "div",
@@ -1782,7 +2071,7 @@ function renderExitPlan(item: {
   const node = el("div", { class: "msg agent plan-markdown" });
   node.appendChild(el("div", { class: "plan-header" }, "📋 Plan"));
   const body = el("div", { class: "body" });
-  body.innerHTML = renderMarkdown(item.plan);
+  body.innerHTML = cachedMarkdown(item, item.plan);
   node.appendChild(body);
   const footer = exitPlanFooter(item.status);
   if (footer !== null) node.appendChild(footer);

@@ -125,6 +125,10 @@ pre code { background: transparent; padding: 0; }
 
 /* Chat */
 .chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+/* Persistent chrome slots around the reconciled .chat-body (views.ts
+   ensureChatView). display:contents keeps their children participating
+   in .chat's column flex directly, so the wrappers are layout-invisible. */
+.chat-slot { display: contents; }
 /* Reading-column constraint: on wide screens, .chat-body and .composer
    collapse their inline padding to keep content in a ~56rem column
    (centered) instead of stretching across the full window. */
