@@ -28,7 +28,7 @@ import {
   sendWorkspaceCommand,
   updateQueuedPrompt,
 } from "./queue.js";
-import { openChat } from "./routing.js";
+import { openChat, closeChat } from "./routing.js";
 import { requestNotificationPermission } from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
@@ -1631,12 +1631,25 @@ function renderChat(c: ChatState): HTMLElement {
     { class: "chat-header" },
     el(
       "div",
-      {
-        class: "chat-title clickable",
-        title: "Click for session details",
-        ...tapHandler(toggleDetails),
-      },
-      title,
+      { class: "chat-title-row" },
+      el(
+        "button",
+        {
+          class: "chat-back",
+          title: "Back to session list",
+          ...tapHandler(closeChat),
+        },
+        "←",
+      ),
+      el(
+        "div",
+        {
+          class: "chat-title clickable",
+          title: "Click for session details",
+          ...tapHandler(toggleDetails),
+        },
+        title,
+      ),
     ),
     el(
       "div",

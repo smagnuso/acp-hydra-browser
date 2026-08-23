@@ -137,9 +137,15 @@ pre code { background: transparent; padding: 0; }
    collapse their inline padding to keep content in a ~56rem column
    (centered) instead of stretching across the full window. */
 .chat-header { display: flex; flex-direction: column; gap: 0.3rem; padding: calc(0.5rem + env(safe-area-inset-top)) calc(0.6rem + env(safe-area-inset-right)) 0.5rem calc(0.6rem + env(safe-area-inset-left)); border-bottom: 1px solid var(--border); background: var(--panel); }
-.chat-title { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-title-row { display: flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.chat-title { font-weight: 600; font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chat-title.clickable { cursor: pointer; }
 .chat-title.clickable:hover { color: var(--accent); }
+.chat-back { display: none; flex: none; background: none; border: none; color: var(--muted); font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0.1rem 0.3rem; }
+.chat-back:hover { color: var(--accent); }
+@media (hover: hover) and (pointer: fine) {
+  .chat-back { display: block; }
+}
 .chat-header-row { display: flex; gap: 0.4rem; align-items: center; }
 .chat-header .info { flex: 1; min-width: 0; }
 .chat-header .info.clickable { cursor: pointer; }
