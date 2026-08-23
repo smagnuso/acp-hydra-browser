@@ -17,6 +17,7 @@ import { render } from "./renderer.js";
 import { notify, send } from "./bridge.js";
 import { ensureSpinner, markActive } from "./acp.js";
 import { jumpToBottom } from "./views.js";
+import { clearDraft, queueDraftWrite } from "./composer-draft.js";
 import type { Attachment, ChatState, QueueEntry } from "./types.js";
 
 // Build an ACP ContentBlock[] for session/prompt et al. Text block is
@@ -51,6 +52,7 @@ export function sendPrompt(): void {
   if (dispatchPrompt(c, text, { attachments })) {
     c.composerValue = "";
     c.attachments = [];
+    clearDraft(c.sessionId);
   }
   render();
 }
@@ -242,6 +244,7 @@ export function amendPrompt(): void {
     });
     c.composerValue = "";
     c.attachments = [];
+    clearDraft(c.sessionId);
     render();
     return;
   }
@@ -254,6 +257,7 @@ export function amendPrompt(): void {
   const draft = c.composerValue;
   c.composerValue = "";
   c.attachments = [];
+  clearDraft(c.sessionId);
   pushHistory(c, text);
   // Add an optimistic local entry mirroring sendPrompt's behavior, but
   // pre-tagged with amendsMessageId so the bubble paints the "+"
@@ -447,6 +451,7 @@ function rollbackAmend(
   );
   c.composerValue = draftText;
   c.attachments = entry.attachments ?? [];
+  queueDraftWrite(c.sessionId, draftText);
   render();
 }
 

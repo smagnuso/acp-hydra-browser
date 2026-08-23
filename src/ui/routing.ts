@@ -8,6 +8,7 @@ import { cancelUnboundQueued } from "./queue.js";
 import { render } from "./renderer.js";
 import { handleNotification, resetChatHistoryState } from "./acp.js";
 import { loadCachedSession } from "./history-cache.js";
+import { loadDraft } from "./composer-draft.js";
 import type { ChatState, SessionInfo } from "./types.js";
 
 // Exponential backoff for WS reconnect: 1s, 2s, 4s, 8s, 16s, 30s cap.
@@ -131,7 +132,7 @@ export function openChat(sessionId: string, load: boolean): void {
     contextSize: null,
     cost: null,
     fileOverlay: null,
-    composerValue: "",
+    composerValue: loadDraft(sessionId),
     attachments: [],
     busy: false,
     recentOwnPrompts: [],

@@ -29,6 +29,7 @@ import {
   updateQueuedPrompt,
 } from "./queue.js";
 import { openChat, closeChat, requestFullHistory } from "./routing.js";
+import { queueDraftWrite } from "./composer-draft.js";
 import { requestNotificationPermission } from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
@@ -1801,6 +1802,7 @@ function renderChat(c: ChatState): HTMLElement {
   const setComposer = (t: HTMLTextAreaElement, text: string): void => {
     t.value = text;
     c.composerValue = text;
+    queueDraftWrite(c.sessionId, text);
     autosize(t);
     t.setSelectionRange(text.length, text.length);
   };
@@ -1897,6 +1899,7 @@ function renderChat(c: ChatState): HTMLElement {
       oninput: (e: Event) => {
         const t = e.target as HTMLTextAreaElement;
         c.composerValue = t.value;
+        queueDraftWrite(c.sessionId, t.value);
         // User typed — they're off the history rail. Drop the nav
         // cursor so the next Up starts a fresh walk and Down doesn't
         // surprise them by restoring an old draft.
@@ -2747,6 +2750,7 @@ function addLineRef(path: string, line: number): void {
   const ref = `${path}:${line}`;
   const cur = state.current.composerValue;
   state.current.composerValue = cur ? `${cur} ${ref}` : ref;
+  queueDraftWrite(state.current.sessionId, state.current.composerValue);
   render();
 }
 
