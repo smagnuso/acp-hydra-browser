@@ -37,6 +37,11 @@ async function main(argv: string[]): Promise<void> {
     printHelp();
     return;
   }
+  if (argv[0] === "tailscale" && argv[1] === "setup") {
+    const { runTailscaleSetup } = await import("./setup/tailscale-wizard.js");
+    await runTailscaleSetup();
+    return;
+  }
 
   const config = loadConfig();
   setDebug(config.debug);
@@ -142,6 +147,8 @@ function printHelp(): void {
 
 Usage:
   hydra-acp-browser                Start the server.
+  hydra-acp-browser tailscale setup  Mint a Tailscale cert and configure
+                                      HTTPS + Tailscale-only access.
   hydra-acp-browser --version      Print version and exit.
   hydra-acp-browser --help         Show this message.
 
@@ -151,7 +158,7 @@ Set the master password on the daemon host:
 Sign in by opening the printed URL in your browser and entering the
 password.
 
-Config: ~/.hydra-acp-browser.conf (KEY=VALUE).
+Config: ~/.hydra-acp/browser.conf (KEY=VALUE).
 When run as a hydra-acp extension, HYDRA_ACP_DAEMON_URL / HYDRA_ACP_TOKEN /
 HYDRA_ACP_WS_URL are injected automatically.
 `,

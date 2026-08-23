@@ -8,19 +8,19 @@ create fresh sessions, kill old ones, and browse the project files of any
 session — all from a phone or laptop browser.
 
 The hydra master token never leaves the machine; the browser authenticates
-with a separate per-host authkey instead.
+you with a password (set via `hydra-acp auth password`) and issues its own
+session cookie.
 
 ## How it works
 
 ```
-                     hydra REST    +-------------------+         browser
-       /v1/sessions   <----------  |                   |  ---->   GET /
+                     hydra REST    +--------------------+         browser
+       /v1/sessions   <----------  |                    |  ---->   GET /
                                    |  hydra-acp-browser |  <---->  /ws?session=<id>
-       hydra WSS      <----------> |                   |
-       /acp                        +-------------------+
+       hydra WSS      <----------> |                    |
+       /acp                        +--------------------+
                                             |
                                   ~/.hydra-acp/browser/
-                                    authkey
                                     link
 ```
 
@@ -96,9 +96,10 @@ The extension exposes:
    ```
 
    On startup, hydra spawns hydra-acp-browser with these env vars set:
-   `HYDRA_ACP_DAEMON_URL`, `HYDRA_ACP_TOKEN`, `HYDRA_ACP_WS_URL`. The
-   first launch generates `~/.hydra-acp/browser/authkey` and writes
-   the open URL (with `?authkey=…`) to `~/.hydra-acp/browser/link`.
+   `HYDRA_ACP_DAEMON_URL`, `HYDRA_ACP_TOKEN`, `HYDRA_ACP_WS_URL`. It writes
+   the URL to open to `~/.hydra-acp/browser/link`. Set the sign-in password
+   once on the daemon host with `hydra-acp auth password`; the browser's
+   login page authenticates against that.
    Stdout/stderr land in `~/.hydra-acp/extensions/hydra-acp-browser.log`.
    Lifecycle is managed with
    `hydra-acp extensions start|stop|restart hydra-acp-browser` —
@@ -113,26 +114,47 @@ The extension exposes:
    npm start
    ```
 
-4. **Open the browser** to the URL printed on stderr. The first request
-   sets a cookie; subsequent requests are authenticated by the cookie
-   alone. The URL is also at `~/.hydra-acp/browser/link` for convenience.
+4. **Open the browser** to the URL printed on stderr (also at
+   `~/.hydra-acp/browser/link`). Enter the password from step 2; a
+   successful login sets an `hb_session` cookie and subsequent requests
+   are authenticated by that cookie alone.
 
 ## HTTPS
 
 Optional on `127.0.0.1`, **required** for any non-loopback bind (the server
-refuses otherwise — same rule as the hydra daemon). The simplest setup
-is a self-signed cert in `~/.hydra-acp/browser/tls/`.
+refuses otherwise — same rule as the hydra daemon).
+
+### On a tailnet (recommended)
+
+```sh
+hydra-acp-browser tailscale setup
+```
+
+Mints a real Let's Encrypt cert via `tailscale cert`, points
+`BROWSER_TLS_CERT`/`BROWSER_TLS_KEY` at it, binds `BROWSER_HOST` to your
+tailnet IP specifically (not `0.0.0.0` — your LAN never sees it), adds your
+MagicDNS name to `BROWSER_ALLOWED_HOSTS`, and offers to restart the
+extension. No trust prompts, no manual SAN wrangling. Certs expire after
+~90 days; re-run the same command to renew.
+
+If `tailscale cert` needs root (no `operator` set — see `tailscale set
+--operator=$(whoami)` to fix this permanently), the wizard offers to retry
+with `sudo` and fixes up file ownership afterward so the server can still
+read the key.
+
+### Without Tailscale: self-signed
+
+The simplest setup is a self-signed cert in `~/.hydra-acp/browser/tls/`.
 
 1. **Generate cert + key.** ECDSA P-256, 5-year validity, with a SAN
    covering loopback. Add any extra hostnames you'll hit it from
-   (Tailscale name, LAN IP, etc.) to the SAN inline:
+   (LAN IP, etc.) to the SAN inline:
 
    ```sh
    mkdir -p ~/.hydra-acp/browser/tls && chmod 700 ~/.hydra-acp/browser/tls
    cd ~/.hydra-acp/browser/tls
 
    SAN='subjectAltName=DNS:localhost,DNS:'"$(hostname)"',IP:127.0.0.1,IP:::1'
-   #     ^ add ,DNS:my.tailnet.ts.net  or  ,IP:100.64.x.y  if needed.
 
    openssl req -x509 \
      -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
@@ -165,35 +187,29 @@ is a self-signed cert in `~/.hydra-acp/browser/tls/`.
 
    ```sh
    BROWSER_HOST=0.0.0.0
-   BROWSER_ALLOWED_HOSTS=mybox,mybox.tailnet.ts.net,100.64.1.5
+   BROWSER_ALLOWED_HOSTS=mybox,100.64.1.5
    ```
 
    Every entry in `BROWSER_ALLOWED_HOSTS` must also be in the cert's SAN.
 
 3. **Apply** with `hydra-acp extensions restart hydra-acp-browser`. The
    log line should now read `listening on https://…` and the
-   `Open: https://…/?authkey=…` URL is what you load. The auth cookie
-   carries `Secure` automatically when serving HTTPS.
+   `Open: https://…/` URL is what you load. The auth cookie carries
+   `Secure` automatically when serving HTTPS.
 
 4. **Trust the cert.** Self-signed certs trip browser warnings.
    - **Click-through:** open the URL, accept the warning. Per-site only.
    - **Linux Chrome/Chromium:**
-     `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n hydra-acp-browser -i ~/.hydra-acp/browser/tls/cert.pem`
+     `certutil -d sql:$HOME/.pki/nssdb -A -t "P,," -n hydra-acp browser -i ~/.hydra-acp/browser/tls/cert.pem`
    - **macOS:** double-click `cert.pem`, add to System keychain, set
      "Always Trust" in Get Info.
    - **iOS:** AirDrop/email `cert.pem` to the device, install profile
      (Settings → General → VPN & Device Management), then enable under
      Settings → General → About → Certificate Trust Settings.
 
-If you're already on Tailscale, [`tailscale cert`](https://tailscale.com/kb/1153/enabling-https)
-issues a real Let's Encrypt cert for `<host>.tailnet.ts.net` — strictly
-better than self-signed (no trust prompts, ~30 s setup). Drop the
-output paths into `BROWSER_TLS_CERT` / `BROWSER_TLS_KEY` and skip
-step 4.
-
 If you flip-flop between HTTP and HTTPS, the `Secure` cookie set under
-HTTPS won't be sent over plain HTTP. Run
-`hydra-acp browser --rotate-authkey` to start fresh.
+HTTPS won't be sent over plain HTTP — clear cookies for the site (or hit
+`/logout`) and sign in again.
 
 ## Configuration keys
 
@@ -202,22 +218,22 @@ HTTPS won't be sent over plain HTTP. Run
 | Key                          | Default                                | Notes |
 |------------------------------|----------------------------------------|-------|
 | `BROWSER_HOST`               | `127.0.0.1`                            | Bind host. Non-loopback requires TLS. |
-| `BROWSER_PORT`               | `9099`                                 | Listen port. |
+| `BROWSER_PORT`               | `5514`                                 | Listen port. |
 | `BROWSER_TLS_CERT`           | (none)                                 | If set with `BROWSER_TLS_KEY`, listen on HTTPS. |
 | `BROWSER_TLS_KEY`            | (none)                                 | Path to TLS key. |
-| `BROWSER_AUTHKEY_FILE`       | `~/.hydra-acp/browser/authkey`         | Where the browser-side authkey lives. |
 | `BROWSER_LINK_FILE`          | `~/.hydra-acp/browser/link`            | URL written for convenience. |
 | `BROWSER_ALLOWED_HOSTS`      | empty                                  | Comma-sep extra Host values for DNS-rebind allowlist (e.g. Tailscale name). |
 | `BROWSER_FILE_MAX_BYTES`     | `262144`                               | Upper bound for `/api/files/read`. |
-| `HYDRA_DAEMON_URL`           | from env / `http://127.0.0.1:8765`     | `HYDRA_ACP_DAEMON_URL` env wins. |
+| `HYDRA_DAEMON_URL`           | from env / `http://127.0.0.1:55514`    | `HYDRA_ACP_DAEMON_URL` env wins. |
 | `HYDRA_WS_URL`               | derived                                | `HYDRA_ACP_WS_URL` env wins. |
 | `HYDRA_TOKEN`                | (required)                             | Same precedence as the slack ext. |
 | `DEBUG`                      | `false`                                | Verbose logging. |
 
 ## Security
 
-- **Authkey vs. hydra token.** The browser only ever sees a per-host
-  authkey (32 bytes, hex). The hydra master token stays on the server.
+- **Password vs. hydra token.** The browser only ever sees the session
+  token the daemon issues after a password login. The hydra master
+  token stays on the server.
 - **Loopback or TLS.** The server refuses to bind a non-loopback host
   unless `BROWSER_TLS_CERT` and `BROWSER_TLS_KEY` are configured —
   mirrors hydra's daemon.
