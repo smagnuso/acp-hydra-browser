@@ -22,6 +22,38 @@ export function buildSessionHash(sessionId: string, load: boolean): string {
   return load ? `#/session/${id}?load=true` : `#/session/${id}`;
 }
 
+// The installed PWA registers as the OS handler for web+hydra:// links
+// (manifest protocol_handlers). Per the Web App Manifest spec, clicking
+// one launches us at /?protocol_launch=<encoded original URL> rather
+// than navigating the browser to the custom scheme directly. Rewrite
+// that into our own hash route before applyHashRoute runs, matching the
+// web+hydra://sessions/<id> shape hydra-acp-reviewer/planner already
+// emit as hydra://sessions/<id> links elsewhere in the ecosystem.
+export function applyProtocolLaunch(): void {
+  const params = new URLSearchParams(window.location.search);
+  const launch = params.get("protocol_launch");
+  if (!launch) {
+    return;
+  }
+  // Scrub the query string immediately so a reload or copy-pasted URL
+  // doesn't replay the same redirect.
+  history.replaceState(null, "", window.location.pathname + window.location.hash);
+  let parsed: URL;
+  try {
+    parsed = new URL(launch);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "web+hydra:" || parsed.hostname !== "sessions") {
+    return;
+  }
+  const sessionId = decodeURIComponent(parsed.pathname.replace(/^\/+/, ""));
+  if (!sessionId) {
+    return;
+  }
+  window.location.hash = buildSessionHash(sessionId, true);
+}
+
 // pushState (not replaceState) so the browser's back/forward buttons
 // step through chat ↔ list transitions. The "already matches" guard
 // makes the case where applyHashRoute is the caller (hashchange after

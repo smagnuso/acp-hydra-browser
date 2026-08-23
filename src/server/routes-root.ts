@@ -57,7 +57,11 @@ export function registerRootRoutes(
         reply.send(injectNonce(html, request.cspNonce ?? ""));
         return;
       }
-      reply.code(200).send(loginPage(request.cspNonce ?? ""));
+      // Preserve a deep link (e.g. ?protocol_launch=... from a web+hydra://
+      // handoff) through the login round trip so it isn't lost when an
+      // unauthenticated visit gets bounced to the login page.
+      const next = new URL(request.url, "http://internal").search;
+      reply.code(200).send(loginPage(request.cspNonce ?? "", undefined, next));
     },
   );
 
@@ -109,22 +113,29 @@ async function handleLogin(
   ctx: ServerContext,
 ): Promise<void> {
   const ip = request.ip ?? "unknown";
+  const body = request.body as { password?: string; next?: string } | undefined;
+  // Only trust it back as a same-page query string: must start with "?"
+  // and stay within printable ASCII, so it can never turn into an
+  // absolute or protocol-relative redirect target.
+  const rawNext = body && typeof body.next === "string" ? body.next : "";
+  const next = /^\?[\x20-\x7e]{0,2048}$/.test(rawNext) ? rawNext : "";
+
   if (ctx.rateLimiter.isBlocked(ip)) {
     reply.code(429).type("text/html; charset=utf-8").send(
       loginPage(
         request.cspNonce ?? "",
         "Too many failed attempts. Try again in a few minutes.",
+        next,
       ),
     );
     return;
   }
 
-  const body = request.body as { password?: string } | undefined;
   const password =
     body && typeof body.password === "string" ? body.password : "";
   if (password.length === 0) {
     reply.code(400).type("text/html; charset=utf-8").send(
-      loginPage(request.cspNonce ?? "", "Password required."),
+      loginPage(request.cspNonce ?? "", "Password required.", next),
     );
     return;
   }
@@ -145,7 +156,7 @@ async function handleLogin(
         maxAgeSeconds: COOKIE_MAX_AGE_SECONDS,
       }),
     );
-    reply.code(303).header("Location", "/").send();
+    reply.code(303).header("Location", "/" + next).send();
     return;
   }
 
@@ -165,7 +176,7 @@ async function handleLogin(
   reply
     .code(daemonResp.status === 403 ? 403 : 401)
     .type("text/html; charset=utf-8")
-    .send(loginPage(request.cspNonce ?? "", errMsg));
+    .send(loginPage(request.cspNonce ?? "", errMsg, next));
 }
 
 async function handleLogout(
@@ -197,16 +208,19 @@ function injectNonce(html: string, nonce: string): string {
   return html.replaceAll("__CSP_NONCE__", nonce);
 }
 
-function loginPage(nonce: string, error?: string): string {
+function loginPage(nonce: string, error?: string, next?: string): string {
   const errorHtml = error
     ? `<p class="error" role="alert">${escapeHtml(error)}</p>`
+    : "";
+  const nextField = next
+    ? `<input type="hidden" name="next" value="${escapeHtml(next)}">`
     : "";
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>hydra-acp-browser</title>
+<title>Hydra</title>
 <style nonce="${nonce}">
 :root { color-scheme: dark; font-family: system-ui, sans-serif; }
 body { background: #0e1116; color: #d6deeb; margin: 0; padding: 4rem 1.5rem; max-width: 26rem; margin-inline: auto; line-height: 1.5; }
@@ -238,9 +252,10 @@ code { background: #1c2230; padding: 0.1rem 0.4rem; border-radius: 4px; }
 </style>
 </head>
 <body>
-<h1>hydra-acp-browser</h1>
+<h1>Hydra</h1>
 ${errorHtml}
 <form id="loginForm" method="POST" action="/login" autocomplete="off">
+  ${nextField}
   <label for="password">Password</label>
   <input type="password" id="password" name="password" autofocus required autocomplete="off">
   <button type="submit">Sign in</button>
