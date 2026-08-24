@@ -13,6 +13,7 @@ import { createServer, type Server } from "node:http";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { HydraRestClient } from "../hydra/client.js";
 import { sendPushToAll } from "./push-store.js";
+import { isSessionVisible } from "./session-visibility.js";
 import { logger } from "../util/log.js";
 import type { Config } from "../config.js";
 
@@ -84,7 +85,7 @@ export async function registerForPush(
     log.info(`registered turn-notify session=${sessionId} messageId=${messageId} status=${result.status}`);
     if (result.status === "already_terminal") {
       pending.delete(messageId);
-      await sendPushToAll(buildPayload(sessionId, sessionTitle, result.stopReason));
+      await deliverPush(sessionId, sessionTitle, result.stopReason);
     }
   } catch (err) {
     pending.delete(messageId);
@@ -119,7 +120,23 @@ async function handleDelivery(
   }
   pending.delete(messageId);
   log.info(`turn-notify delivered session=${entry.sessionId} messageId=${messageId} stopReason=${payload.stopReason}`);
-  await sendPushToAll(buildPayload(entry.sessionId, entry.sessionTitle, payload.stopReason));
+  await deliverPush(entry.sessionId, entry.sessionTitle, payload.stopReason);
+}
+
+// Skips the push when a browser WS is currently open on this session
+// with the tab visible and focused — the answer's already on screen,
+// and the foreground notification path (notifications.ts) already
+// covers "tab open but not looked at" on its own.
+async function deliverPush(
+  sessionId: string,
+  sessionTitle: string,
+  stopReason: string | undefined,
+): Promise<void> {
+  if (isSessionVisible(sessionId)) {
+    log.info(`session=${sessionId} currently visible — suppressing push`);
+    return;
+  }
+  await sendPushToAll(buildPayload(sessionId, sessionTitle, stopReason));
 }
 
 // iOS/Safari auto-appends "from <site name>" under every web push

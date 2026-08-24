@@ -69,7 +69,7 @@ function lastAgentText(c: ChatState): string {
 // Notify only when the tab genuinely isn't being looked at — a
 // foreground notification while the user is staring at the finished
 // turn would just be noise stacked on top of what's already on screen.
-function tabIsHidden(): boolean {
+export function tabIsHidden(): boolean {
   return document.visibilityState !== "visible" || !document.hasFocus();
 }
 

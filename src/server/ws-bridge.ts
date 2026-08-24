@@ -21,6 +21,7 @@ import type { ServerContext } from "./http.js";
 import { HydraRestClient } from "../hydra/client.js";
 import { hasSubscriptions } from "./push-store.js";
 import { registerForPush } from "./turn-notify-callback.js";
+import { clearConnection, setConnectionVisible } from "./session-visibility.js";
 
 const log = logger("ws-bridge");
 
@@ -140,6 +141,13 @@ function handleConnection(
     daemonWsUrl: ctx.config.hydraWsUrl,
     token: sessionToken,
   });
+
+  // Identity for this connection's entry in the session-visibility
+  // registry (see bridge/visibility handling below). Assume visible
+  // until told otherwise — connecting to a session's WS at all almost
+  // always means the user just navigated to look at it.
+  const connId = Symbol("ws-bridge-conn");
+  setConnectionVisible(sessionId, connId, true);
 
   // Track ids of outstanding upstream→browser requests so we can validate
   // browser-supplied responses (and reject responses for unknown ids,
@@ -340,6 +348,15 @@ function handleConnection(
       parsed = JSON.parse(data.toString("utf8")) as JsonRpcMessage;
     } catch (err) {
       log.warn(`browser parse error: ${(err as Error).message}`);
+      return;
+    }
+    // Local-only signal (see notifications.ts's reportVisibility) — never
+    // forwarded upstream, doesn't go through ALLOWED_BROWSER_*_METHODS.
+    // Lets turn-notify-callback.ts skip a push when the answer is
+    // already on screen.
+    if (isNotification(parsed) && parsed.method === "bridge/visibility") {
+      const params = (parsed.params ?? {}) as { visible?: unknown };
+      setConnectionVisible(sessionId, connId, params.visible === true);
       return;
     }
     handleBrowserFrame(parsed);
@@ -556,6 +573,7 @@ function handleConnection(
   }
 
   function cleanup(): void {
+    clearConnection(sessionId, connId);
     // If a session/prompt we just forwarded hasn't produced its
     // prompt_queue/added yet, don't tear down the daemon connection
     // immediately — backgrounding the app right after hitting send (the

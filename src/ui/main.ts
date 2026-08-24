@@ -7,6 +7,7 @@ import { initPullToRefresh } from "./pull-refresh.js";
 import { initSwipeBack } from "./swipe-nav.js";
 import { initViewportHeight } from "./viewport.js";
 import { ensureServiceWorker, subscribeForPush } from "./notifications.js";
+import { reportVisibility } from "./bridge.js";
 import { state } from "./state.js";
 
 initViewportHeight();
@@ -38,3 +39,10 @@ window.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("hashchange", () => {
   applyHashRoute();
 });
+
+// Keeps the server's per-session visibility registry (ws-bridge.ts)
+// current so a turn-end push can be suppressed while this tab is
+// actually the one being looked at — see turn-notify-callback.ts.
+document.addEventListener("visibilitychange", () => reportVisibility());
+window.addEventListener("focus", () => reportVisibility());
+window.addEventListener("blur", () => reportVisibility());

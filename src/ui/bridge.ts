@@ -15,7 +15,7 @@ import {
 } from "./acp.js";
 import { cancelAllQueued } from "./queue.js";
 import { parseArmedTaskList } from "./acp.js";
-import { notifyTurnEnded } from "./notifications.js";
+import { notifyTurnEnded, tabIsHidden } from "./notifications.js";
 import type { ChatState, PermissionEntry } from "./types.js";
 
 interface JsonRpcFrame {
@@ -47,6 +47,17 @@ export function notify(method: string, params: unknown): void {
     return;
   }
   c.ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+}
+
+// Tells the bridge (server-side, this connection only — see ws-bridge.ts's
+// bridge/visibility handling) whether this tab is actually being looked
+// at right now, so it can skip a turn-end push when the answer's already
+// on screen. Local-only: the server intercepts this before it would ever
+// reach the daemon. Call on visibilitychange/focus/blur and once the
+// session is ready, since the server assumes visible=true by default
+// until told otherwise.
+export function reportVisibility(): void {
+  notify("bridge/visibility", { visible: !tabIsHidden() });
 }
 
 // Send a JSON-RPC response (used for replying to permission asks).
@@ -139,6 +150,10 @@ export function handleFrame(frame: JsonRpcFrame): void {
         /* listener errors don't block other listeners */
       }
     }
+    // The bridge assumes visible=true on connect as a default, not a
+    // measurement — send the real state now that there's a connection
+    // to send it on.
+    reportVisibility();
     render();
     return;
   }
