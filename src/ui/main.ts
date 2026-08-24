@@ -71,3 +71,28 @@ window.addEventListener("keydown", (e) => {
 // same idea as the TUI's session picker. See views.ts's
 // handleListKeydown for the actual logic.
 window.addEventListener("keydown", (e) => handleListKeydown(e));
+
+// PageUp/PageDown to page through chat history. Without this they're
+// dead keys in the chat view: body is position:fixed and #app/.chat are
+// overflow:hidden (see AGENTS.md's scroll-chaining gotcha), so there's
+// no ancestor for the browser's own "scroll nearest scrollable
+// container" default to find, even with the composer focused. Skipped
+// when focus is in a textarea that's actually overflowing (the queue
+// chip's inline prompt editor, given a long enough prompt) so paging
+// there scrolls within the field instead of yanking focus-owner
+// expectations out from under it — the composer itself is deliberately
+// NOT exempted here, since desktop auto-focuses it (views.ts) and it's
+// essentially never tall enough to have its own scrollable content.
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "PageUp" && e.key !== "PageDown") return;
+  if (state.view !== "chat") return;
+  const active = document.activeElement;
+  if (active instanceof HTMLTextAreaElement && active.scrollHeight > active.clientHeight) {
+    return;
+  }
+  const chatBody = document.querySelector<HTMLElement>(".chat-body");
+  if (!chatBody) return;
+  e.preventDefault();
+  const delta = chatBody.clientHeight * 0.9;
+  chatBody.scrollBy({ top: e.key === "PageDown" ? delta : -delta, behavior: "smooth" });
+});
