@@ -115,21 +115,29 @@ export async function loadCachedSession(
 // In-memory buffer of not-yet-flushed frames per session, so a burst of
 // chunks during an active turn costs one debounced write instead of one
 // IndexedDB round trip per frame.
-const pendingFrames = new Map<string, CachedFrame[]>();
+const pendingFrames = new Map<string, JsonRpcFrame[]>();
 const pendingLastSeen = new Map<string, string>();
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Called from acp.ts's handleNotification for every recordable
 // session/update — the same gate that already drives ChatState's own
 // lastSeenMessageId, so the cache and the live delta-reconnect cursor
-// never disagree about what's been "seen".
+// never disagree about what's been "seen". That gate fires on every
+// streamed agent_message_chunk during an active turn (the daemon stamps
+// a messageId on every recordable update, not just turn boundaries —
+// see cli's recordAndBroadcast), so this has to stay cheap: two Map
+// writes, nothing else. An earlier version computed byteSize(frame)
+// (JSON.stringify + TextEncoder) right here, on the same main thread as
+// keystroke handling, and was measurably competing with typing
+// responsiveness during a fast-streaming reply. Sizing is deferred to
+// mergeAndTrim, which only runs once per debounce window.
 export function queueFrameForCache(
   sessionId: string,
   frame: JsonRpcFrame,
   messageId: string,
 ): void {
   const list = pendingFrames.get(sessionId) ?? [];
-  list.push({ frame, bytes: byteSize(frame) });
+  list.push(frame);
   pendingFrames.set(sessionId, list);
   pendingLastSeen.set(sessionId, messageId);
   if (flushTimer === undefined) {
@@ -174,7 +182,7 @@ async function flushPending(): Promise<void> {
 function mergeAndTrim(
   db: IDBDatabase,
   sessionId: string,
-  newFrames: CachedFrame[],
+  newFrames: JsonRpcFrame[],
   lastSeenMessageId: string,
 ): Promise<void> {
   return new Promise((resolve) => {
@@ -189,10 +197,16 @@ function mergeAndTrim(
     const getReq = store.get(sessionId);
     getReq.onsuccess = () => {
       const existing = getReq.result as CachedSession | undefined;
-      const frames = [...(existing?.frames ?? []), ...newFrames];
+      // Sizing happens here, once per debounce window, instead of per
+      // frame at queue time — see queueFrameForCache.
+      const sized: CachedFrame[] = newFrames.map((frame) => ({
+        frame,
+        bytes: byteSize(frame),
+      }));
+      const frames = [...(existing?.frames ?? []), ...sized];
       let totalBytes =
         (existing?.totalBytes ?? 0) +
-        newFrames.reduce((sum, f) => sum + f.bytes, 0);
+        sized.reduce((sum, f) => sum + f.bytes, 0);
       // Trim oldest-first until back under budget. A single oversized
       // frame (e.g. a huge tool-output blob) can still exceed the cap on
       // its own — that's fine, it just means this session temporarily
