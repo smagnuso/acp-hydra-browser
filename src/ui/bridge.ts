@@ -306,7 +306,10 @@ export function handleFrame(frame: JsonRpcFrame): void {
     state.current.ownPromptIds.has(String(frame.id))
   ) {
     state.current.ownPromptIds.delete(String(frame.id));
-    finalizeTurn();
+    const result = frame.result as { stopReason?: unknown } | undefined;
+    const stopReason =
+      typeof result?.stopReason === "string" ? result.stopReason : undefined;
+    finalizeTurn(stopReason);
     render();
     return;
   }

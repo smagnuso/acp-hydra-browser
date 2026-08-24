@@ -444,7 +444,15 @@ function onToolCallUpdate(update: AnyRecord): void {
 
 // ---- Turn boundaries ---------------------------------------------
 
-export function finalizeTurn(): void {
+// stopReason comes from the session/prompt response (own turn) or the
+// turn_complete/stop update's own `stopReason` field (peer-visible turn) —
+// see bridge.ts and the "stop"/"turn_complete" case below. "cancelled"
+// gets its own terminal status so the queue chip makes an interrupted
+// turn visibly distinct from a normal finish, mirroring the same
+// mid-flight-cancel case the TUI already flags loudly (app.ts's
+// "stopped (<reason>)" treatment) — the browser previously had no
+// equivalent, so a cancelled turn looked identical to a completed one.
+export function finalizeTurn(stopReason?: string): void {
   if (!state.current) return;
   // Drop the spinner entry; the tool call records remain in state but
   // are no longer rendered as a clutter list.
@@ -453,24 +461,29 @@ export function finalizeTurn(): void {
   // Close the streaming agent message so the next turn starts a
   // fresh bubble even if the agent immediately resumes streaming.
   closeOpenStream();
-  // Mark any own entry that was processing as done. The daemon doesn't
-  // emit a prompt_queue_removed for natural turn completion (only for
-  // started/cancelled/abandoned), so without this our promptQueue keeps
-  // counting the just-finished prompt as "active" and ahead-of-queue
-  // for the next prompt's chip math.
+  // Mark any own entry that was processing as done (or cancelled). The
+  // daemon doesn't emit a prompt_queue_removed for natural turn
+  // completion (only for started/cancelled/abandoned), so without this
+  // our promptQueue keeps counting the just-finished prompt as "active"
+  // and ahead-of-queue for the next prompt's chip math.
   for (const entry of state.current.promptQueue) {
     if (entry.status === "processing") {
-      entry.status = "done";
+      entry.status = stopReason === "cancelled" ? "cancelled" : "done";
     }
   }
   // A prompt held offline and flushed back while this turn was still
   // streaming: the turn is over now, its output is complete, and the
   // next turn's output hasn't started, so this is the one safe moment
   // to put the bubble in its final place below everything that came
-  // before it. The "done" guard keeps a stale flag from firing on the
-  // prompt's own completion, which would drop it below its own reply.
+  // before it. The "done"/"cancelled" guard keeps a stale flag from
+  // firing on the prompt's own completion, which would drop it below
+  // its own reply.
   for (const entry of state.current.promptQueue) {
-    if (entry.reseatAfterCurrentTurn && entry.status !== "done") {
+    if (
+      entry.reseatAfterCurrentTurn &&
+      entry.status !== "done" &&
+      entry.status !== "cancelled"
+    ) {
       entry.reseatAfterCurrentTurn = undefined;
       reseatBubbleAtEnd(state.current, entry);
     }
@@ -1275,7 +1288,9 @@ export function handleNotification(frame: JsonRpcFrame): void {
           tagAmendedM1(cancelledId, newId);
         }
       }
-      finalizeTurn();
+      const stopReason =
+        typeof update.stopReason === "string" ? update.stopReason : undefined;
+      finalizeTurn(stopReason);
       break;
     }
     // Agent-initiated ("unsolicited") turn: the agent restarted itself
