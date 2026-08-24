@@ -336,7 +336,13 @@ function refreshRailInPlace(rail: HTMLElement): void {
 }
 
 function renderSplitLayout(s: AppState): HTMLElement {
-  const detail = el("div", { class: "detail" });
+  // "split-detail", not "detail" — that name collides with the
+  // pre-existing generic .detail label+control row class used all over
+  // the app (options modal, chat-details panel, permission rows, …).
+  // CSS classes aren't scoped, so sharing it silently applied this
+  // wrapper's column-flex/max-width rules to every one of those rows
+  // too, stacking each label above its control instead of beside it.
+  const detail = el("div", { class: "split-detail" });
   if (s.current) {
     detail.appendChild(renderChat(s.current));
     if (s.current.fileOverlay) {
@@ -344,7 +350,7 @@ function renderSplitLayout(s: AppState): HTMLElement {
     }
   } else {
     detail.appendChild(
-      el("div", { class: "detail-empty" }, "Select a session from the list"),
+      el("div", { class: "split-detail-empty" }, "Select a session from the list"),
     );
   }
   return el("div", { class: "split" }, renderRail(), detail);
@@ -527,8 +533,8 @@ function openOrFocusChat(sessionId: string, cold: boolean): void {
   openChat(sessionId, cold);
 }
 
-// Up/Down moves a keyboard-nav cursor over the session list (by id, see
-// listHighlightedSessionId); Enter opens whatever it's on; Escape jumps
+// Up/Down (or n/p) moves a keyboard-nav cursor over the session list
+// (by id, see listHighlightedSessionId); Enter opens whatever it's on; Escape jumps
 // back into whichever session you most recently backed out of (same
 // target and same "still exists" guard as swipe-nav.ts's list->chat
 // swipe). Mirrors the TUI's session picker. Ignored while a form
@@ -568,7 +574,27 @@ export function handleListKeydown(e: KeyboardEvent): void {
     openOrFocusChat(s.sessionId, s.status === "cold");
     return;
   }
-  if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
+  // "c" opens the new-session dialog. Plain key only; a modifier
+  // (Ctrl/Cmd+C for copy, etc.) falls through to the browser's own
+  // handling untouched.
+  if (
+    e.key.toLowerCase() === "c" &&
+    !e.shiftKey &&
+    !e.altKey &&
+    !e.ctrlKey &&
+    !e.metaKey
+  ) {
+    e.preventDefault();
+    openSessionModal();
+    return;
+  }
+  // n/p are emacs/vi-style synonyms for Down/Up, same plain-key-only
+  // (no modifier) rule as "c" above so Ctrl/Cmd+N/P (new window,
+  // print) fall through untouched.
+  const noMods = !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey;
+  const isDown = e.key === "ArrowDown" || (e.key === "n" && noMods);
+  const isUp = e.key === "ArrowUp" || (e.key === "p" && noMods);
+  if (!isDown && !isUp && e.key !== "Enter") return;
   const ids = flatVisibleSessionIds();
   if (ids.length === 0) return;
   if (e.key === "Enter") {
@@ -587,7 +613,7 @@ export function handleListKeydown(e: KeyboardEvent): void {
   const nextIdx =
     currentIdx === -1
       ? 0
-      : e.key === "ArrowDown"
+      : isDown
       ? Math.min(ids.length - 1, currentIdx + 1)
       : Math.max(0, currentIdx - 1);
   setState({ listHighlightedSessionId: ids[nextIdx]! });
@@ -1284,7 +1310,7 @@ async function createSession(): Promise<void> {
   }
 }
 
-function closeModal(): void {
+export function closeModal(): void {
   setState({ modal: null });
 }
 
@@ -1840,7 +1866,7 @@ export function tryPatchChat(root: HTMLElement, s: AppState): boolean {
     return false;
   }
   if (isWideLayout()) {
-    // Split layout: root -> .split -> [.rail, .detail -> view.root].
+    // Split layout: root -> .split -> [.rail, .split-detail -> view.root].
     // The rail is a sibling of the chat's own subtree, so patching the
     // chat here never touches it — refreshRailInPlace (cheap, dirty-
     // gated) is what keeps it current instead.
@@ -1852,7 +1878,7 @@ export function tryPatchChat(root: HTMLElement, s: AppState): boolean {
       return false;
     }
     const rail = split.querySelector<HTMLElement>(":scope > .rail");
-    const detail = split.querySelector<HTMLElement>(":scope > .detail");
+    const detail = split.querySelector<HTMLElement>(":scope > .split-detail");
     if (!rail || !detail) {
       return false;
     }
@@ -2104,7 +2130,12 @@ function renderChat(c: ChatState): HTMLElement {
     // handleListKeydown — which re-reads document.activeElement, now
     // sees the rail *already* focused, and immediately calls
     // focusComposer() right back, undoing this in the same keystroke.
-    if (e.key === "Escape" && isWideLayout()) {
+    // Stand down when a modal is open (main.ts owns Escape then, to
+    // close it) — an edge case, but without this guard the composer
+    // would still have DOM focus underneath the modal overlay and
+    // would swallow the Escape for itself first, before main.ts's
+    // window-level handler ever sees it.
+    if (e.key === "Escape" && isWideLayout() && !state.modal) {
       e.preventDefault();
       e.stopPropagation();
       focusListRail();

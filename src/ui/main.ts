@@ -9,7 +9,7 @@ import { initViewportHeight } from "./viewport.js";
 import { initWideLayoutWatcher, isWideLayout } from "./dom.js";
 import { ensureServiceWorker, subscribeForPush } from "./notifications.js";
 import { reportPushEndpoint, reportVisibility } from "./bridge.js";
-import { handleListKeydown, focusListRail } from "./views.js";
+import { handleListKeydown, focusListRail, closeModal } from "./views.js";
 import { state } from "./state.js";
 
 initViewportHeight();
@@ -75,6 +75,30 @@ window.addEventListener("keydown", (e) => {
   } else if (state.view === "chat") {
     closeChat();
   }
+});
+
+// Escape closes whatever modal is open (new-session dialog, mode/model
+// picker, options) — covers every kind generically since closeModal()
+// just clears state.modal. Skipped while the session-create dialog is
+// mid-submit (m.busy), matching its own Cancel button's disabled state
+// — Escape shouldn't be able to do something the button itself refuses.
+// Registered before handleListKeydown below so a modal takes priority
+// over the list's own Escape handling while both could otherwise apply.
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !state.modal) return;
+  if (state.modal.kind === "session" && state.modal.busy) return;
+  e.preventDefault();
+  // stopImmediatePropagation, not stopPropagation: handleListKeydown
+  // below is a SIBLING listener on this same window target (a separate
+  // addEventListener call, not a descendant element), so plain
+  // stopPropagation wouldn't stop it from also firing on this same
+  // keypress — only stopImmediatePropagation skips other listeners
+  // registered on the same target. Without it, handleListKeydown's own
+  // (unrelated) Escape behavior would additionally fire — e.g. narrow
+  // mode's "jump into lastSessionId" navigating away at the same moment
+  // the modal closes.
+  e.stopImmediatePropagation();
+  closeModal();
 });
 
 // Up/Down to move a cursor over the session list, Enter to open it —
