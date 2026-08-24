@@ -2,6 +2,8 @@
 // `element.innerHTML`; the rendering escapes all input text up-front so
 // only this file's own tags reach the DOM.
 
+import { highlightFenced } from "./hljs.js";
+
 export function escapeHtml(s: unknown): string {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -71,6 +73,14 @@ function parseTableSeparator(s: string): Array<"left" | "center" | "right" | nul
   return aligns;
 }
 
+function renderCodeBlock(code: string, lang: string): string {
+  const highlighted = highlightFenced(code, lang);
+  const langAttr = escapeHtml(lang);
+  const codeAttrs = highlighted !== null ? ` class="hljs" data-lang="${langAttr}"` : ` data-lang="${langAttr}"`;
+  const body = highlighted ?? escapeHtml(code);
+  return `<pre><code${codeAttrs}>${body}</code></pre>`;
+}
+
 function renderTableRow(
   cells: string[],
   aligns: Array<"left" | "center" | "right" | null>,
@@ -115,7 +125,7 @@ export function renderMarkdown(src: unknown): string {
     const raw = lines[i]!;
     if (inCode) {
       if (/^```/.test(raw)) {
-        out += `<pre><code data-lang="${escapeHtml(codeLang)}">${escapeHtml(codeBuf.join("\n"))}</code></pre>`;
+        out += renderCodeBlock(codeBuf.join("\n"), codeLang);
         inCode = false;
         codeBuf = [];
         codeLang = "";
@@ -216,7 +226,7 @@ export function renderMarkdown(src: unknown): string {
     i++;
   }
   if (inCode) {
-    out += `<pre><code>${escapeHtml(codeBuf.join("\n"))}</code></pre>`;
+    out += renderCodeBlock(codeBuf.join("\n"), codeLang);
   }
   flushPara();
   closeList();

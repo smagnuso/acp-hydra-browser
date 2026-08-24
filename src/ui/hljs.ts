@@ -98,3 +98,29 @@ export function highlightCode(code: string, filename: string): string | null {
   if (!lang) return null;
   return hljs.highlight(code, { language: lang }).value;
 }
+
+const REGISTERED_LANG_IDS = new Set([
+  "bash", "c", "cpp", "css", "dockerfile", "go", "ini", "java", "javascript",
+  "json", "kotlin", "markdown", "php", "python", "ruby", "rust", "sql",
+  "swift", "typescript", "xml", "yaml",
+]);
+
+// Markdown fence tags occasionally differ from EXT_MAP's file-extension
+// keys (e.g. "c++" instead of "cpp", "shell"/"console" instead of "sh").
+const FENCE_LANG_ALIASES: Record<string, string> = {
+  "c++": "cpp",
+  shell: "bash",
+  console: "bash",
+};
+
+// Same idea as highlightCode, but resolves a markdown fence's language tag
+// (```cpp, ```c++, ```sh, ...) instead of a filename extension.
+export function highlightFenced(code: string, langTag: string): string | null {
+  const key = langTag.trim().toLowerCase();
+  if (!key) return null;
+  const lang = REGISTERED_LANG_IDS.has(key)
+    ? key
+    : (FENCE_LANG_ALIASES[key] ?? EXT_MAP[key]);
+  if (!lang) return null;
+  return hljs.highlight(code, { language: lang }).value;
+}
