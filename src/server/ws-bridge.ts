@@ -143,11 +143,17 @@ function handleConnection(
   });
 
   // Identity for this connection's entry in the session-visibility
-  // registry (see bridge/visibility handling below). Assume visible
-  // until told otherwise — connecting to a session's WS at all almost
-  // always means the user just navigated to look at it.
+  // registry (see bridge/visibility handling below). Deliberately NOT
+  // pre-marked visible: a reconnect that happens while the app is
+  // already backgrounded (its own retry logic, a brief network blip)
+  // opens a fresh WS without any visibility change on the client to
+  // report — no visibilitychange event fires because nothing changed —
+  // so a "connecting implies visible" default would sit there wrongly
+  // suppressing pushes for as long as that connection lives. bridge.ts's
+  // reportVisibility() sends the real state right after bridge/ready,
+  // so genuine foreground opens still get marked visible within
+  // milliseconds; this only changes the (safer) assumption in between.
   const connId = Symbol("ws-bridge-conn");
-  setConnectionVisible(sessionId, connId, true);
 
   // Track ids of outstanding upstream→browser requests so we can validate
   // browser-supplied responses (and reject responses for unknown ids,

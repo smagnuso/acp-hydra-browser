@@ -1,30 +1,21 @@
-// Turn-end notifications for prompts THIS browser tab submitted. Scoped
-// to "own" turns only — hydra excludes the originator from turn_complete
-// fan-out, so the response to our own session/prompt request (see
-// bridge.ts) is the only own-turn-end signal available, and that's also
-// exactly the scope we want: a peer-submitted turn finishing isn't
-// "browser initiated."
+// Turn-end notifications for prompts THIS browser tab submitted, scoped
+// to "own" turns only (see ws-bridge.ts's prompt_queue/added matching by
+// clientId — a peer-submitted turn finishing isn't "browser initiated").
+// Delivered via real Web Push, registered server-side per prompt against
+// the daemon's turn-notify webhook (see ws-bridge.ts / turn-notify-callback.ts),
+// so it reaches the user even once the tab — or, on iOS, the installed
+// PWA — is fully closed, not just backgrounded. The server also skips
+// delivery when this tab is the one currently looking at the session
+// (session-visibility.ts), which is what tabIsHidden()/reportVisibility
+// below feed.
 //
 // Safari (desktop and iOS) doesn't support the plain `new Notification()`
 // constructor called from page script — it requires going through a
-// service worker's showNotification(). Chrome/Firefox support both; we
-// use the service-worker path unconditionally so the same code works
-// everywhere rather than branching per browser. See sw.js for the
-// notificationclick handler (shared by both the foreground path below
-// and the `push` event handler that fires this same showNotification
-// while the app isn't running at all) and its notificationclick
-// handler, which is what brings the tab to front on click.
-//
-// This foreground path only fires while the page is alive and the tab
-// is hidden — it can't reach the user once the tab (or, on iOS, the
-// installed PWA) is fully closed. subscribeForPush/unsubscribeFromPush
-// below cover that case via real Web Push, registered server-side per
-// prompt (see ws-bridge.ts's maybeRegisterPush) against the daemon's
-// turn-notify webhook.
+// service worker's showNotification(). sw.js's `push` handler is what
+// actually renders the notification; see its notificationclick handler
+// for bringing the tab to front on click.
 
-import { state } from "./state.js";
 import { api } from "./api.js";
-import type { ChatState } from "./types.js";
 
 let swRegistration: ServiceWorkerRegistration | null = null;
 
@@ -56,19 +47,8 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return result === "granted";
 }
 
-function lastAgentText(c: ChatState): string {
-  for (let i = c.log.length - 1; i >= 0; i--) {
-    const item = c.log[i]!;
-    if (item.kind === "stream" && item.role === "agent" && item.text) {
-      return item.text;
-    }
-  }
-  return "";
-}
-
-// Notify only when the tab genuinely isn't being looked at — a
-// foreground notification while the user is staring at the finished
-// turn would just be noise stacked on top of what's already on screen.
+// Fed to the server (see reportVisibility in bridge.ts) so it can skip
+// a push when this tab is the one currently looking at the session.
 export function tabIsHidden(): boolean {
   return document.visibilityState !== "visible" || !document.hasFocus();
 }
@@ -116,21 +96,4 @@ export async function unsubscribeFromPush(): Promise<void> {
   } catch (err) {
     console.warn("push unsubscribe failed:", err);
   }
-}
-
-export async function notifyTurnEnded(c: ChatState): Promise<void> {
-  if (!state.notifyOnTurnEnd) return;
-  if (!tabIsHidden()) return;
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") {
-    return;
-  }
-  const reg = await ensureServiceWorker();
-  if (!reg) return;
-  const body = lastAgentText(c).trim().slice(0, 200) || "Turn finished.";
-  const title = c.title || "hydra-acp";
-  await reg.showNotification(title, {
-    body,
-    tag: `hydra-acp-turn-${c.sessionId}`,
-    data: { url: `/#/session/${encodeURIComponent(c.sessionId)}` },
-  });
 }
