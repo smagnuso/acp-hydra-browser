@@ -522,7 +522,27 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
     const e = raw as AnyRecord;
     const messageId = typeof e.messageId === "string" ? e.messageId : "";
     if (!messageId) continue;
-    if (state.current.queueByMessageId.has(messageId)) continue;
+    const position = typeof e.position === "number" ? e.position : 0;
+    const existing = state.current.queueByMessageId.get(messageId);
+    if (existing) {
+      // Reconcile against the daemon's authoritative snapshot rather
+      // than leaving whatever status we last knew locally untouched.
+      // The live hydra-acp/prompt_queue/removed{started} notification
+      // that would normally promote this entry can be lost to a
+      // disconnect/server-restart race landing between the entry being
+      // created and the next reattach — with nothing else left to
+      // correct it, the chip was getting stuck on "queued" forever.
+      // Mirrors onPromptQueueAdded's own promotion rule below.
+      if (position === 0) {
+        state.current.currentHeadMessageId = messageId;
+        if (existing.status === "queued" || existing.status === "pending") {
+          existing.status = "processing";
+        }
+      } else if (existing.status === "pending") {
+        existing.status = "queued";
+      }
+      continue;
+    }
     const blocks = Array.isArray(e.prompt) ? e.prompt : [];
     let text = "";
     for (const block of blocks) {
@@ -534,7 +554,6 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
       }
     }
     if (!text) continue;
-    const position = typeof e.position === "number" ? e.position : 0;
     const entry = {
       id: "snap_" + Math.random().toString(36).slice(2, 10),
       text,
