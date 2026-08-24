@@ -277,6 +277,8 @@ export function renderApp(root: HTMLElement, s: AppState): void {
           (m) => sendSetModel(m.id),
         ),
       );
+    } else if (s.modal.kind === "options") {
+      root.appendChild(renderOptionsModal());
     }
   }
 }
@@ -311,6 +313,7 @@ function renderTopbar(): HTMLElement {
     ),
     renderHostFilter(),
     el("span", { class: "spacer" }),
+    el("button", { ...tapHandler(openOptionsModal), title: "Options" }, "⚙"),
     el(
       "button",
       {
@@ -507,9 +510,10 @@ function workspaceRow(workspace: SessionInfo["workspace"]): HTMLElement {
 }
 
 // Global (cross-session) toggle for whether agent_thought_chunk
-// bubbles render at all. Lives in the expanded chat-details panel next
-// to the config-option dropdowns since it's the same "session settings"
-// area, even though the preference itself isn't per-session.
+// bubbles render at all. Lives in the global options modal (see
+// renderOptionsModal below), not a per-session panel — the preference
+// applies everywhere, so a per-session home would misleadingly imply
+// otherwise.
 function hideThoughtsRow(): HTMLElement {
   return el(
     "div",
@@ -529,11 +533,14 @@ function hideThoughtsRow(): HTMLElement {
   );
 }
 
-// Global toggle for a system notification when a turn THIS tab
-// submitted finishes while the tab isn't visible/focused. Turning it on
-// requests Notification permission (and registers the notification
-// service worker) right away rather than waiting for the first turn to
-// finish, so a denial surfaces immediately instead of silently.
+// Global (device-wide, not per-session) toggle for a Web Push
+// notification when a turn THIS device submitted finishes while it
+// isn't the one being looked at (see ws-bridge.ts / turn-notify-callback.ts).
+// Turning it on requests Notification permission and subscribes right
+// away rather than waiting for the first turn to finish, so a denial
+// surfaces immediately instead of silently. Lives in the global options
+// modal — subscribing here arms it for every session, not just
+// whichever one happened to be open.
 function notifyOnTurnEndRow(): HTMLElement {
   return el(
     "div",
@@ -567,6 +574,39 @@ function notifyOnTurnEndRow(): HTMLElement {
           });
         },
       }),
+    ),
+  );
+}
+
+function openOptionsModal(): void {
+  setState({ modal: { kind: "options" } });
+}
+
+// Global, device-wide preferences — as opposed to the per-session
+// chat-details panel, which holds settings scoped to one session
+// (title, cwd, model/mode/agent). Reachable from the gear button on
+// both the session-list topbar and a session's chat header, so it's
+// available whether or not a session happens to be open.
+function renderOptionsModal(): HTMLElement {
+  return el(
+    "div",
+    {
+      class: "modal-bg",
+      ...tapHandler((e) => {
+        if ((e.target as HTMLElement).classList.contains("modal-bg")) closeModal();
+      }),
+    },
+    el(
+      "div",
+      { class: "modal" },
+      el("h2", null, "Options"),
+      hideThoughtsRow(),
+      notifyOnTurnEndRow(),
+      el(
+        "div",
+        { class: "actions" },
+        el("button", { class: "primary", ...tapHandler(closeModal) }, "Close"),
+      ),
     ),
   );
 }
@@ -1766,6 +1806,7 @@ function renderChat(c: ChatState): HTMLElement {
             fmtCost(c.cost) as string,
           )
         : null,
+      el("button", { ...tapHandler(openOptionsModal), title: "Options" }, "⚙"),
       el("button", { ...tapHandler(openFiles), title: "Files" }, "📁"),
       el(
         "button",
@@ -1792,8 +1833,6 @@ function renderChat(c: ChatState): HTMLElement {
         detailRow("directory", cwd || "?"),
         workspaceRow(live?.workspace),
         ...c.configOptions.map(configOptionRow),
-        hideThoughtsRow(),
-        notifyOnTurnEndRow(),
       )
     : null;
 

@@ -413,6 +413,7 @@ export type ModalState =
   | SessionModalData
   | { kind: "modes" }
   | { kind: "models" }
+  | { kind: "options" }
   | null;
 
 export type Banner = { kind: "good" | "warn" | "bad"; text: string } | null;
