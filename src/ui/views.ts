@@ -5,7 +5,7 @@
 
 import { state, setState } from "./state.js";
 import { render, noteTypingActivity } from "./renderer.js";
-import { el, tapHandler, isFormControl, TAP_MOVE_THRESHOLD } from "./dom.js";
+import { el, tapHandler, isFormControl, isDesktopPointer, TAP_MOVE_THRESHOLD } from "./dom.js";
 import { renderMarkdown, escapeHtml } from "./markdown.js";
 import { highlightCode } from "./hljs.js";
 import {
@@ -382,9 +382,12 @@ function renderHostFilter(): HTMLElement {
 
 // ---- Session list -----------------------------------------------
 
-function renderList(): HTMLElement {
-  // Daemon always returns everything now; the "show cold" toggle and
-  // the host filter are client-side passes — apply them in order.
+// Daemon always returns everything now; the "show cold" toggle and the
+// host filter are client-side passes — apply them in order. Shared by
+// renderList (which also needs raw `visible` for the empty-state check)
+// and flatVisibleSessionIds (keyboard nav needs the exact same set and
+// order the user is actually looking at).
+function visibleFilteredSessions(): SessionInfo[] {
   let visible = state.showCold
     ? state.sessions
     : state.sessions.filter((s) => s.status !== "cold");
@@ -398,6 +401,62 @@ function renderList(): HTMLElement {
         s.importedFromMachine === state.hostFilter && !s.upstreamSessionId,
     );
   }
+  return visible;
+}
+
+// Flattened top-to-bottom order of session cards as actually rendered
+// (groups, then per-group sort) — the sequence Up/Down/Enter navigate.
+export function flatVisibleSessionIds(): string[] {
+  return groupSessions(visibleFilteredSessions(), state.groupBy).flatMap(
+    (g) => g.sessions.map((s) => s.sessionId),
+  );
+}
+
+// Up/Down moves a keyboard-nav cursor over the session list (by id, see
+// listHighlightedSessionId); Enter opens whatever it's on; Escape jumps
+// back into whichever session you most recently backed out of (same
+// target and same "still exists" guard as swipe-nav.ts's list->chat
+// swipe). Mirrors the TUI's session picker. Ignored outside the list
+// view and while a form control (the host-filter select) has focus, so
+// arrow keys there change the select's value instead of hijacking it.
+export function handleListKeydown(e: KeyboardEvent): void {
+  if (state.view !== "list") return;
+  if (isFormControl(document.activeElement)) return;
+  if (e.key === "Escape") {
+    const id = state.lastSessionId;
+    const s = id ? state.sessions.find((s) => s.sessionId === id) : undefined;
+    if (!s) return;
+    e.preventDefault();
+    openChat(s.sessionId, s.status === "cold");
+    return;
+  }
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
+  const ids = flatVisibleSessionIds();
+  if (ids.length === 0) return;
+  if (e.key === "Enter") {
+    const id = state.listHighlightedSessionId;
+    if (!id || !ids.includes(id)) return;
+    const s = state.sessions.find((s) => s.sessionId === id);
+    if (!s) return;
+    e.preventDefault();
+    openChat(s.sessionId, s.status === "cold");
+    return;
+  }
+  e.preventDefault();
+  const currentIdx = state.listHighlightedSessionId
+    ? ids.indexOf(state.listHighlightedSessionId)
+    : -1;
+  const nextIdx =
+    currentIdx === -1
+      ? 0
+      : e.key === "ArrowDown"
+      ? Math.min(ids.length - 1, currentIdx + 1)
+      : Math.max(0, currentIdx - 1);
+  setState({ listHighlightedSessionId: ids[nextIdx]! });
+}
+
+function renderList(): HTMLElement {
+  const visible = visibleFilteredSessions();
   // Count cold-filtered sessions separately so the empty-state message
   // for the "warm" toggle isn't muddied by host-filter hits.
   const hiddenCold = state.showCold
@@ -405,6 +464,15 @@ function renderList(): HTMLElement {
     : state.sessions.filter((s) => s.status === "cold").length;
   const groups = groupSessions(visible, state.groupBy);
   const list = el("div", { class: "list" });
+  // Keyboard-highlighted card may be scrolled out of view (a long list,
+  // or the highlight just moved past the fold) — bring it on screen.
+  // Deferred a tick: `list` isn't attached to the document until
+  // renderApp's caller appends this function's return value.
+  if (state.listHighlightedSessionId) {
+    queueMicrotask(() => {
+      document.querySelector(".card.highlighted")?.scrollIntoView({ block: "nearest" });
+    });
+  }
   if (visible.length === 0) {
     let msg: string;
     if (state.sessions.length === 0) {
@@ -673,7 +741,7 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
   return el(
     "div",
     {
-      class: "card",
+      class: s.sessionId === state.listHighlightedSessionId ? "card highlighted" : "card",
       ...tapHandler((e) => {
         const target = e.target as HTMLElement;
         if (target.closest("button")) return;
@@ -1969,6 +2037,14 @@ function renderChat(c: ChatState): HTMLElement {
   ) as HTMLTextAreaElement;
   if (c.composerValue && c.composerValue.length > 0) {
     queueMicrotask(() => autosize(textarea));
+  }
+  // Desktop only, and only the chat's first render — see composerAutoFocused
+  // in types.ts for why this can't just run on every renderChat call.
+  // Deferred a tick: the textarea isn't attached to the document yet at
+  // element-construction time, and focusing a detached node is a no-op.
+  if (!c.composerAutoFocused && isDesktopPointer()) {
+    c.composerAutoFocused = true;
+    queueMicrotask(() => textarea.focus());
   }
 
   // While a turn is in flight, split the lone Send button into two:

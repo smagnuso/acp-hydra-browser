@@ -373,6 +373,15 @@ export interface ChatState {
   // Whether the chat-header's detail panel (full title/cwd/agent/model,
   // untruncated) is expanded. Toggled by clicking the header's info block.
   headerExpanded: boolean;
+  // Whether renderChat has already tried auto-focusing the composer for
+  // this ChatState. One-shot so it fires on the chat's first render
+  // (nothing else has had a chance to take focus yet) and never again —
+  // renderChat runs on nearly every render while a turn streams, and
+  // refocusing every time would rip focus away from anything else the
+  // user clicked into (a modal, a queue chip's inline editor). See
+  // dom.ts's isDesktopPointer: only desktop gets this, since a virtual
+  // keyboard popping up unasked is a real cost mobile doesn't have.
+  composerAutoFocused?: boolean;
   // Whether to render the full log rather than just the most recent
   // window (see CHAT_LOG_RENDER_WINDOW in views.ts). A long-running
   // session's full history is thousands of markdown-rendered DOM nodes,
@@ -474,6 +483,11 @@ export interface AppState {
   // imported session; "__all" hides nothing; any other value filters
   // to sessions whose importedFromMachine matches.
   hostFilter: string;
+  // Keyboard-nav cursor for the session list (Up/Down + Enter). By id
+  // rather than index so it survives a reorder/poll refresh instead of
+  // silently pointing at whatever session happens to now be in that
+  // slot. Null means no keyboard selection is active.
+  listHighlightedSessionId: string | null;
   banner: Banner;
   modal: ModalState;
   current: ChatState | null;

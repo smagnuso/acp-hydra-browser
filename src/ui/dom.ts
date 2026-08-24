@@ -101,6 +101,16 @@ export function isFormControl(target: EventTarget | null): boolean {
   );
 }
 
+// Same signal index.html's desktop-only CSS already gates on (chat-back
+// button, queue button sizing) — a mouse/trackpad with real hover, not
+// just a wide viewport (a tablet in landscape can be just as wide as a
+// laptop but still wants touch behavior). JS-side uses: deciding whether
+// autofocusing the composer is free (no virtual keyboard to pop up) or
+// costly (steals the screen on a touch device).
+export function isDesktopPointer(): boolean {
+  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+}
+
 export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
   let firedViaPointer = false;
   let startX = 0;

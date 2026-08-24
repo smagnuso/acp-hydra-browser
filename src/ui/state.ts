@@ -50,6 +50,7 @@ export const state: AppState = {
   // archiver) are noisy if they all show up alongside the user's own
   // work. The dropdown lets them switch to a specific peer or "all".
   hostFilter: "__local",
+  listHighlightedSessionId: null,
   hideThoughts: false,
   notifyOnTurnEnd: false,
   banner: null,
