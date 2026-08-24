@@ -14,7 +14,7 @@ import {
   pollSessions,
   tryImportBundleWith409,
 } from "./api.js";
-import { respondPermission } from "./bridge.js";
+import { reportPushEndpoint, respondPermission } from "./bridge.js";
 import {
   amendPrompt,
   cancelProcessingPrompt,
@@ -624,7 +624,7 @@ function notifyOnTurnEndRow(): HTMLElement {
           const checked = (e.target as HTMLInputElement).checked;
           if (!checked) {
             setState({ notifyOnTurnEnd: false });
-            void unsubscribeFromPush();
+            void unsubscribeFromPush().then(() => reportPushEndpoint());
             return;
           }
           void requestNotificationPermission().then((granted) => {
@@ -638,7 +638,7 @@ function notifyOnTurnEndRow(): HTMLElement {
               return;
             }
             setState({ notifyOnTurnEnd: true });
-            void subscribeForPush();
+            void subscribeForPush().then(() => reportPushEndpoint());
           });
         },
       }),

@@ -15,7 +15,7 @@ import {
 } from "./acp.js";
 import { cancelAllQueued, flushOfflineQueue } from "./queue.js";
 import { parseArmedTaskList } from "./acp.js";
-import { tabIsHidden } from "./notifications.js";
+import { getPushEndpoint, tabIsHidden } from "./notifications.js";
 import type { ChatState, PermissionEntry } from "./types.js";
 
 interface JsonRpcFrame {
@@ -58,6 +58,18 @@ export function notify(method: string, params: unknown): void {
 // until told otherwise.
 export function reportVisibility(): void {
   notify("bridge/visibility", { visible: !tabIsHidden() });
+}
+
+// Tells the bridge (server-side, this connection only — see ws-bridge.ts's
+// bridge/push-endpoint handling) which Web Push subscription, if any,
+// belongs to this device, so a turn-end push targets it specifically
+// instead of every subscribed device (see turn-notify-callback.ts). Call
+// once the session is ready and again whenever the subscription changes
+// (notify toggle flipped on/off).
+export function reportPushEndpoint(): void {
+  void getPushEndpoint().then((endpoint) => {
+    notify("bridge/push-endpoint", { endpoint: endpoint ?? null });
+  });
 }
 
 // Application-level "is this connection actually alive" check.
@@ -222,6 +234,9 @@ export function handleFrame(frame: JsonRpcFrame): void {
     // measurement — send the real state now that there's a connection
     // to send it on.
     reportVisibility();
+    // Same idea, for this device's push subscription — a fresh
+    // connection doesn't know it yet either.
+    reportPushEndpoint();
     // Reset connectionHealthy before flushing — a prior connection that
     // died via a missed heartbeat would otherwise leave it false right
     // through the flush below.

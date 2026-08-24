@@ -7,7 +7,7 @@ import { initPullToRefresh } from "./pull-refresh.js";
 import { initSwipeBack } from "./swipe-nav.js";
 import { initViewportHeight } from "./viewport.js";
 import { ensureServiceWorker, subscribeForPush } from "./notifications.js";
-import { reportVisibility } from "./bridge.js";
+import { reportPushEndpoint, reportVisibility } from "./bridge.js";
 import { handleListKeydown } from "./views.js";
 import { state } from "./state.js";
 
@@ -28,7 +28,7 @@ window.addEventListener("DOMContentLoaded", () => {
     typeof Notification !== "undefined" &&
     Notification.permission === "granted"
   ) {
-    void subscribeForPush();
+    void subscribeForPush().then(() => reportPushEndpoint());
   }
   applyProtocolLaunch();
   applyHashRoute();

@@ -190,6 +190,14 @@ function handleConnection(
   // just this connection's. Undefined until doHandshake completes.
   let ownClientId: string | undefined;
 
+  // This connection's own Web Push subscription endpoint, reported by the
+  // browser over bridge/push-endpoint (mirrors bridge/visibility below).
+  // Undefined if this device has turn-end notifications off. Threaded
+  // into maybeRegisterPush so a delivered push targets only the device
+  // that submitted the prompt, not every subscribed device — see
+  // turn-notify-callback.ts.
+  let ownPushEndpoint: string | undefined;
+
   // Count of session/prompt requests forwarded upstream that haven't
   // been resolved by a matching prompt_queue/added yet (see
   // maybeRegisterPush below). Used only to decide whether cleanup()
@@ -217,7 +225,7 @@ function handleConnection(
     } catch {
       // Best-effort — fall back to the generic title below.
     }
-    await registerForPush(ctx.config, sessionId, messageId, title);
+    await registerForPush(ctx.config, sessionId, messageId, title, ownPushEndpoint);
   }
 
   upstream.on("open", () => {
@@ -363,6 +371,14 @@ function handleConnection(
     if (isNotification(parsed) && parsed.method === "bridge/visibility") {
       const params = (parsed.params ?? {}) as { visible?: unknown };
       setConnectionVisible(sessionId, connId, params.visible === true);
+      return;
+    }
+    // Local-only signal (see bridge.ts's reportPushEndpoint) — never
+    // forwarded upstream. Lets maybeRegisterPush target a turn-end push
+    // at this connection's own device instead of every subscribed one.
+    if (isNotification(parsed) && parsed.method === "bridge/push-endpoint") {
+      const params = (parsed.params ?? {}) as { endpoint?: unknown };
+      ownPushEndpoint = typeof params.endpoint === "string" ? params.endpoint : undefined;
       return;
     }
     // Application-level heartbeat (see bridge.ts's sendPing). Local-only,

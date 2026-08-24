@@ -53,6 +53,16 @@ export function tabIsHidden(): boolean {
   return document.visibilityState !== "visible" || !document.hasFocus();
 }
 
+// Fed to the server (see reportPushEndpoint in bridge.ts) so a turn-end
+// push targets this device specifically instead of every subscribed
+// device. Undefined when this device has notifications off.
+export async function getPushEndpoint(): Promise<string | undefined> {
+  const reg = await ensureServiceWorker();
+  if (!reg || !("pushManager" in reg)) return undefined;
+  const sub = await reg.pushManager.getSubscription();
+  return sub?.endpoint;
+}
+
 // applicationServerKey wants a raw Uint8Array, not the base64url string
 // the server hands back.
 function urlBase64ToUint8Array(base64Url: string): Uint8Array {

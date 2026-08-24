@@ -87,43 +87,35 @@ export async function hasSubscriptions(): Promise<boolean> {
   return (await load()).subscriptions.length > 0;
 }
 
-// Sends to every registered subscription, pruning any the push service
-// reports as gone (404/410 — the user uninstalled, revoked permission,
-// or the browser rotated the endpoint). Best-effort: a delivery failure
-// for one subscription doesn't block the others.
-export async function sendPushToAll(payload: {
-  title: string;
-  body: string;
-  url: string;
-  tag: string;
-}): Promise<void> {
+// Sends to the one subscription matching `endpoint` — turn-notify delivery
+// targets only the device that submitted the prompt (see
+// turn-notify-callback.ts), not every subscribed device. Prunes the
+// subscription if the push service reports it gone (404/410 — the user
+// uninstalled, revoked permission, or the browser rotated the endpoint).
+export async function sendPushToEndpoint(
+  endpoint: string,
+  payload: { title: string; body: string; url: string; tag: string },
+): Promise<void> {
   const file = await load();
-  if (file.subscriptions.length === 0) {
-    log.info(`sendPushToAll: no subscriptions, skipping "${payload.title}"`);
+  const sub = file.subscriptions.find((s) => s.endpoint === endpoint);
+  if (!sub) {
+    log.info(`sendPushToEndpoint: no matching subscription, skipping "${payload.title}"`);
     return;
   }
-  log.info(`sending push to ${file.subscriptions.length} subscription(s): "${payload.title}" / "${payload.body}"`);
+  log.info(`sending push to ${endpoint.slice(0, 60)}…: "${payload.title}" / "${payload.body}"`);
   const details = await vapidDetails();
   const body = JSON.stringify(payload);
-  const stale: string[] = [];
-  await Promise.all(
-    file.subscriptions.map(async (sub) => {
-      try {
-        await webpush.sendNotification(sub, body, { vapidDetails: details });
-      } catch (err) {
-        const e = err as { statusCode?: number; body?: string; headers?: unknown; message?: string };
-        if (e.statusCode === 404 || e.statusCode === 410) {
-          stale.push(sub.endpoint);
-        } else {
-          log.warn(
-            `push delivery failed: status=${e.statusCode} body=${e.body} headers=${JSON.stringify(e.headers)} msg=${e.message}`,
-          );
-        }
-      }
-    }),
-  );
-  if (stale.length > 0) {
-    file.subscriptions = file.subscriptions.filter((s) => !stale.includes(s.endpoint));
-    await save();
+  try {
+    await webpush.sendNotification(sub, body, { vapidDetails: details });
+  } catch (err) {
+    const e = err as { statusCode?: number; body?: string; headers?: unknown; message?: string };
+    if (e.statusCode === 404 || e.statusCode === 410) {
+      file.subscriptions = file.subscriptions.filter((s) => s.endpoint !== endpoint);
+      await save();
+    } else {
+      log.warn(
+        `push delivery failed: status=${e.statusCode} body=${e.body} headers=${JSON.stringify(e.headers)} msg=${e.message}`,
+      );
+    }
   }
 }

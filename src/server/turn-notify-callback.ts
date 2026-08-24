@@ -12,7 +12,7 @@
 import { createServer, type Server } from "node:http";
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { HydraRestClient } from "../hydra/client.js";
-import { sendPushToAll } from "./push-store.js";
+import { sendPushToEndpoint } from "./push-store.js";
 import { isSessionVisible } from "./session-visibility.js";
 import { logger } from "../util/log.js";
 import type { Config } from "../config.js";
@@ -23,6 +23,11 @@ interface PendingPush {
   secret: string;
   sessionId: string;
   sessionTitle: string;
+  // The originating connection's push subscription endpoint, if it has
+  // notifications on — delivery targets only this device, not every
+  // subscribed device. Undefined if the submitting device isn't
+  // subscribed, in which case the turn simply doesn't push anywhere.
+  endpoint: string | undefined;
 }
 
 const pending = new Map<string, PendingPush>();
@@ -72,12 +77,13 @@ export async function registerForPush(
   sessionId: string,
   messageId: string,
   sessionTitle: string,
+  endpoint: string | undefined,
 ): Promise<void> {
   if (!serverPort || !isLoopback(config.hydraDaemonUrl)) {
     return;
   }
   const secret = randomBytes(32).toString("hex");
-  pending.set(messageId, { secret, sessionId, sessionTitle });
+  pending.set(messageId, { secret, sessionId, sessionTitle, endpoint });
   const callbackUrl = `http://127.0.0.1:${serverPort}/turn-notify`;
   const client = HydraRestClient.forRequest(config.hydraDaemonUrl, config.hydraToken);
   try {
@@ -85,7 +91,7 @@ export async function registerForPush(
     log.info(`registered turn-notify session=${sessionId} messageId=${messageId} status=${result.status}`);
     if (result.status === "already_terminal") {
       pending.delete(messageId);
-      await deliverPush(sessionId, sessionTitle, result.stopReason);
+      await deliverPush(sessionId, sessionTitle, result.stopReason, endpoint);
     }
   } catch (err) {
     pending.delete(messageId);
@@ -120,23 +126,31 @@ async function handleDelivery(
   }
   pending.delete(messageId);
   log.info(`turn-notify delivered session=${entry.sessionId} messageId=${messageId} stopReason=${payload.stopReason}`);
-  await deliverPush(entry.sessionId, entry.sessionTitle, payload.stopReason);
+  await deliverPush(entry.sessionId, entry.sessionTitle, payload.stopReason, entry.endpoint);
 }
 
 // Skips the push when a browser WS is currently open on this session
 // with the tab visible and focused — the answer's already on screen,
 // and the foreground notification path (notifications.ts) already
-// covers "tab open but not looked at" on its own.
+// covers "tab open but not looked at" on its own. Delivery otherwise
+// targets only the device that submitted the prompt (`endpoint`), not
+// every subscribed device — a turn started on desktop shouldn't buzz a
+// phone that had nothing to do with it.
 async function deliverPush(
   sessionId: string,
   sessionTitle: string,
   stopReason: string | undefined,
+  endpoint: string | undefined,
 ): Promise<void> {
   if (isSessionVisible(sessionId)) {
     log.info(`session=${sessionId} currently visible — suppressing push`);
     return;
   }
-  await sendPushToAll(buildPayload(sessionId, sessionTitle, stopReason));
+  if (!endpoint) {
+    log.info(`session=${sessionId} originating device has no push subscription — skipping push`);
+    return;
+  }
+  await sendPushToEndpoint(endpoint, buildPayload(sessionId, sessionTitle, stopReason));
 }
 
 // iOS/Safari auto-appends "from <site name>" under every web push
