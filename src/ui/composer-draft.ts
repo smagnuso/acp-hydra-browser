@@ -33,10 +33,19 @@ const pendingWrites = new Map<string, string>();
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Called on every keystroke — debounced so typing doesn't hit
-// localStorage (synchronous, main-thread) once per character.
+// localStorage (synchronous, main-thread, and genuinely slow on some
+// platforms — iOS Safari in particular) on every character. Must be a
+// true debounce (reset the timer on each call), not a throttle: an
+// earlier version only started the timer if none was already running,
+// which meant a burst of continuous typing still hit localStorage once
+// per WRITE_DEBOUNCE_MS the whole time typing continued, instead of
+// once after it actually paused — periodic main-thread stalls for as
+// long as you kept typing.
 export function queueDraftWrite(sessionId: string, text: string): void {
   pendingWrites.set(sessionId, text);
-  if (flushTimer !== undefined) return;
+  if (flushTimer !== undefined) {
+    clearTimeout(flushTimer);
+  }
   flushTimer = setTimeout(() => {
     flushTimer = undefined;
     flushDraftWrites();
