@@ -2376,7 +2376,7 @@ function renderQueueChip(entry: QueueEntry): Node {
     return el(
       "div",
       { class: "queue-chip queue-editing" },
-      el("span", null, "editing · enter to save · esc to cancel edit"),
+      el("span", null, "editing — Save or Cancel below"),
     );
   }
   if (entry.status === "processing") {
@@ -2406,9 +2406,12 @@ function renderQueueChip(entry: QueueEntry): Node {
 
 // Inline edit-while-queued textarea. Enter (without shift) commits via
 // hydra-acp/prompt/update and reverts the chip to "queued"; Escape
-// reverts without sending. The commit may be rejected by hydra if the
-// prompt has already started — the chip status will get overwritten
-// shortly after by the daemon's broadcasts in either case.
+// reverts without sending. Save/Cancel buttons do the same two things
+// by tap — a phone keyboard has no Escape key, and relying on it as
+// the only way to back out of an edit left mobile with no way to
+// cancel at all. The commit may be rejected by hydra if the prompt has
+// already started — the chip status will get overwritten shortly after
+// by the daemon's broadcasts in either case.
 //
 // onCommit lets the caller patch the surrounding LogItem's text so the
 // bubble reflects the edit optimistically (the same value lands again
@@ -2424,19 +2427,25 @@ function renderQueueEditor(
     autocapitalize: "off",
   }) as HTMLTextAreaElement;
   textarea.value = entry.text;
+  const commit = (): void => {
+    const next = textarea.value;
+    entry.text = next;
+    onCommit(next);
+    entry.status = "queued";
+    updateQueuedPrompt(entry, next);
+    render();
+  };
+  const cancel = (): void => {
+    entry.status = "queued";
+    render();
+  };
   textarea.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" && !ev.shiftKey) {
       ev.preventDefault();
-      const next = textarea.value;
-      entry.text = next;
-      onCommit(next);
-      entry.status = "queued";
-      updateQueuedPrompt(entry, next);
-      render();
+      commit();
     } else if (ev.key === "Escape") {
       ev.preventDefault();
-      entry.status = "queued";
-      render();
+      cancel();
     }
   });
   // Autofocus + place caret at end. Done in a microtask so the
@@ -2445,7 +2454,17 @@ function renderQueueEditor(
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   });
-  return el("div", { class: "queue-editor" }, textarea);
+  return el(
+    "div",
+    { class: "queue-editor" },
+    textarea,
+    el(
+      "div",
+      { class: "queue-editor-actions" },
+      el("button", { class: "ghost", ...tapHandler(cancel) }, "Cancel"),
+      el("button", { class: "primary", ...tapHandler(commit) }, "Save"),
+    ),
+  );
 }
 
 function renderSpinner(spinner: SpinnerState): HTMLElement {
