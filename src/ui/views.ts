@@ -2359,7 +2359,7 @@ function renderQueueChip(entry: QueueEntry): Node {
           }),
           title: "Edit before sending",
         },
-        "✎",
+        el("span", { class: "queue-btn-glyph" }, "✎"),
       ),
       el(
         "button",
@@ -2368,7 +2368,7 @@ function renderQueueChip(entry: QueueEntry): Node {
           ...tapHandler(() => cancelQueuedPrompt(entry)),
           title: "Cancel before sending",
         },
-        "×",
+        el("span", { class: "queue-btn-glyph" }, "×"),
       ),
     );
   }
@@ -2475,7 +2475,7 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
       ...tapHandler(() => cancelProcessingPrompt()),
       title: "Cancel this turn",
     },
-    "×",
+    el("span", { class: "queue-btn-glyph" }, "×"),
   );
   if (!spinner.expanded) {
     return el(
