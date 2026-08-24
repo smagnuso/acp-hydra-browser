@@ -487,6 +487,11 @@ export interface AppState {
   // hideThoughts. See notifications.ts — gated on Notification
   // permission, which the checkbox requests when first turned on.
   notifyOnTurnEnd: boolean;
+  // Persisted like the other global prefs above. "system" resolves live
+  // off prefers-color-scheme (theme.ts) rather than being written out
+  // to a concrete light/dark value, so it keeps tracking the OS setting
+  // across reloads instead of freezing whatever it resolved to once.
+  theme: "dark" | "light" | "system";
   // Host filter selection for the session list. "__local" hides every
   // imported session; "__all" hides nothing; any other value filters
   // to sessions whose importedFromMachine matches.

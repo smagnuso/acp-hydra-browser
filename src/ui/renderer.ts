@@ -119,7 +119,9 @@ let lastKeystrokeAt = 0;
 export function noteTypingActivity(): void {
   lastKeystrokeAt = performance.now();
 }
-function isActivelyTyping(): boolean {
+// Exported for api.ts's poll guard — same "genuinely, recently typing"
+// signal, not just "a text input happens to have focus" (see there).
+export function isActivelyTyping(): boolean {
   const active = document.activeElement;
   if (
     !(active instanceof HTMLTextAreaElement) &&

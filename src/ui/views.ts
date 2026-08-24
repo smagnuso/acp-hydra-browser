@@ -43,6 +43,7 @@ import {
   unsubscribeFromPush,
 } from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
+import { applyTheme } from "./theme.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
@@ -814,6 +815,35 @@ function openOptionsModal(): void {
   setState({ modal: { kind: "options" } });
 }
 
+// Global (device-wide) light/dark theme picker. Lives in the same spot
+// as hideThoughts/notifyOnTurnEnd — a display preference, not session
+// state. applyTheme (theme.ts) does the actual work; this just persists
+// the choice and re-triggers it.
+const THEME_OPTIONS: Array<{ value: AppState["theme"]; label: string }> = [
+  { value: "system", label: "system" },
+  { value: "dark", label: "dark" },
+  { value: "light", label: "light" },
+];
+
+function themeRow(): HTMLElement {
+  const select = el(
+    "select",
+    {
+      onchange: (e: Event) => {
+        setState({ theme: (e.target as HTMLSelectElement).value as AppState["theme"] });
+        applyTheme();
+      },
+    },
+    ...THEME_OPTIONS.map((opt) => {
+      const el_ = el("option", { value: opt.value }, opt.label);
+      if (opt.value === state.theme) el_.setAttribute("selected", "");
+      return el_;
+    }),
+  ) as HTMLSelectElement;
+  select.value = state.theme;
+  return el("div", { class: "detail" }, el("span", { class: "k" }, "theme"), select);
+}
+
 // Global, device-wide preferences — as opposed to the per-session
 // chat-details panel, which holds settings scoped to one session
 // (title, cwd, model/mode/agent). Reachable from the gear button on
@@ -832,6 +862,7 @@ function renderOptionsModal(): HTMLElement {
       "div",
       { class: "modal" },
       el("h2", null, "Options"),
+      themeRow(),
       hideThoughtsRow(),
       notifyOnTurnEndRow(),
       el(

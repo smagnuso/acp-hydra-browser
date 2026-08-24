@@ -3,7 +3,7 @@
 // presents its session cookie.
 
 import { setState, state, sameValue, markRailDirty } from "./state.js";
-import { render } from "./renderer.js";
+import { render, isActivelyTyping } from "./renderer.js";
 import { isWideLayout } from "./dom.js";
 import type { SessionInfo } from "./types.js";
 
@@ -41,19 +41,27 @@ export async function api<T = unknown>(
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function pollSessions(): Promise<void> {
-  // Skip this cycle entirely while a text input is focused. sameValue's
-  // JSON.stringify comparison below is a real synchronous main-thread
-  // cost, and it ran unconditionally every 2s on a fixed timer no
-  // matter what the user was doing — competing with keystroke handling
-  // independent of typing speed, which is what made it show up as
-  // periodic stalls during held-key repeat (several characters through,
-  // then a stall whenever the poll happened to land, repeat) rather
-  // than uniform lag. The session list being one cycle staler while
-  // focused is invisible; a dropped or delayed keystroke isn't.
-  if (
-    document.activeElement instanceof HTMLTextAreaElement ||
-    document.activeElement instanceof HTMLInputElement
-  ) {
+  // Skip this cycle while genuinely, recently typing (renderer.ts's
+  // isActivelyTyping — a real keystroke in the last 250ms, not just "a
+  // text input happens to have focus"). sameValue's JSON.stringify
+  // comparison below is a real synchronous main-thread cost, and it ran
+  // unconditionally every 2s on a fixed timer no matter what the user
+  // was doing — competing with keystroke handling independent of typing
+  // speed, which is what made it show up as periodic stalls during
+  // held-key repeat (several characters through, then a stall whenever
+  // the poll happened to land, repeat) rather than uniform lag.
+  //
+  // This used to be a bare "is a text input focused" check instead, on
+  // the theory that the list being one cycle staler while focused is
+  // invisible — true only because the list wasn't on screen during a
+  // chat at all back then. In wide layout's split view the rail stays
+  // visible the whole time, and the composer auto-focuses on open and
+  // typically just sits focused afterward (not being actively typed
+  // into) — so the old check could block every poll for as long as a
+  // session was open, not just while typing, and the rail would never
+  // pick up e.g. a turn starting elsewhere. isActivelyTyping's recency
+  // window fixes that while still protecting actual keystroke bursts.
+  if (isActivelyTyping()) {
     return;
   }
   // While viewing a single session, only that session's own metadata

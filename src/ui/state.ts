@@ -15,6 +15,7 @@ const PERSISTED_KEYS = [
   "hostFilter",
   "hideThoughts",
   "notifyOnTurnEnd",
+  "theme",
 ] as const;
 
 function loadPersistedFilters(): Partial<AppState> {
@@ -53,6 +54,10 @@ export const state: AppState = {
   listHighlightedSessionId: null,
   hideThoughts: false,
   notifyOnTurnEnd: false,
+  // Matches the app's always-dark behavior before theming existed —
+  // "system" is opt-in, not the default, so nobody's UI silently
+  // switches to light just because their OS happens to be.
+  theme: "dark",
   banner: null,
   modal: null,
   current: null,

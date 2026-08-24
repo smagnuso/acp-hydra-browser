@@ -11,6 +11,11 @@ import { ensureServiceWorker, subscribeForPush } from "./notifications.js";
 import { reportPushEndpoint, reportVisibility } from "./bridge.js";
 import { handleListKeydown, focusListRail, closeModal } from "./views.js";
 import { state } from "./state.js";
+import { initTheme } from "./theme.js";
+
+// As early as possible, before the first render() — applying the
+// persisted theme after paint would flash the wrong one.
+initTheme();
 
 initViewportHeight();
 
