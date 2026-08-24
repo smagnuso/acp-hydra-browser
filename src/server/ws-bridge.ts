@@ -365,6 +365,16 @@ function handleConnection(
       setConnectionVisible(sessionId, connId, params.visible === true);
       return;
     }
+    // Application-level heartbeat (see bridge.ts's sendPing). Local-only,
+    // like bridge/visibility above — answering here, immediately, rather
+    // than round-tripping through the daemon is the whole point: it's
+    // testing whether the browser<->extension leg of the connection is
+    // actually alive, which is exactly the leg that can go quietly dead
+    // (bad wifi, cell handoff) while readyState still says otherwise.
+    if (isNotification(parsed) && parsed.method === "bridge/ping") {
+      sendBrowserFrame({ jsonrpc: "2.0", method: "bridge/pong" });
+      return;
+    }
     handleBrowserFrame(parsed);
   });
 

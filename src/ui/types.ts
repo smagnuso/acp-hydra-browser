@@ -116,7 +116,13 @@ export type QueueStatus =
   // strikethrough, no red banner) — the replacement carries the
   // user's intent forward, so the M1 bubble just gets a chip noting
   // it was merged into the next prompt.
-  | "amended";
+  | "amended"
+  // The WS wasn't open at submit time, so this was never actually sent
+  // — held locally (see offline-queue.ts) and persisted so it survives
+  // a relaunch, not just a reconnect. queue.ts's flushOfflineQueue
+  // dispatches it for real the next time the socket comes up, at which
+  // point it transitions to "queued"/"pending" like any other send.
+  | "offline";
 
 export interface QueueEntry {
   // Local id assigned at submit time. Stable for the lifetime of the
@@ -150,6 +156,22 @@ export interface QueueEntry {
   // log item) so amend/steer resends and rollback can rebuild the same
   // content blocks without re-threading them through every call site.
   attachments?: Attachment[];
+  // Status to restore when an inline edit is saved or abandoned. Set
+  // when entering "editing", which overwrites the real status and would
+  // otherwise be unrecoverable. Defaults to "queued" when unset, which
+  // is what the server-side queued/pending chip wants; an "offline"
+  // entry must set it, or saving an edit would silently promote it to
+  // "queued" and flushOfflineQueue (which only looks for "offline")
+  // would never send it.
+  editReturnStatus?: QueueStatus;
+  // Set on an entry flushed out of the offline hold *while a turn was
+  // still streaming*. That turn can keep appending new log items (tool
+  // calls, a fresh bubble after one) below the flushed prompt, so its
+  // bubble needs a second re-seat once that turn finishes. Fired from
+  // finalizeTurn, deliberately not from this prompt's own "started"
+  // notification: "started" can arrive after the agent has already begun
+  // replying, and re-seating then drops the bubble below its own answer.
+  reseatAfterCurrentTurn?: boolean;
 }
 
 export interface ToolCallState {
@@ -336,6 +358,18 @@ export interface ChatState {
   // Reconnects should not re-send it: load=true is the cold-start
   // hint for session/load and is harmless but wasted on a hot session.
   loadOnConnect?: boolean;
+  // Application-level heartbeat (see bridge.ts's startHeartbeat/sendPing).
+  // readyState and navigator.onLine can both keep reporting "fine" for a
+  // while after the connection is actually dead (observed on iOS Safari:
+  // navigator.onLine is well known to be unreliable there, especially in
+  // standalone PWA mode) — connectionHealthy is the signal queue.ts's
+  // offline detection actually trusts, flipped false the moment a ping
+  // goes unanswered rather than waiting on the socket to notice on its
+  // own. heartbeatTimer schedules the next ping; heartbeatDeadline is
+  // the "no pong in time" timeout, cleared the moment a pong lands.
+  connectionHealthy: boolean;
+  heartbeatTimer?: ReturnType<typeof setTimeout>;
+  heartbeatDeadline?: ReturnType<typeof setTimeout>;
   // Whether the chat-header's detail panel (full title/cwd/agent/model,
   // untruncated) is expanded. Toggled by clicking the header's info block.
   headerExpanded: boolean;

@@ -1,7 +1,7 @@
 // Boot. Wires up DOM events that drive the rest of the SPA.
 
 import { startPolling, loadAgents, loadConfig } from "./api.js";
-import { applyHashRoute, applyProtocolLaunch } from "./routing.js";
+import { applyHashRoute, applyProtocolLaunch, forceReconnect } from "./routing.js";
 import { render } from "./renderer.js";
 import { initPullToRefresh } from "./pull-refresh.js";
 import { initSwipeBack } from "./swipe-nav.js";
@@ -46,3 +46,7 @@ window.addEventListener("hashchange", () => {
 document.addEventListener("visibilitychange", () => reportVisibility());
 window.addEventListener("focus", () => reportVisibility());
 window.addEventListener("blur", () => reportVisibility());
+
+// Connectivity's back (per the OS, via the browser) — don't wait on a
+// stale WebSocket to notice on its own. See routing.ts's forceReconnect.
+window.addEventListener("online", () => forceReconnect());

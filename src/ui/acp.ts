@@ -463,6 +463,18 @@ export function finalizeTurn(): void {
       entry.status = "done";
     }
   }
+  // A prompt held offline and flushed back while this turn was still
+  // streaming: the turn is over now, its output is complete, and the
+  // next turn's output hasn't started, so this is the one safe moment
+  // to put the bubble in its final place below everything that came
+  // before it. The "done" guard keeps a stale flag from firing on the
+  // prompt's own completion, which would drop it below its own reply.
+  for (const entry of state.current.promptQueue) {
+    if (entry.reseatAfterCurrentTurn && entry.status !== "done") {
+      entry.reseatAfterCurrentTurn = undefined;
+      reseatBubbleAtEnd(state.current, entry);
+    }
+  }
   // Forget the active-turn plan card — the next plan update should
   // push a fresh card rather than mutating last turn's into oblivion.
   state.current.currentPlanEntry = null;
@@ -543,17 +555,36 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
       }
       continue;
     }
-    const blocks = Array.isArray(e.prompt) ? e.prompt : [];
-    let text = "";
-    for (const block of blocks) {
-      if (block && typeof block === "object") {
-        const b = block as AnyRecord;
-        if (b.type === "text" && typeof b.text === "string") {
-          text += b.text;
-        }
-      }
-    }
+    const text = promptBlocksToText(e.prompt);
     if (!text) continue;
+    // Same rebind-not-duplicate logic as onPromptQueueAdded's revival
+    // pass, for the same reason: cancelUnboundQueued can mark an entry
+    // "cancelled" on a WS drop even though the daemon actually got it —
+    // this snapshot is the proof. Text equality is required, same as
+    // there: the snapshot also carries entries this client never
+    // originated (peers, or our own pre-reconnect clientId's prompts on
+    // a session another device also drives), and matching one of those
+    // to an arbitrary unbound local entry revives the wrong bubble. The
+    // matched entry's existing log bubble already points at this
+    // QueueEntry object, so fixing it up in place is enough; no need to
+    // touch c.log like the position-0 case below does for a bubble that
+    // never had one.
+    const revivable = state.current.promptQueue.find(
+      (q) =>
+        q.messageId === undefined &&
+        q.text === text &&
+        (q.status === "pending" || q.status === "queued" || q.status === "cancelled"),
+    );
+    if (revivable) {
+      revivable.messageId = messageId;
+      state.current.queueByMessageId.set(messageId, revivable);
+      revivable.aheadAtEnqueue = Math.max(0, position);
+      revivable.status = position === 0 ? "processing" : "queued";
+      if (position === 0) {
+        state.current.currentHeadMessageId = messageId;
+      }
+      continue;
+    }
     const entry = {
       id: "snap_" + Math.random().toString(36).slice(2, 10),
       text,
@@ -624,6 +655,20 @@ function findUnboundUserBubble(
 // other client typed *while* it's still queued. The peer's eventual
 // prompt_received notification is de-duped against this bubble via
 // messageId (see onPromptReceived).
+function promptBlocksToText(prompt: unknown): string {
+  const blocks = Array.isArray(prompt) ? prompt : [];
+  let text = "";
+  for (const block of blocks) {
+    if (block && typeof block === "object") {
+      const b = block as AnyRecord;
+      if (b.type === "text" && typeof b.text === "string") {
+        text += b.text;
+      }
+    }
+  }
+  return text;
+}
+
 function onPromptQueueAdded(params: AnyRecord): void {
   if (!state.current) return;
   const messageId = typeof params.messageId === "string" ? params.messageId : "";
@@ -643,10 +688,38 @@ function onPromptQueueAdded(params: AnyRecord): void {
   const isOwn =
     !!state.current.ownClientId &&
     originatorClientId === state.current.ownClientId;
+  const eventText = promptBlocksToText(params.prompt);
   if (isOwn) {
-    const unbound = state.current.promptQueue.find(
-      (e) => e.messageId === undefined && e.status !== "cancelled",
+    // Two-pass bind. Pass 1: FIFO among entries genuinely awaiting a
+    // bind. This must win over revival: a cancelled straggler from an
+    // earlier lost-ack episode sits ahead of the new entry in
+    // promptQueue, and letting it match here steals the bind from the
+    // entry this event was actually emitted for — the new entry then
+    // sticks in "pending" forever, inflating every later send's ahead
+    // count by one and compounding on each further mis-bind.
+    const awaiting = state.current.promptQueue.find(
+      (e) =>
+        e.messageId === undefined &&
+        (e.status === "pending" || e.status === "queued" || e.status === "editing"),
     );
+    // Pass 2 (revival): nothing is awaiting a bind, so this event
+    // describes a prompt whose ack we lost — the send reached the
+    // daemon just before the socket died, and cancelUnboundQueued
+    // marked the entry cancelled on the (wrong, in that case) theory
+    // that it never made it. The added event is proof it did; rebind
+    // and let the real status win. Text equality is the guard against
+    // reviving some unrelated straggler; in the lost-ack case the text
+    // always matches. "offline" entries are never candidates in either
+    // pass: those are deliberately unsent (see queue.ts's
+    // flushOfflineQueue) and unrelated to whatever this describes.
+    const unbound =
+      awaiting ??
+      state.current.promptQueue.find(
+        (e) =>
+          e.messageId === undefined &&
+          e.status === "cancelled" &&
+          e.text === eventText,
+      );
     if (!unbound) {
       // Out-of-band added event we can't correlate (e.g. resumed after
       // a refresh, no local FIFO entry waiting). Drop on the floor —
@@ -667,10 +740,11 @@ function onPromptQueueAdded(params: AnyRecord): void {
     const position = typeof params.position === "number" ? params.position : 1;
     unbound.aheadAtEnqueue = Math.max(0, position);
     // Promote to "processing" if hydra says position 0 (we're at the
-    // head and about to run). Otherwise leave as "queued".
+    // head and about to run). Otherwise leave as "queued" — including
+    // recovering from a wrongly-applied "cancelled" (see above).
     if (position === 0) {
       unbound.status = "processing";
-    } else if (unbound.status === "pending") {
+    } else if (unbound.status === "pending" || unbound.status === "cancelled") {
       unbound.status = "queued";
     }
     return;
@@ -678,16 +752,7 @@ function onPromptQueueAdded(params: AnyRecord): void {
   // Peer-originated. Render a fresh user bubble for it now — same
   // chip-on-bubble treatment as own queued prompts, so the user sees
   // the peer's queued prompt instead of waiting for it to start.
-  const blocks = Array.isArray(params.prompt) ? params.prompt : [];
-  let text = "";
-  for (const block of blocks) {
-    if (block && typeof block === "object") {
-      const b = block as AnyRecord;
-      if (b.type === "text" && typeof b.text === "string") {
-        text += b.text;
-      }
-    }
-  }
+  const text = eventText;
   if (!text) return;
   const position = typeof params.position === "number" ? params.position : 0;
   const queueDepth =
@@ -762,6 +827,27 @@ function onPromptQueueUpdated(params: AnyRecord): void {
   }
 }
 
+// Move a prompt's bubble to the end of the transcript. Used for prompts
+// that were held offline: the bubble was appended when the user hit
+// send, which was the end of the log as the client knew it then, but
+// being offline is exactly the case where the client is behind. Whatever
+// the reconnect replays (or the in-flight turn goes on to stream) belongs
+// above it, since the prompt is only genuinely submitted once the socket
+// is back. Lives here rather than queue.ts to keep the queue.ts → acp.ts
+// import direction one-way.
+export function reseatBubbleAtEnd(c: ChatState, entry: QueueEntry): void {
+  const idx = c.log.findIndex(
+    (it) => it.kind === "stream" && it.queueEntry === entry,
+  );
+  if (idx < 0 || idx === c.log.length - 1) {
+    return;
+  }
+  const [item] = c.log.splice(idx, 1);
+  if (item) {
+    c.log.push(item);
+  }
+}
+
 // Server says the entry left the queue. reason: started → it's now
 // running (chip transitions to processing then disappears once
 // turn_complete arrives); cancelled → mark cancelled, the bubble
@@ -784,6 +870,11 @@ function onPromptQueueRemoved(params: AnyRecord): void {
   if (!entry) return;
   if (reason === "started") {
     entry.status = "processing";
+    // Its own turn is starting, so any deferred re-seat is moot. Clear
+    // it rather than acting on it: this notification can arrive after
+    // the agent has already begun replying, and re-seating at that
+    // point drops the bubble below its own answer.
+    entry.reseatAfterCurrentTurn = undefined;
   } else if (reason === "cancelled" || reason === "abandoned") {
     // If we already flagged this entry as amended (via prompt_amended
     // or the M2's _meta.amending hint) the bubble should render as

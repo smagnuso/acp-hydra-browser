@@ -3,13 +3,14 @@
 // survives reloads + back/forward navigation.
 
 import { setState, state } from "./state.js";
-import { handleFrame } from "./bridge.js";
+import { handleFrame, stopHeartbeat } from "./bridge.js";
 import { cancelUnboundQueued } from "./queue.js";
 import { render } from "./renderer.js";
 import { handleNotification, resetChatHistoryState } from "./acp.js";
 import { loadCachedSession } from "./history-cache.js";
 import { loadDraft } from "./composer-draft.js";
-import type { ChatState, SessionInfo } from "./types.js";
+import { loadOfflineEntries } from "./offline-queue.js";
+import type { ChatState, QueueEntry, SessionInfo } from "./types.js";
 
 // Exponential backoff for WS reconnect: 1s, 2s, 4s, 8s, 16s, 30s cap.
 // Indexed by reconnectAttempt (0 = first retry after a drop).
@@ -155,6 +156,7 @@ export function openChat(sessionId: string, load: boolean): void {
     headerExpanded: false,
     unsolicitedTurnOpen: new Set(),
     configOptions: [],
+    connectionHealthy: true,
   };
   state.current = initial;
   setState({ view: "chat" });
@@ -185,6 +187,35 @@ async function hydrateFromCacheThenConnect(chat: ChatState): Promise<void> {
     // returns you the "load full history" button once you scroll to the
     // top of what we do have.
     chat.historyIsPartial = true;
+  }
+  // Prompts that couldn't be sent last time this session was open (see
+  // offline-queue.ts) — append them after the replayed history as
+  // "offline" bubbles so they're visible immediately, and so
+  // flushOfflineQueue (fired from bridge.ts on bridge/ready) has
+  // something in c.promptQueue to actually dispatch once connected.
+  const held = await loadOfflineEntries(chat.sessionId);
+  if (state.current !== chat) {
+    return;
+  }
+  for (const persisted of held) {
+    const entry: QueueEntry = {
+      id: persisted.id,
+      text: persisted.text,
+      status: "offline",
+      aheadAtEnqueue: 0,
+      attachments: persisted.attachments,
+    };
+    chat.promptQueue.push(entry);
+    chat.log.push({
+      kind: "stream",
+      role: "user",
+      text: persisted.text,
+      closed: true,
+      queueEntry: entry,
+      attachments: entry.attachments,
+    });
+  }
+  if (cached || held.length > 0) {
     render();
   }
   connectChatSocket(chat);
@@ -309,6 +340,10 @@ function resetConnectionStateForReconnect(chat: ChatState): void {
   chat.idleListeners = [];
   chat.readyListeners = [];
   chat.nextId = undefined;
+  // Stale timers from the dead connection must not fire against
+  // whatever socket replaces it — bridge.ts's startHeartbeat (fired
+  // from the new connection's bridge/ready) sets up fresh ones.
+  stopHeartbeat(chat);
 }
 
 export function closeChat(): void {
@@ -321,6 +356,26 @@ export function closeChat(): void {
   });
 }
 
+// Called from main.ts's `online` listener. A WebSocket left open
+// through a spell of no connectivity doesn't necessarily know it's
+// dead yet — readyState can keep reporting OPEN until some future send
+// finally times out, which could be a while. Nudging it closed here
+// lets the existing close → scheduleReconnect → connectChatSocket chain
+// take over immediately instead of waiting on that. Closing an
+// already-effectively-dead (or already fine) socket is harmless either
+// way — the `ws.addEventListener("close", ...)` in connectChatSocket
+// already no-ops for a socket that's been superseded.
+export function forceReconnect(): void {
+  if (!state.current?.ws) {
+    return;
+  }
+  try {
+    state.current.ws.close();
+  } catch {
+    /* close errors are non-fatal */
+  }
+}
+
 function closeChatSocket(): void {
   if (!state.current) {
     return;
@@ -329,6 +384,7 @@ function closeChatSocket(): void {
     clearTimeout(state.current.reconnectTimer);
     state.current.reconnectTimer = undefined;
   }
+  stopHeartbeat(state.current);
   if (state.current.ws) {
     try {
       state.current.ws.close();

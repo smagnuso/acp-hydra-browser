@@ -13,7 +13,7 @@ import {
   pushLog,
   resetChatHistoryState,
 } from "./acp.js";
-import { cancelAllQueued } from "./queue.js";
+import { cancelAllQueued, flushOfflineQueue } from "./queue.js";
 import { parseArmedTaskList } from "./acp.js";
 import { tabIsHidden } from "./notifications.js";
 import type { ChatState, PermissionEntry } from "./types.js";
@@ -58,6 +58,74 @@ export function notify(method: string, params: unknown): void {
 // until told otherwise.
 export function reportVisibility(): void {
   notify("bridge/visibility", { visible: !tabIsHidden() });
+}
+
+// Application-level "is this connection actually alive" check.
+// readyState and navigator.onLine can both keep reporting "fine" well
+// after the connection is really dead — observed directly on iOS
+// Safari, where navigator.onLine is a known-unreliable API (especially
+// in standalone PWA mode) that doesn't reflect reality. This doesn't
+// trust any browser API's opinion about connectivity; it just sends
+// traffic over the actual WS in use and reacts if nothing comes back.
+const HEARTBEAT_INTERVAL_MS = 10_000;
+const HEARTBEAT_TIMEOUT_MS = 5_000;
+
+function scheduleNextPing(c: ChatState): void {
+  c.heartbeatTimer = setTimeout(() => sendPing(c), HEARTBEAT_INTERVAL_MS);
+}
+
+function sendPing(c: ChatState): void {
+  if (state.current !== c || !c.ws || c.ws.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  notify("bridge/ping", {});
+  c.heartbeatDeadline = setTimeout(() => {
+    // No pong within the deadline. queue.ts's offline detection checks
+    // connectionHealthy directly, so a send attempted right now
+    // correctly gets held instead of going out over what's actually a
+    // dead pipe. Force a reconnect rather than waiting for a TCP-level
+    // timeout, which can take far longer than this.
+    c.connectionHealthy = false;
+    render();
+    try {
+      c.ws?.close();
+    } catch {
+      /* close errors are non-fatal */
+    }
+  }, HEARTBEAT_TIMEOUT_MS);
+}
+
+// Called on a pong — clears the deadline and lines up the next ping.
+function onPong(c: ChatState): void {
+  c.connectionHealthy = true;
+  if (c.heartbeatDeadline !== undefined) {
+    clearTimeout(c.heartbeatDeadline);
+    c.heartbeatDeadline = undefined;
+  }
+  scheduleNextPing(c);
+}
+
+// Called from bridge/ready — the start of a live connection, so this is
+// also where connectionHealthy resets to true after coming back from a
+// prior drop.
+export function startHeartbeat(c: ChatState): void {
+  stopHeartbeat(c);
+  c.connectionHealthy = true;
+  scheduleNextPing(c);
+}
+
+// Called from routing.ts whenever the connection-scoped slice of a chat
+// gets torn down (reconnect, close) — stale timers from a superseded
+// connection must not fire against a new one.
+export function stopHeartbeat(c: ChatState): void {
+  if (c.heartbeatTimer !== undefined) {
+    clearTimeout(c.heartbeatTimer);
+    c.heartbeatTimer = undefined;
+  }
+  if (c.heartbeatDeadline !== undefined) {
+    clearTimeout(c.heartbeatDeadline);
+    c.heartbeatDeadline = undefined;
+  }
 }
 
 // Send a JSON-RPC response (used for replying to permission asks).
@@ -154,7 +222,21 @@ export function handleFrame(frame: JsonRpcFrame): void {
     // measurement — send the real state now that there's a connection
     // to send it on.
     reportVisibility();
+    // Reset connectionHealthy before flushing — a prior connection that
+    // died via a missed heartbeat would otherwise leave it false right
+    // through the flush below.
+    startHeartbeat(state.current);
+    // Dispatch anything held locally from being offline — covers both a
+    // live reconnect (already in c.promptQueue) and a fresh app launch
+    // (routing.ts rehydrated persisted entries before this connect).
+    flushOfflineQueue(state.current);
     render();
+    return;
+  }
+  if (frame.method === "bridge/pong") {
+    if (state.current) {
+      onPong(state.current);
+    }
     return;
   }
   if (frame.method === "bridge/error") {

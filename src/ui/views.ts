@@ -2144,17 +2144,18 @@ function renderLogItem(item: ChatState["log"][number]): Node {
       node.classList.add("amended-target");
     }
     // Only show a chip while the prompt is still waiting locally
-    // (queued / editing) or ended in cancellation / amend. Once it's
-    // sent ("processing" or "done"), the bubble looks like a normal
-    // user message. The running turn's × lives on the spinner instead
-    // so it works for sibling-originated prompts too.
+    // (queued / editing / offline) or ended in cancellation / amend.
+    // Once it's sent ("processing" or "done"), the bubble looks like a
+    // normal user message. The running turn's × lives on the spinner
+    // instead so it works for sibling-originated prompts too.
     if (
       qe &&
       (qe.status === "queued" ||
         qe.status === "pending" ||
         qe.status === "cancelled" ||
         qe.status === "editing" ||
-        qe.status === "amended")
+        qe.status === "amended" ||
+        qe.status === "offline")
     ) {
       node.appendChild(renderQueueChip(qe));
     }
@@ -2383,16 +2384,22 @@ function exitPlanFooter(status: string | undefined): HTMLElement | null {
 
 function renderQueueChip(entry: QueueEntry): Node {
   if (entry.status === "queued" || entry.status === "pending") {
-    const ahead = Math.max(1, entry.aheadAtEnqueue);
+    // "pending" means sent but not yet acknowledged (no queue position
+    // exists yet) — say that, rather than the old Math.max(1, ...)
+    // floor that dressed it up as "queued · 1 ahead". Besides being
+    // wrong on its face for a prompt about to run immediately, the
+    // floor masked a real bug: an entry stuck unbound forever (the
+    // bind stolen by a stale straggler, see onPromptQueueAdded) showed
+    // a plausible queue position instead of a visibly-stuck "sending…".
+    const label =
+      entry.status === "pending"
+        ? "sending…"
+        : `queued · ${Math.max(1, entry.aheadAtEnqueue)} ahead` +
+          (entry.held ? " · held: agent resumed" : "");
     return el(
       "div",
       { class: "queue-chip queue-queued" },
-      el(
-        "span",
-        null,
-        `queued · ${ahead} behind` +
-          (entry.held ? " · held: agent resumed" : ""),
-      ),
+      el("span", null, label),
       el(
         "button",
         {
@@ -2445,6 +2452,37 @@ function renderQueueChip(entry: QueueEntry): Node {
       el("span", null, "amended — merged into the next prompt"),
     );
   }
+  if (entry.status === "offline") {
+    return el(
+      "div",
+      { class: "queue-chip queue-offline" },
+      el("span", null, "pending"),
+      el(
+        "button",
+        {
+          class: "queue-edit",
+          ...tapHandler(() => {
+            // Must be set before flipping to "editing", which clobbers
+            // the status the editor needs to restore afterwards.
+            entry.editReturnStatus = "offline";
+            entry.status = "editing";
+            render();
+          }),
+          title: "Edit before sending",
+        },
+        el("span", { class: "queue-btn-glyph" }, "✎"),
+      ),
+      el(
+        "button",
+        {
+          class: "queue-cancel",
+          ...tapHandler(() => cancelQueuedPrompt(entry)),
+          title: "Discard, this was never sent",
+        },
+        el("span", { class: "queue-btn-glyph" }, "×"),
+      ),
+    );
+  }
   return document.createTextNode("");
 }
 
@@ -2471,16 +2509,23 @@ function renderQueueEditor(
     autocapitalize: "off",
   }) as HTMLTextAreaElement;
   textarea.value = entry.text;
+  // Restore whatever the entry was before editing, not a hardcoded
+  // "queued": an offline (held, never sent) entry promoted to "queued"
+  // here would stop matching flushOfflineQueue and never get sent.
+  const restoreStatus = (): void => {
+    entry.status = entry.editReturnStatus ?? "queued";
+    entry.editReturnStatus = undefined;
+  };
   const commit = (): void => {
     const next = textarea.value;
     entry.text = next;
     onCommit(next);
-    entry.status = "queued";
+    restoreStatus();
     updateQueuedPrompt(entry, next);
     render();
   };
   const cancel = (): void => {
-    entry.status = "queued";
+    restoreStatus();
     render();
   };
   textarea.addEventListener("keydown", (ev) => {

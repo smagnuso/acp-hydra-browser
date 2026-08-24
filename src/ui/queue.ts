@@ -15,9 +15,10 @@
 import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { notify, send } from "./bridge.js";
-import { ensureSpinner, markActive } from "./acp.js";
+import { ensureSpinner, markActive, reseatBubbleAtEnd } from "./acp.js";
 import { jumpToBottom } from "./views.js";
 import { clearDraft, queueDraftWrite } from "./composer-draft.js";
+import { removeOfflineEntry, saveOfflineEntry } from "./offline-queue.js";
 import type { Attachment, ChatState, QueueEntry } from "./types.js";
 
 // Build an ACP ContentBlock[] for session/prompt et al. Text block is
@@ -85,13 +86,22 @@ function dispatchPrompt(
   opts: { addToHistory?: boolean; attachments?: Attachment[] } = {},
 ): boolean {
   const attachments = opts.attachments ?? [];
-  if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
-    c.log.push({
-      kind: "error",
-      text: "Not connected to session — prompt not sent.",
-    });
-    return false;
-  }
+  // No connection right now (offline, bad network, or the app just
+  // launched cold before the WS came up) — hold it locally instead of
+  // failing outright. The entry still gets a bubble + chip, just with
+  // "offline" status; flushOfflineQueue sends it for real once the
+  // socket comes up, whether that's a live reconnect or the next time
+  // the app runs. See offline-queue.ts for the persistence side.
+  //
+  // connectionHealthy (bridge.ts's heartbeat) is the primary signal —
+  // readyState and navigator.onLine can both keep saying "fine" well
+  // after the connection is actually dead (navigator.onLine in
+  // particular is known-unreliable on iOS Safari, especially in
+  // standalone PWA mode, and didn't catch this in practice). All three
+  // are checked anyway since any one of them being bad is reason enough
+  // to hold rather than risk a send into a dead pipe.
+  const offline =
+    !c.connectionHealthy || !navigator.onLine || !c.ws || c.ws.readyState !== WebSocket.OPEN;
   // aheadAtEnqueue is an UX hint — number of entries the user has to
   // wait through before theirs runs. Captured at submit time so the
   // chip doesn't tick down distractingly. The in-flight own entry, if
@@ -99,13 +109,14 @@ function dispatchPrompt(
   // only add 1 for inTurn when the active turn is a peer's (nothing in
   // our own queue is processing yet — otherwise we'd double-count).
   // onPromptQueueAdded corrects this against the daemon's authoritative
-  // position once the entry is bound.
+  // position once the entry is bound. Meaningless while offline — there's
+  // no server-side queue to be ahead in — so it's just 0 there.
   const ownActive = c.promptQueue.filter(
     (e) => e.status === "queued" || e.status === "pending" || e.status === "processing",
   ).length;
   const peerInFlight =
     c.inTurn && !c.promptQueue.some((e) => e.status === "processing");
-  const ahead = ownActive + (peerInFlight ? 1 : 0);
+  const ahead = offline ? 0 : ownActive + (peerInFlight ? 1 : 0);
   const entry: QueueEntry = {
     id: "p_" + Math.random().toString(36).slice(2, 10),
     text,
@@ -113,7 +124,7 @@ function dispatchPrompt(
     // processing depending on position). If hydra rejects the prompt
     // outright the entry stays "pending" and we'll surface the error
     // from the session/prompt response.
-    status: ahead > 0 ? "queued" : "pending",
+    status: offline ? "offline" : ahead > 0 ? "queued" : "pending",
     aheadAtEnqueue: ahead,
     attachments: attachments.length > 0 ? attachments : undefined,
   };
@@ -129,6 +140,14 @@ function dispatchPrompt(
   c.recentOwnPrompts.push({ text, at: Date.now() });
   const cutoff = Date.now() - 60_000;
   c.recentOwnPrompts = c.recentOwnPrompts.filter((p) => p.at >= cutoff).slice(-16);
+  if (offline) {
+    void saveOfflineEntry(c.sessionId, { id: entry.id, text, attachments: entry.attachments });
+    jumpToBottom(c);
+    if (opts.addToHistory ?? true) {
+      pushHistory(c, text);
+    }
+    return true;
+  }
   // Fire eagerly. Hydra serializes upstream — if there's an in-flight
   // turn this prompt sits at the daemon-side queue until it advances,
   // and prompt_queue_added arrives back with our messageId. We don't
@@ -147,6 +166,55 @@ function dispatchPrompt(
     pushHistory(c, text);
   }
   return true;
+}
+
+// Dispatches every locally-held "offline" entry for real, in submission
+// order, now that the socket is up — called from bridge.ts's bridge/ready
+// handler, which covers both a live reconnect (entries already in
+// c.promptQueue) and a fresh app launch (routing.ts's
+// hydrateFromCacheThenConnect rehydrates persisted entries into
+// c.promptQueue before the first connect). Mutates each entry in place
+// rather than re-running dispatchPrompt so no duplicate bubble/log
+// entry gets created for what the user already sees on screen.
+export function flushOfflineQueue(c: ChatState): void {
+  let flushed = false;
+  for (const entry of c.promptQueue) {
+    if (entry.status !== "offline") continue;
+    if (!c.ws || c.ws.readyState !== WebSocket.OPEN) break;
+    flushed = true;
+    const ownActive = c.promptQueue.filter(
+      (e) => e.status === "queued" || e.status === "pending" || e.status === "processing",
+    ).length;
+    const peerInFlight =
+      c.inTurn && !c.promptQueue.some((e) => e.status === "processing");
+    const ahead = ownActive + (peerInFlight ? 1 : 0);
+    entry.aheadAtEnqueue = ahead;
+    entry.status = ahead > 0 ? "queued" : "pending";
+    const promptId = send("session/prompt", {
+      sessionId: c.sessionId,
+      prompt: buildContentBlocks(entry.text, entry.attachments ?? []),
+    });
+    if (promptId !== undefined) {
+      c.ownPromptIds.add(String(promptId));
+    }
+    void removeOfflineEntry(c.sessionId, entry.id);
+    // Re-seat now, which is correct and immediate whenever nothing was
+    // mid-turn at reconnect. Entries flush in promptQueue order, so
+    // relative order among several held prompts is preserved.
+    reseatBubbleAtEnd(c, entry);
+    // Reconnecting mid-turn is the harder case: that turn can still
+    // append new log items (tool calls, a fresh bubble after one) below
+    // the bubble just re-seated. Arm a second re-seat for when that turn
+    // finishes. Only when a turn is actually in flight, or the flag
+    // would sit unused and later fire against an unrelated turn.
+    if (c.inTurn) {
+      entry.reseatAfterCurrentTurn = true;
+    }
+  }
+  if (flushed) {
+    ensureSpinner();
+    markActive();
+  }
 }
 
 // Append a submitted prompt to the up/down recall history. Most-recent
@@ -184,6 +252,12 @@ export function cancelQueuedPrompt(entry: QueueEntry): void {
     });
     return;
   }
+  // Offline-held entries were never sent, so there's nothing server-side
+  // to cancel — just drop the local hold so it doesn't get flushed on
+  // the next reconnect.
+  if (entry.status === "offline") {
+    void removeOfflineEntry(c.sessionId, entry.id);
+  }
   entry.status = "cancelled";
   render();
 }
@@ -198,6 +272,19 @@ export function updateQueuedPrompt(entry: QueueEntry, text: string): void {
   if (!c) return;
   const trimmed = text.trim();
   if (!trimmed) return;
+  // Held offline: there's no server-side entry to update, but the
+  // persisted copy has to track the edit too, or relaunching the app
+  // would flush the original pre-edit text.
+  if (entry.status === "offline") {
+    entry.text = trimmed;
+    void saveOfflineEntry(c.sessionId, {
+      id: entry.id,
+      text: trimmed,
+      attachments: entry.attachments,
+    });
+    render();
+    return;
+  }
   if (entry.messageId === undefined) {
     // Not bound yet — apply locally and let the eventual bound state
     // pick up the new text. The user already sees the edit immediately.
@@ -237,7 +324,14 @@ export function amendPrompt(): void {
   const text = c.composerValue.trim();
   const attachments = c.attachments;
   if (!text && attachments.length === 0) return;
-  if (!c.ws || c.ws.readyState !== WebSocket.OPEN) {
+  // Same connectionHealthy/navigator.onLine reasoning as dispatchPrompt
+  // — a WebSocket can sit in "OPEN" for a while after the connection's
+  // actually gone. Amend targets a specific in-flight messageId rather
+  // than just enqueueing, so unlike a regular send there's no sensible
+  // "hold and retry later" for it — the target may not even still be
+  // the head by the time connectivity returns. Surface the failure
+  // instead.
+  if (!c.connectionHealthy || !navigator.onLine || !c.ws || c.ws.readyState !== WebSocket.OPEN) {
     c.log.push({
       kind: "error",
       text: "Not connected to session — prompt not sent.",
@@ -536,6 +630,9 @@ export function sendSetConfigOption(configId: string, value: string): void {
 export function cancelAllQueued(c: ChatState): void {
   for (const entry of c.promptQueue) {
     if (entry.status !== "done" && entry.status !== "cancelled") {
+      if (entry.status === "offline") {
+        void removeOfflineEntry(c.sessionId, entry.id);
+      }
       entry.status = "cancelled";
       if (entry.messageId !== undefined) {
         c.queueByMessageId.delete(entry.messageId);
@@ -552,13 +649,18 @@ export function cancelAllQueued(c: ChatState): void {
 // processing it, and the eventual after_message replay (or the attach
 // response's queue snapshot, see hydrateQueueFromSnapshot) will report
 // its true status — cancelling it locally first would show a false
-// strikethrough on a prompt that's actually still running.
+// strikethrough on a prompt that's actually still running. "offline"
+// entries are deliberately excluded too — unlike a prompt that was
+// actually transmitted and lost, these were never sent at all, which is
+// exactly the case they exist to survive; flushOfflineQueue re-dispatches
+// them once the reconnect succeeds instead.
 export function cancelUnboundQueued(c: ChatState): void {
   for (const entry of c.promptQueue) {
     if (
       entry.messageId === undefined &&
       entry.status !== "done" &&
-      entry.status !== "cancelled"
+      entry.status !== "cancelled" &&
+      entry.status !== "offline"
     ) {
       entry.status = "cancelled";
     }
