@@ -39,6 +39,21 @@ export async function api<T = unknown>(
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 export async function pollSessions(): Promise<void> {
+  // Skip this cycle entirely while a text input is focused. sameValue's
+  // JSON.stringify comparison below is a real synchronous main-thread
+  // cost, and it ran unconditionally every 2s on a fixed timer no
+  // matter what the user was doing — competing with keystroke handling
+  // independent of typing speed, which is what made it show up as
+  // periodic stalls during held-key repeat (several characters through,
+  // then a stall whenever the poll happened to land, repeat) rather
+  // than uniform lag. The session list being one cycle staler while
+  // focused is invisible; a dropped or delayed keystroke isn't.
+  if (
+    document.activeElement instanceof HTMLTextAreaElement ||
+    document.activeElement instanceof HTMLInputElement
+  ) {
+    return;
+  }
   try {
     // Daemon's default `/v1/sessions` view already excludes one-shot
     // `hydra cat` runs and editor-spawned empty sessions (anything not
