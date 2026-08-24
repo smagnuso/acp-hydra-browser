@@ -10,10 +10,20 @@
 // service worker's showNotification(). Chrome/Firefox support both; we
 // use the service-worker path unconditionally so the same code works
 // everywhere rather than branching per browser. See sw.js for the
-// (deliberately minimal, no-push) worker and its notificationclick
+// notificationclick handler (shared by both the foreground path below
+// and the `push` event handler that fires this same showNotification
+// while the app isn't running at all) and its notificationclick
 // handler, which is what brings the tab to front on click.
+//
+// This foreground path only fires while the page is alive and the tab
+// is hidden — it can't reach the user once the tab (or, on iOS, the
+// installed PWA) is fully closed. subscribeForPush/unsubscribeFromPush
+// below cover that case via real Web Push, registered server-side per
+// prompt (see ws-bridge.ts's maybeRegisterPush) against the daemon's
+// turn-notify webhook.
 
 import { state } from "./state.js";
+import { api } from "./api.js";
 import type { ChatState } from "./types.js";
 
 let swRegistration: ServiceWorkerRegistration | null = null;
@@ -61,6 +71,51 @@ function lastAgentText(c: ChatState): string {
 // turn would just be noise stacked on top of what's already on screen.
 function tabIsHidden(): boolean {
   return document.visibilityState !== "visible" || !document.hasFocus();
+}
+
+// applicationServerKey wants a raw Uint8Array, not the base64url string
+// the server hands back.
+function urlBase64ToUint8Array(base64Url: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64Url.length % 4)) % 4);
+  const base64 = (base64Url + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+
+// Called after the user turns the "notify" checkbox on and permission
+// is granted. Idempotent — PushManager.subscribe() returns the existing
+// subscription if one's already active, and the server-side store
+// dedupes by endpoint.
+export async function subscribeForPush(): Promise<void> {
+  const reg = await ensureServiceWorker();
+  if (!reg || !("pushManager" in reg)) return;
+  try {
+    const { publicKey } = await api<{ publicKey: string }>("/api/push/vapid-public-key");
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
+    });
+    await api("/api/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) });
+  } catch (err) {
+    console.warn("push subscribe failed:", err);
+  }
+}
+
+// Called when the user turns the checkbox off. Tears down the browser's
+// own subscription (not just the server-side record) so a stale
+// subscription doesn't linger consuming the push service's quota.
+export async function unsubscribeFromPush(): Promise<void> {
+  const reg = await ensureServiceWorker();
+  if (!reg || !("pushManager" in reg)) return;
+  try {
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    const endpoint = sub.endpoint;
+    await sub.unsubscribe();
+    await api("/api/push/unsubscribe", { method: "POST", body: JSON.stringify({ endpoint }) });
+  } catch (err) {
+    console.warn("push unsubscribe failed:", err);
+  }
 }
 
 export async function notifyTurnEnded(c: ChatState): Promise<void> {

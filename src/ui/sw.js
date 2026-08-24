@@ -1,14 +1,14 @@
-// Registration-only service worker. Its sole job is to exist so
-// registration.showNotification() is available — Safari (desktop and
-// iOS) requires notifications go through a service worker; it doesn't
-// support the plain `new Notification()` constructor called from page
-// script. See notifications.ts for the page-side half.
-//
-// No fetch/push handling: this app doesn't do offline caching or real
-// Web Push (notifications only fire while the page is alive and asks
-// for one), so there's nothing else for this worker to do. Kept as
-// plain JS, not bundled with the rest of the app — it must be servable
-// at its own URL for registration to work.
+// Service worker. Two jobs: exist so registration.showNotification() is
+// available (Safari, desktop and iOS, requires notifications go through
+// a service worker rather than the plain `new Notification()`
+// constructor), and handle real Web Push deliveries so a turn-end
+// notification can reach the user even when the app isn't running at
+// all (see notifications.ts's subscribeForPush and the server-side
+// turn-notify-callback.ts). No offline caching — the fetch handler
+// below is a pure passthrough, kept only because Chrome's install
+// prompt won't show without one. Kept as plain JS, not bundled with the
+// rest of the app — it must be servable at its own URL for registration
+// to work.
 self.addEventListener("install", () => {
   self.skipWaiting();
 });
@@ -22,6 +22,26 @@ self.addEventListener("activate", (event) => {
 // caching; without one, the install prompt doesn't show.
 self.addEventListener("fetch", (event) => {
   event.respondWith(fetch(event.request));
+});
+
+// Payload shape is whatever turn-notify-callback.ts's sendPushToAll
+// sends: { title, body, url, tag }. No push subscription rides through
+// here without going through that server-side path first, so the
+// shape is trusted rather than re-validated field by field.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    // Non-JSON payload; fall through to the defaults below.
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Hydra", {
+      body: data.body || "Turn finished.",
+      tag: data.tag,
+      data: { url: data.url || "/" },
+    }),
+  );
 });
 
 // A notification is owned by the worker, not the page that created it,

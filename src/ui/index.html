@@ -224,13 +224,16 @@ pre code { background: transparent; padding: 0; }
 .perm .title { font-weight: 600; margin-bottom: 0.35rem; }
 .perm .desc { color: var(--muted); font-size: 0.9rem; margin-bottom: 0.6rem; }
 .detail { font-size: 0.82rem; margin-bottom: 0.3rem; display: flex; gap: 0.4rem; align-items: baseline; }
-.detail .k { color: var(--muted); flex: 0 0 6rem; }
+.detail .k { color: var(--muted); flex: 0 0 6rem; text-transform: capitalize; }
 .detail code { word-break: break-all; }
 .detail select {
   font-size: inherit;
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
   background: transparent;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
 }
 .detail .checkbox-label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
 .perm .detail.note { color: var(--muted); font-style: italic; }

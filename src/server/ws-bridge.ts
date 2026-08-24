@@ -18,6 +18,9 @@ import {
 } from "./auth.js";
 import { checkStateChanging } from "../util/csrf.js";
 import type { ServerContext } from "./http.js";
+import { HydraRestClient } from "../hydra/client.js";
+import { hasSubscriptions } from "./push-store.js";
+import { registerForPush } from "./turn-notify-callback.js";
 
 const log = logger("ws-bridge");
 
@@ -57,6 +60,13 @@ const ALLOWED_BROWSER_REQUEST_METHODS = new Set<string>([
 const ALLOWED_BROWSER_NOTIFICATION_METHODS = new Set<string>([
   "session/cancel",
 ]);
+
+// How long to keep the daemon connection open after the browser WS
+// closes, when a just-sent session/prompt hasn't been paired with its
+// messageId yet (see cleanup()). prompt_received fires as soon as the
+// daemon accepts the prompt, well before the turn itself finishes, so
+// this only needs to outlast that brief window.
+const OWN_PROMPT_GRACE_MS = 20_000;
 
 const SHORT_CIRCUIT_AGENT_REQUEST_METHODS = new Set<string>([
   "fs/read_text_file",
@@ -160,6 +170,42 @@ function handleConnection(
   // reconnectReplayBuffer.
   let handshakeBuffer: JsonRpcMessage[] | null = [];
 
+  // This connection's own clientId, learned from the attach response —
+  // used to recognize our own submissions on prompt_queue/added (see
+  // below), which fans out every client's prompts on the session, not
+  // just this connection's. Undefined until doHandshake completes.
+  let ownClientId: string | undefined;
+
+  // Count of session/prompt requests forwarded upstream that haven't
+  // been resolved by a matching prompt_queue/added yet (see
+  // maybeRegisterPush below). Used only to decide whether cleanup()
+  // needs to hold the upstream connection open a little longer.
+  let pendingOwnPrompts = 0;
+
+  // Web Push registration for this connection's own prompts, mirroring
+  // the foreground own-turn-end scope in notifications.ts (a
+  // peer-submitted turn finishing isn't "browser initiated"). Only
+  // fires when at least one device has subscribed — otherwise this is
+  // a no-op REST call to the daemon for every prompt, for nobody.
+  async function maybeRegisterPush(messageId: string): Promise<void> {
+    if (!(await hasSubscriptions())) {
+      return;
+    }
+    let title = "Hydra";
+    try {
+      const info = await HydraRestClient.forRequest(
+        ctx.config.hydraDaemonUrl,
+        ctx.config.hydraToken,
+      ).getSession(sessionId);
+      if (info.title) {
+        title = info.title;
+      }
+    } catch {
+      // Best-effort — fall back to the generic title below.
+    }
+    await registerForPush(ctx.config, sessionId, messageId, title);
+  }
+
   upstream.on("open", () => {
     void doHandshake().catch((err: unknown) => {
       log.warn(
@@ -171,6 +217,33 @@ function handleConnection(
   });
 
   upstream.on("notification", (n) => {
+    // prompt_queue/added is the accept-time signal (fires the instant
+    // hydra enqueues the prompt) and, unlike prompt_received/turn_complete,
+    // is NOT excluded from the originating connection — PROTOCOL.md is
+    // explicit that only prompt_received/turn_complete skip the sender.
+    // An earlier version of this hooked prompt_received instead, which
+    // meant it could never fire for our own prompts at all. Match by
+    // originator.clientId (not FIFO position) since queue/added fans out
+    // every client's submissions on this same connection, not just ours.
+    if (n.method === "hydra-acp/prompt_queue/added") {
+      const params = (n.params ?? {}) as {
+        messageId?: unknown;
+        originator?: { clientId?: unknown };
+      };
+      const originatorClientId =
+        params.originator && typeof params.originator === "object"
+          ? params.originator.clientId
+          : undefined;
+      if (
+        typeof params.messageId === "string" &&
+        ownClientId !== undefined &&
+        originatorClientId === ownClientId &&
+        pendingOwnPrompts > 0
+      ) {
+        pendingOwnPrompts -= 1;
+        void maybeRegisterPush(params.messageId);
+      }
+    }
     // Permission resolution during the display-delay window cancels
     // the pending forward. The UI never saw the request so dropping
     // the resolved notification too is correct — there's nothing for
@@ -178,7 +251,7 @@ function handleConnection(
     if (n.method === "session/update") {
       const params = (n.params ?? {}) as { update?: unknown };
       const update = params.update as
-        | { sessionUpdate?: unknown; toolCallId?: unknown }
+        | { sessionUpdate?: unknown; toolCallId?: unknown; messageId?: unknown }
         | undefined;
       if (
         update?.sessionUpdate === "permission_resolved" &&
@@ -309,6 +382,9 @@ function handleConnection(
         msg.params && typeof msg.params === "object"
           ? { ...(msg.params as Record<string, unknown>), sessionId }
           : { sessionId };
+      if (msg.method === "session/prompt") {
+        pendingOwnPrompts += 1;
+      }
       upstream.sendRaw({
         jsonrpc: "2.0",
         id: msg.id,
@@ -442,6 +518,7 @@ function handleConnection(
     const readyParams: Record<string, unknown> = { sessionId };
     if (typeof attachResp?.clientId === "string") {
       readyParams.clientId = attachResp.clientId;
+      ownClientId = attachResp.clientId;
     }
     // configOptions (model/mode/agent plus whatever the agent advertises,
     // e.g. effort) rides at the top level of the attach response, not
@@ -479,7 +556,21 @@ function handleConnection(
   }
 
   function cleanup(): void {
-    upstream.stop();
+    // If a session/prompt we just forwarded hasn't produced its
+    // prompt_queue/added yet, don't tear down the daemon connection
+    // immediately — backgrounding the app right after hitting send (the
+    // literal case Web Push exists for) closes the browser WS within a
+    // second or two on iOS, possibly before the notification lands.
+    // Killing upstream here would silently drop the turn-notify
+    // registration every time. Give it a short grace window instead.
+    if (pendingOwnPrompts > 0) {
+      log.info(
+        `browser gone with ${pendingOwnPrompts} own prompt(s) unresolved for session=${sessionId} — holding upstream ${OWN_PROMPT_GRACE_MS}ms for prompt_queue/added`,
+      );
+      setTimeout(() => upstream.stop(), OWN_PROMPT_GRACE_MS);
+    } else {
+      upstream.stop();
+    }
     for (const timer of pendingPermissionFrames.values()) {
       clearTimeout(timer);
     }

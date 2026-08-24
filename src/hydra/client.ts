@@ -130,6 +130,24 @@ export class HydraRestClient {
     return this.json("GET", "/v1/agents");
   }
 
+  // Register a one-shot HTTP callback for a specific prompt's turn
+  // completion (see cli's turn-notify.ts / PROTOCOL.md). `already_terminal`
+  // means the turn had already finished by the time this landed — the
+  // caller should treat that as an immediate completion rather than
+  // waiting on a callback that will never come.
+  async registerTurnNotify(
+    sessionId: string,
+    messageId: string,
+    callbackUrl: string,
+    secret: string,
+  ): Promise<{ status: "registered" | "already_terminal"; stopReason?: string }> {
+    return this.json(
+      "POST",
+      `/v1/sessions/${encodeURIComponent(sessionId)}/prompt/${encodeURIComponent(messageId)}/notify`,
+      { callbackUrl, secret },
+    );
+  }
+
   async getConfig(): Promise<{ defaultAgent: string; defaultCwd: string }> {
     return this.json("GET", "/v1/config");
   }

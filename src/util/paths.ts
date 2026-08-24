@@ -20,6 +20,9 @@ export const paths = {
   linkFile(): string {
     return `${HOME_DIR}/link`;
   },
+  pushFile(): string {
+    return `${HOME_DIR}/push.json`;
+  },
   configFile(): string {
     if (existsSync(PRIMARY_CONF)) {
       return PRIMARY_CONF;

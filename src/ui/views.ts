@@ -30,7 +30,11 @@ import {
 } from "./queue.js";
 import { openChat, closeChat, requestFullHistory } from "./routing.js";
 import { queueDraftWrite } from "./composer-draft.js";
-import { requestNotificationPermission } from "./notifications.js";
+import {
+  requestNotificationPermission,
+  subscribeForPush,
+  unsubscribeFromPush,
+} from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
@@ -521,7 +525,6 @@ function hideThoughtsRow(): HTMLElement {
           setState({ hideThoughts: (e.target as HTMLInputElement).checked });
         },
       }),
-      "hide",
     ),
   );
 }
@@ -546,6 +549,7 @@ function notifyOnTurnEndRow(): HTMLElement {
           const checked = (e.target as HTMLInputElement).checked;
           if (!checked) {
             setState({ notifyOnTurnEnd: false });
+            void unsubscribeFromPush();
             return;
           }
           void requestNotificationPermission().then((granted) => {
@@ -559,10 +563,10 @@ function notifyOnTurnEndRow(): HTMLElement {
               return;
             }
             setState({ notifyOnTurnEnd: true });
+            void subscribeForPush();
           });
         },
       }),
-      "on turn end",
     ),
   );
 }
@@ -1785,7 +1789,7 @@ function renderChat(c: ChatState): HTMLElement {
         { class: "chat-details" },
         detailRow("title", title),
         detailRow("session", shortSessionId(c.sessionId)),
-        detailRow("cwd", cwd || "?"),
+        detailRow("directory", cwd || "?"),
         workspaceRow(live?.workspace),
         ...c.configOptions.map(configOptionRow),
         hideThoughtsRow(),
