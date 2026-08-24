@@ -284,18 +284,21 @@ pre code { background: transparent; padding: 0; }
 }
 
 /* Composer */
-/* Bottom padding encroaches ~12px into the home-indicator inset (34pt
-   on notch devices): the indicator bar itself is a thin strip centered
-   in that inset, so the button row can sit this much closer to the
-   screen edge without landing in the swipe-up gesture zone. The max()
-   keeps the normal 0.6rem when there's no inset (browser tabs). */
-.composer { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)) max(0.6rem, calc(env(safe-area-inset-bottom) - 0.75rem)); border-top: 1px solid var(--border); background: var(--panel); }
+/* Bottom padding encroaches into the home-indicator inset (34pt on
+   notch devices): the indicator bar itself is a thin strip centered in
+   that inset, so the button row can sit this much closer to the screen
+   edge without landing in the swipe-up gesture zone. The max() keeps
+   the normal 0.6rem when there's no inset (browser tabs). */
+.composer { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.6rem max(0.6rem, calc(50% - 28rem)) max(0.6rem, calc(env(safe-area-inset-bottom) - 1.1rem)); border-top: 1px solid var(--border); background: var(--panel); }
 /* The keyboard already bounds the composer's bottom edge, so the
    safe-area reserve (there for the home indicator when it's not up)
    would just leave a dead gap above it — see viewport.ts. */
 html.keyboard-open .composer { padding-bottom: 0.6rem; }
 .composer textarea { width: 100%; min-height: 2.4rem; max-height: 12rem; resize: none; }
-.composer-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; }
+/* padding-right shifts the row (Send/Enqueue lands rightmost) off the
+   screen's rounded bottom-right corner — the swipe-gesture margin above
+   is vertical-only and doesn't protect against the corner mask. */
+.composer-buttons { display: flex; justify-content: flex-end; gap: 0.5rem; padding-right: 1.4rem; }
 .composer .stop { color: var(--bad); border-color: var(--bad); }
 
 /* Pasted-image attachments: pending chips above the composer, and
