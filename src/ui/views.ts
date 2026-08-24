@@ -586,7 +586,7 @@ function hideThoughtsRow(): HTMLElement {
   return el(
     "div",
     { class: "detail" },
-    el("span", { class: "k" }, "thoughts"),
+    el("span", { class: "k" }, "hide thoughts"),
     el(
       "label",
       { class: "checkbox-label" },
