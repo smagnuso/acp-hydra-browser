@@ -257,6 +257,15 @@ pre code { background: transparent; padding: 0; }
 .queue-editor textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 0.4rem 0.5rem; box-sizing: border-box; }
 .queue-editor-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.4rem; }
 .queue-editor-actions button { min-height: 2.75rem; padding: 0.4rem 1rem; }
+/* Full touch-target sizing is overkill for a mouse/trackpad, where a
+   pointer is precise and there's no finger to miss under — shrink back
+   down closer to the glyph itself, same breakpoint the desktop chat-back
+   button uses. Must come after the unconditional rules above: equal
+   specificity resolves by source order, so this has to be later to win. */
+@media (hover: hover) and (pointer: fine) {
+  .queue-cancel, .queue-edit { min-width: 1.6rem; min-height: 1.6rem; font-size: 0.95rem; }
+  .queue-editor-actions button { min-height: auto; padding: 0.35rem 0.75rem; }
+}
 
 /* Composer */
 /* Bottom padding encroaches ~12px into the home-indicator inset (34pt
