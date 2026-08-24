@@ -250,9 +250,16 @@ pre code { background: transparent; padding: 0; }
 .amend-badge { position: absolute; top: -0.45rem; right: -0.45rem; width: 1.25rem; height: 1.25rem; border-radius: 999px; background: var(--accent); color: #0a0d12; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; line-height: 1; border: 2px solid var(--bg); cursor: help; }
 .msg.user.amended-target { opacity: 0.55; }
 .queue-amended { color: var(--accent); border: 1px solid var(--accent); background: rgba(110,168,254,0.08); }
-.queue-cancel, .queue-edit { display: inline-flex; align-items: center; justify-content: center; min-width: 2.75rem; min-height: 2.75rem; box-sizing: border-box; padding: 0; border: none; border-radius: 50%; color: inherit; font-size: 1.15rem; line-height: 1; cursor: pointer; background: rgba(255, 255, 255, 0.08); opacity: 0.85; flex-shrink: 0; }
-.queue-cancel:hover, .queue-edit:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); }
-.queue-cancel:active, .queue-edit:active { opacity: 1; background: rgba(255, 255, 255, 0.22); }
+/* The button itself is the tap target (invisible, no background of its
+   own) — sized for a finger, not for how it looks. The glyph inside
+   gets its own small, proportionate visible circle, so a 44px hit area
+   doesn't read as an oversized button bulging out of a small pill; it
+   just makes the easy-to-hit region around a normal-looking icon
+   bigger, the same trick a padded-but-transparent tap target uses. */
+.queue-cancel, .queue-edit { display: inline-flex; align-items: center; justify-content: center; min-width: 2.75rem; min-height: 2.75rem; box-sizing: border-box; padding: 0; border: none; border-radius: 50%; color: inherit; cursor: pointer; background: transparent; flex-shrink: 0; }
+.queue-btn-glyph { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; font-size: 0.95rem; line-height: 1; background: rgba(255, 255, 255, 0.08); opacity: 0.85; }
+.queue-cancel:hover .queue-btn-glyph, .queue-edit:hover .queue-btn-glyph { opacity: 1; background: rgba(255, 255, 255, 0.14); }
+.queue-cancel:active .queue-btn-glyph, .queue-edit:active .queue-btn-glyph { opacity: 1; background: rgba(255, 255, 255, 0.22); }
 .queue-editor { margin-bottom: 0.3rem; }
 .queue-editor textarea { width: 100%; min-height: 3rem; resize: vertical; font: inherit; padding: 0.4rem 0.5rem; box-sizing: border-box; }
 .queue-editor-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.4rem; }
@@ -263,7 +270,8 @@ pre code { background: transparent; padding: 0; }
    button uses. Must come after the unconditional rules above: equal
    specificity resolves by source order, so this has to be later to win. */
 @media (hover: hover) and (pointer: fine) {
-  .queue-cancel, .queue-edit { min-width: 1.6rem; min-height: 1.6rem; font-size: 0.95rem; }
+  .queue-cancel, .queue-edit { min-width: 1.6rem; min-height: 1.6rem; }
+  .queue-btn-glyph { width: 1.6rem; height: 1.6rem; }
   .queue-editor-actions button { min-height: auto; padding: 0.35rem 0.75rem; }
 }
 
