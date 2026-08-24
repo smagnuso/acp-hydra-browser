@@ -2346,7 +2346,7 @@ function renderQueueChip(entry: QueueEntry): Node {
       el(
         "span",
         null,
-        (ahead === 1 ? "queued · waiting on 1 turn" : `queued · waiting on ${ahead} turns`) +
+        `queued · ${ahead} behind` +
           (entry.held ? " · held: agent resumed" : ""),
       ),
       el(
