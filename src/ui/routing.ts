@@ -349,10 +349,15 @@ function resetConnectionStateForReconnect(chat: ChatState): void {
 export function closeChat(): void {
   setLocationHash("");
   closeChatSocket();
+  const returningFrom = state.current?.sessionId ?? state.lastSessionId;
   setState({
     view: "list",
     current: null,
-    lastSessionId: state.current?.sessionId ?? state.lastSessionId,
+    lastSessionId: returningFrom,
+    // Land the keyboard-nav cursor (views.ts's listHighlightedSessionId)
+    // on the card we just backed out of, so the list isn't cursor-less
+    // on return — matches the TUI's session picker behavior.
+    listHighlightedSessionId: returningFrom ?? state.listHighlightedSessionId,
   });
 }
 
