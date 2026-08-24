@@ -1105,6 +1105,19 @@ export interface JsonRpcFrame {
 }
 
 export function handleNotification(frame: JsonRpcFrame): void {
+  // Any live notification is proof the session is attached and running,
+  // regardless of how it got that way (this connection's own
+  // session/prompt auto-resurrecting a killed session server-side, a
+  // peer's activity, etc.) — bridge/ready is the only other place that
+  // flips these, and that only fires on a fresh WS handshake, which a
+  // resurrect-via-prompt on an already-open connection never triggers.
+  // Without this, the chat header pill (views.ts) would keep reading
+  // "cold" forever after a kill-then-resurrect that didn't also drop
+  // the WS.
+  if (state.current?.cold) {
+    state.current.cold = false;
+    state.current.ready = true;
+  }
   // Hydra-side prompt queue notifications. These don't fit the
   // session/update shape (they're top-level hydra-acp/* methods) so
   // they're dispatched separately, before the session/update guard.

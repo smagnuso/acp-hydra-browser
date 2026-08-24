@@ -283,6 +283,14 @@ export interface ChatState {
   agentId: string;
   ws: WebSocket | null;
   ready: boolean;
+  // Set when the daemon reports this session closed cold (idle-close,
+  // /hydra kill, disk-only) while we were attached — see bridge.ts's
+  // hydra-acp/session/closed handling. Distinguishes "nothing to
+  // reconnect to yet" from an actual WS reconnect in progress so the
+  // chat-header pill can say "cold" instead of a misleading
+  // "connecting…". Cleared once bridge/ready lands again (warm reattach
+  // or a resurrecting prompt).
+  cold?: boolean;
   log: LogItem[];
   toolCalls: Map<string, ToolCallState>;
   pendingPermissions: Map<string, PermissionEntry>;

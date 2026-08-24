@@ -1782,7 +1782,17 @@ function renderChat(c: ChatState): HTMLElement {
     el(
       "div",
       { class: "chat-header-row" },
-      !c.ready
+      !c.ready && c.cold
+        ? el(
+            "span",
+            {
+              class: "pill cold clickable",
+              title: "Session closed cold — sending a prompt will resurrect it",
+              ...tapHandler(toggleDetails),
+            },
+            "cold",
+          )
+        : !c.ready
         ? el(
             "span",
             {
@@ -1985,7 +1995,11 @@ function renderChat(c: ChatState): HTMLElement {
     "textarea",
     {
       "data-focus-key": "composer",
-      placeholder: c.ready ? "Message…" : "Connecting…",
+      placeholder: c.ready
+        ? "Message…"
+        : c.cold
+        ? "Message… (wakes the session)"
+        : "Connecting…",
       rows: "1",
       // Mobile keyboards auto-capitalize the first letter of a
       // "sentence", which includes the start of the field — so

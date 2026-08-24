@@ -168,6 +168,7 @@ export function handleFrame(frame: JsonRpcFrame): void {
   }
   if (frame.method === "bridge/ready") {
     state.current.ready = true;
+    state.current.cold = false;
     state.banner = null;
     state.current.reconnectAttempt = 0;
     // Capture the server-side bridge's clientId so we can recognize
@@ -265,17 +266,17 @@ export function handleFrame(frame: JsonRpcFrame): void {
   // Daemon closed our session (user typed /hydra kill, idle-close fired,
   // record was deleted, etc.). The WS itself is still up — only the
   // session is gone — so we mirror the WS-close cleanup (ready=false,
-  // drop the queue chain) and tell the user. The list view's "cold"
-  // badge updates on its own next refresh via session/list.
+  // drop the queue chain) and mark it cold rather than banner-ing: the
+  // chat-header pill (views.ts) reads `cold` to say "cold" instead of
+  // the generic (and here misleading, since nothing is actually
+  // reconnecting yet) "connecting…". The list view's "cold" badge
+  // updates on its own next refresh via session/list.
   if (frame.method === "hydra-acp/session/closed") {
     if (state.current) {
       state.current.ready = false;
+      state.current.cold = true;
       cancelAllQueued(state.current);
     }
-    state.banner = {
-      kind: "warn",
-      text: "Session is now cold — opening a new prompt will resurrect it.",
-    };
     render();
     return;
   }
@@ -306,6 +307,26 @@ export function handleFrame(frame: JsonRpcFrame): void {
     state.current.ownPromptIds.has(String(frame.id))
   ) {
     state.current.ownPromptIds.delete(String(frame.id));
+    // A live response (success or error) is proof of life, same as any
+    // notification — see the matching check in acp.ts's
+    // handleNotification. Without this, a prompt that resurrected a
+    // killed session over an already-open connection (no fresh WS
+    // handshake, so no bridge/ready) would leave the pill stuck on
+    // "cold" even though the turn just completed.
+    if (state.current.cold) {
+      state.current.cold = false;
+      state.current.ready = true;
+    }
+    if (frame.error) {
+      const err = frame.error as { code?: number; message?: string };
+      pushLog({
+        kind: "error",
+        text: `Prompt failed: ${err.message ?? "unknown error"}`,
+      });
+      finalizeTurn();
+      render();
+      return;
+    }
     const result = frame.result as { stopReason?: unknown } | undefined;
     const stopReason =
       typeof result?.stopReason === "string" ? result.stopReason : undefined;
