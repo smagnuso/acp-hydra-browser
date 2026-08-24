@@ -90,6 +90,23 @@ pre code { background: transparent; padding: 0; }
    its comment for why the plain 100% chain isn't enough on iOS. */
 #app { height: var(--app-height, 100%); display: flex; flex-direction: column; overflow: hidden; }
 
+/* Split (wide-layout) view — session-list rail alongside the active
+   chat instead of either taking the whole screen. Breakpoint mirrors
+   dom.ts's isWideLayout() (min-width: 1000px); keep the two in sync.
+   .detail's flex-grow:0 caps it at 58rem (the chat-body/composer
+   content column's own ~56rem clamp, calc(50% - 28rem), plus its
+   1rem-each-side floor) — past that, widening the window further does
+   nothing for the chat, so .rail (the only flex-grow item left, no
+   max-width of its own) is what absorbs the extra width instead of it
+   going to dead padding. Unlike the chat's cap, .rail's isn't a
+   readability constraint — a wider list of session cards doesn't get
+   harder to use, so there's no reason to freeze it too. */
+.split { flex: 1; display: flex; overflow: hidden; }
+.rail { flex: 1 1 20rem; min-width: 18rem; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
+.rail:focus { outline: none; box-shadow: inset 3px 0 0 var(--accent); }
+.detail { flex: 0 1 58rem; max-width: 58rem; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+
 /* Header */
 .topbar { display: flex; align-items: center; gap: 0.5rem; padding: calc(0.6rem + env(safe-area-inset-top)) calc(0.6rem + env(safe-area-inset-right)) 0.6rem calc(0.6rem + env(safe-area-inset-left)); border-bottom: 1px solid var(--border); background: var(--panel); }
 .topbar .spacer { flex: 1; }

@@ -6,12 +6,18 @@ import { render } from "./renderer.js";
 import { initPullToRefresh } from "./pull-refresh.js";
 import { initSwipeBack } from "./swipe-nav.js";
 import { initViewportHeight } from "./viewport.js";
+import { initWideLayoutWatcher, isWideLayout } from "./dom.js";
 import { ensureServiceWorker, subscribeForPush } from "./notifications.js";
 import { reportPushEndpoint, reportVisibility } from "./bridge.js";
-import { handleListKeydown } from "./views.js";
+import { handleListKeydown, focusListRail } from "./views.js";
 import { state } from "./state.js";
 
 initViewportHeight();
+
+// Crossing the split-layout breakpoint (dom.ts's isWideLayout) needs a
+// re-render even with no state change — it changes how renderApp lays
+// out the existing state, not the state itself.
+initWideLayoutWatcher(() => render());
 
 window.addEventListener("DOMContentLoaded", () => {
   startPolling();
@@ -55,14 +61,18 @@ window.addEventListener("online", () => forceReconnect());
 // Ctrl-P: same binding as the TUI's session switcher (cli/src/tui/input.ts),
 // so muscle memory carries over between the two. Always preventDefault —
 // left alone the browser opens its print dialog, which nothing in this
-// app ever wants. No-ops on the list view itself; there's nowhere further
-// to switch to.
+// app ever wants. In split (wide) layout the chat stays open the whole
+// time, so this just moves keyboard focus to the rail instead of
+// navigating away — narrow mode no-ops on the list view itself, since
+// there's nowhere further to switch to.
 window.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() !== "p" || !e.ctrlKey || e.metaKey || e.altKey) {
     return;
   }
   e.preventDefault();
-  if (state.view === "chat") {
+  if (isWideLayout()) {
+    focusListRail();
+  } else if (state.view === "chat") {
     closeChat();
   }
 });

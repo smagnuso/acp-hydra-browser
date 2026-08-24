@@ -60,6 +60,36 @@ export const state: AppState = {
   ...loadPersistedFilters(),
 };
 
+// Fields that affect the session-list rail's rendering (wide-layout
+// split view, views.ts's renderSplitLayout). tryPatchChat's fast path
+// keeps the chat pane patching in place during a stream without a full
+// #app teardown, which means the rail — a sibling, not touched by that
+// patch — needs its own cheap "did anything I'd render change" signal
+// instead of unconditionally rebuilding hundreds of session cards on
+// every streamed chunk (a render() fires roughly every 100ms during an
+// active turn). markRailClean()/isRailDirty() below back that check;
+// this list is what feeds it. pollAllSessions (api.ts) mutates
+// `sessions` directly rather than through setState, so it calls
+// markRailDirty() itself.
+const RAIL_AFFECTING_KEYS = [
+  "sessions",
+  "groupBy",
+  "showCold",
+  "hostFilter",
+  "listHighlightedSessionId",
+] as const;
+
+let railDirty = true;
+export function markRailDirty(): void {
+  railDirty = true;
+}
+export function isRailDirty(): boolean {
+  return railDirty;
+}
+export function markRailClean(): void {
+  railDirty = false;
+}
+
 export function setState(patch: Partial<AppState>): void {
   let changed = false;
   let filtersChanged = false;
@@ -70,6 +100,9 @@ export function setState(patch: Partial<AppState>): void {
       changed = true;
       if ((PERSISTED_KEYS as readonly string[]).includes(k as string)) {
         filtersChanged = true;
+      }
+      if ((RAIL_AFFECTING_KEYS as readonly string[]).includes(k as string)) {
+        railDirty = true;
       }
     }
   }

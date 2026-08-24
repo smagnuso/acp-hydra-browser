@@ -2,8 +2,9 @@
 // (with the bearer token attached server-side); the browser only
 // presents its session cookie.
 
-import { setState, state, sameValue } from "./state.js";
+import { setState, state, sameValue, markRailDirty } from "./state.js";
 import { render } from "./renderer.js";
+import { isWideLayout } from "./dom.js";
 import type { SessionInfo } from "./types.js";
 
 function hasActiveSelection(): boolean {
@@ -62,8 +63,10 @@ export async function pollSessions(): Promise<void> {
   // fetching, JSON-parsing, and (in pollAllSessions' sameValue check)
   // re-serializing every other session on the install every 2s for no
   // reason a long-lived install can have hundreds of entries. Hit the
-  // single-session endpoint instead.
-  if (state.view === "chat" && state.current) {
+  // single-session endpoint instead — except in the wide-layout split
+  // view, where the session-list rail is on screen the whole time
+  // alongside the chat and genuinely needs the full list kept fresh.
+  if (state.view === "chat" && state.current && !isWideLayout()) {
     await pollCurrentSessionOnly(state.current.sessionId);
     return;
   }
@@ -124,6 +127,11 @@ async function pollAllSessions(): Promise<void> {
     const sessionsChanged = !sameValue(state.sessions, newSessions);
     state.sessions = newSessions;
     state.banner = null;
+    // Bypasses setState (the assignment above), so its rail-dirty
+    // tracking needs the same signal explicitly — see state.ts.
+    if (sessionsChanged) {
+      markRailDirty();
+    }
     if (!sessionsChanged && !hadBanner) {
       return;
     }

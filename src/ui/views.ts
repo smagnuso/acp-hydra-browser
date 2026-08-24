@@ -3,9 +3,16 @@
 // largest module by design — keeping all the DOM-shaping code together
 // makes UX iteration easier than chasing pieces across files.
 
-import { state, setState } from "./state.js";
+import { state, setState, isRailDirty, markRailClean } from "./state.js";
 import { render, noteTypingActivity } from "./renderer.js";
-import { el, tapHandler, isFormControl, isDesktopPointer, TAP_MOVE_THRESHOLD } from "./dom.js";
+import {
+  el,
+  tapHandler,
+  isFormControl,
+  isDesktopPointer,
+  isWideLayout,
+  TAP_MOVE_THRESHOLD,
+} from "./dom.js";
 import { renderMarkdown, escapeHtml } from "./markdown.js";
 import { highlightCode } from "./hljs.js";
 import {
@@ -247,7 +254,9 @@ export function renderApp(root: HTMLElement, s: AppState): void {
       el("div", { class: "banner " + s.banner.kind }, s.banner.text),
     );
   }
-  if (s.view === "list") {
+  if (isWideLayout()) {
+    root.appendChild(renderSplitLayout(s));
+  } else if (s.view === "list") {
     root.appendChild(renderTopbar());
     root.appendChild(renderList());
   } else if (s.view === "chat" && s.current) {
@@ -281,6 +290,94 @@ export function renderApp(root: HTMLElement, s: AppState): void {
       root.appendChild(renderOptionsModal());
     }
   }
+}
+
+// ---- Wide-layout split view ---------------------------------------
+// Above dom.ts's isWideLayout() breakpoint, the session list renders as
+// a persistent rail alongside the active chat instead of taking over
+// the whole screen. The rail has no incremental view object the way
+// chatViews gives the chat pane — it's always been a from-scratch
+// rebuild (renderList()) on every render(). That's fine when it's the
+// only thing on screen, but tryPatchChat's fast path now keeps the
+// chat patching in place many times a second during a stream, and the
+// rail sits right next to it the whole time — rebuilding hundreds of
+// session cards on every streamed token would be real, needless jank.
+// isRailDirty()/markRailClean() (state.ts) gate the rebuild on whether
+// anything rail-relevant actually changed since the last one.
+
+function buildRailContents(): Node[] {
+  return [renderTopbar(), renderList()];
+}
+
+// The rail element itself — not its children — is what carries
+// keyboard focus (see focusListRail below). replaceChildren() never
+// disturbs the element holding it, so unlike a full #app teardown this
+// needs no data-focus-key restore dance.
+function renderRail(): HTMLElement {
+  const rail = el(
+    "div",
+    { class: "rail", tabindex: "-1", "data-focus-key": "list-rail" },
+    ...buildRailContents(),
+  );
+  markRailClean();
+  return rail;
+}
+
+function refreshRailInPlace(rail: HTMLElement): void {
+  if (!isRailDirty()) return;
+  const oldList = rail.querySelector<HTMLElement>(".list");
+  const oldScrollTop = oldList ? oldList.scrollTop : null;
+  rail.replaceChildren(...buildRailContents());
+  markRailClean();
+  if (oldScrollTop !== null) {
+    const newList = rail.querySelector<HTMLElement>(".list");
+    if (newList) newList.scrollTop = oldScrollTop;
+  }
+}
+
+function renderSplitLayout(s: AppState): HTMLElement {
+  const detail = el("div", { class: "detail" });
+  if (s.current) {
+    detail.appendChild(renderChat(s.current));
+    if (s.current.fileOverlay) {
+      detail.appendChild(renderFileOverlay(s.current));
+    }
+  } else {
+    detail.appendChild(
+      el("div", { class: "detail-empty" }, "Select a session from the list"),
+    );
+  }
+  return el("div", { class: "split" }, renderRail(), detail);
+}
+
+// Moves keyboard focus to the session-list rail (wide layout only) so
+// Up/Down/Enter act on it — see handleListKeydown below. Used in place
+// of closeChat()'s narrow-mode "leave chat, show list" navigation: in
+// split view the chat stays open and visible the whole time; only the
+// keyboard target changes. Exported for main.ts's back-button/Ctrl+P
+// handlers.
+export function focusListRail(): void {
+  const rail = document.querySelector<HTMLElement>('[data-focus-key="list-rail"]');
+  if (!rail) return;
+  // Land the cursor on the currently-open session so the focus move is
+  // actually visible — a bare DOM focus() with no card highlighted
+  // looked like nothing happened. Unconditional: an earlier version
+  // gated this on the session still showing in the (possibly filtered,
+  // possibly stale-by-a-poll-cycle) visible list, which could silently
+  // skip the highlight while focus still moved — exactly the "focus
+  // moved but nothing got reselected" split a filter mismatch or a
+  // just-created session not yet polled into state.sessions would
+  // produce. Setting a highlight id for a card that isn't currently
+  // rendered is harmless (renderSessionCard just never matches it).
+  // setState's render() is async (rAF-deferred); rail.focus() below
+  // runs against this same still-live node before that fires, and the
+  // eventual re-render patches the rail's children in place
+  // (refreshRailInPlace/tryPatchChat) rather than replacing this node,
+  // so the focus set here survives it.
+  if (state.current) {
+    setState({ listHighlightedSessionId: state.current.sessionId });
+  }
+  rail.focus();
 }
 
 // ---- Topbar ------------------------------------------------------
@@ -412,22 +509,63 @@ export function flatVisibleSessionIds(): string[] {
   );
 }
 
+function focusComposer(): void {
+  document.querySelector<HTMLElement>('[data-focus-key="composer"]')?.focus();
+}
+
+// Shared by handleListKeydown's Enter/Escape branches: switching to a
+// session already showing in the split-view detail pane doesn't need a
+// reconnect, just a focus move — openChat() tears down and reconnects
+// unconditionally, which narrow mode never risked (you can't select a
+// session you're not currently viewing there) but wide mode can, since
+// the chat stays open the whole time you're navigating the rail.
+function openOrFocusChat(sessionId: string, cold: boolean): void {
+  if (isWideLayout() && state.current?.sessionId === sessionId) {
+    focusComposer();
+    return;
+  }
+  openChat(sessionId, cold);
+}
+
 // Up/Down moves a keyboard-nav cursor over the session list (by id, see
 // listHighlightedSessionId); Enter opens whatever it's on; Escape jumps
 // back into whichever session you most recently backed out of (same
 // target and same "still exists" guard as swipe-nav.ts's list->chat
-// swipe). Mirrors the TUI's session picker. Ignored outside the list
-// view and while a form control (the host-filter select) has focus, so
-// arrow keys there change the select's value instead of hijacking it.
+// swipe). Mirrors the TUI's session picker. Ignored while a form
+// control (the host-filter select) has focus, so arrow keys there
+// change the select's value instead of hijacking it. Otherwise active
+// in narrow mode's list view, or in wide mode's split view once
+// focusListRail has moved keyboard focus onto the rail (see
+// renderApp/focusListRail) — composer text and its own history-recall
+// arrow keys are what's focused the rest of the time in wide mode, and
+// this must not steal those keystrokes out from under it.
 export function handleListKeydown(e: KeyboardEvent): void {
-  if (state.view !== "list") return;
+  const railFocused =
+    (document.activeElement as HTMLElement | null)?.dataset.focusKey === "list-rail";
+  if (state.view !== "list" && !(isWideLayout() && railFocused)) return;
   if (isFormControl(document.activeElement)) return;
   if (e.key === "Escape") {
+    // Wide mode: the chat never closed, so there's nothing to jump
+    // back into — just hand focus back to it. lastSessionId (below)
+    // is narrow mode's mechanism and is never set by the rail-focus
+    // path (see focusListRail; unlike closeChat(), it doesn't touch
+    // lastSessionId, since nothing was actually closed). Also snaps
+    // the highlight back to the session actually being viewed — Up/Down
+    // may have moved it to preview a different row without committing
+    // (Enter is what commits), and abandoning that via Escape should
+    // abandon the preview highlight too, not leave it stranded on
+    // whatever row the cursor last landed on.
+    if (isWideLayout() && state.current) {
+      e.preventDefault();
+      setState({ listHighlightedSessionId: state.current.sessionId });
+      focusComposer();
+      return;
+    }
     const id = state.lastSessionId;
     const s = id ? state.sessions.find((s) => s.sessionId === id) : undefined;
     if (!s) return;
     e.preventDefault();
-    openChat(s.sessionId, s.status === "cold");
+    openOrFocusChat(s.sessionId, s.status === "cold");
     return;
   }
   if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Enter") return;
@@ -439,7 +577,7 @@ export function handleListKeydown(e: KeyboardEvent): void {
     const s = state.sessions.find((s) => s.sessionId === id);
     if (!s) return;
     e.preventDefault();
-    openChat(s.sessionId, s.status === "cold");
+    openOrFocusChat(s.sessionId, s.status === "cold");
     return;
   }
   e.preventDefault();
@@ -745,7 +883,7 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
       ...tapHandler((e) => {
         const target = e.target as HTMLElement;
         if (target.closest("button")) return;
-        openChat(s.sessionId, s.status === "cold");
+        openOrFocusChat(s.sessionId, s.status === "cold");
       }),
     },
     el("div", { class: "row1" }, title),
@@ -1701,6 +1839,30 @@ export function tryPatchChat(root: HTMLElement, s: AppState): boolean {
   if (!view) {
     return false;
   }
+  if (isWideLayout()) {
+    // Split layout: root -> .split -> [.rail, .detail -> view.root].
+    // The rail is a sibling of the chat's own subtree, so patching the
+    // chat here never touches it — refreshRailInPlace (cheap, dirty-
+    // gated) is what keeps it current instead.
+    if (root.childNodes.length !== 1) {
+      return false;
+    }
+    const split = root.firstElementChild;
+    if (!split || !split.classList.contains("split")) {
+      return false;
+    }
+    const rail = split.querySelector<HTMLElement>(":scope > .rail");
+    const detail = split.querySelector<HTMLElement>(":scope > .detail");
+    if (!rail || !detail) {
+      return false;
+    }
+    if (detail.childNodes.length !== 1 || detail.firstChild !== view.root) {
+      return false;
+    }
+    refreshRailInPlace(rail);
+    renderChat(s.current);
+    return true;
+  }
   if (root.childNodes.length !== 1 || root.firstChild !== view.root) {
     return false;
   }
@@ -1765,7 +1927,10 @@ function renderChat(c: ChatState): HTMLElement {
         {
           class: "chat-back",
           title: "Back to session list",
-          ...tapHandler(closeChat),
+          // Split view keeps the chat open and visible the whole
+          // time — "back" just moves keyboard focus to the rail
+          // instead of navigating away from it (see focusListRail).
+          ...tapHandler(() => (isWideLayout() ? focusListRail() : closeChat())),
         },
         "←",
       ),
@@ -1929,6 +2094,22 @@ function renderChat(c: ChatState): HTMLElement {
   };
   const composerOnKey = (e: KeyboardEvent): void => {
     if (e.isComposing) return;
+    // Wide (split) layout: Escape hands focus back to the rail, landing
+    // on this session's own card — the reverse of handleListKeydown's
+    // Escape-from-the-rail branch, which sends focus back here. Keeps
+    // Escape a consistent "leave whichever pane you're in" toggle.
+    // stopPropagation is load-bearing: this handler runs first (it's on
+    // the textarea itself) and moves focus to the rail synchronously,
+    // but the same event then keeps bubbling to window's
+    // handleListKeydown — which re-reads document.activeElement, now
+    // sees the rail *already* focused, and immediately calls
+    // focusComposer() right back, undoing this in the same keystroke.
+    if (e.key === "Escape" && isWideLayout()) {
+      e.preventDefault();
+      e.stopPropagation();
+      focusListRail();
+      return;
+    }
     const t = e.target as HTMLTextAreaElement;
     // Up/Down history recall. Trigger only at the boundaries so caret
     // navigation inside multi-line drafts still works normally. Plain

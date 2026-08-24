@@ -159,7 +159,12 @@ export function openChat(sessionId: string, load: boolean): void {
     connectionHealthy: true,
   };
   state.current = initial;
-  setState({ view: "chat" });
+  // Keeps the split-view rail's highlight glued to whichever session is
+  // actually being viewed — every way of opening a session (card click,
+  // Enter, a fresh deep link, session creation) funnels through here, so
+  // this one line is the single place that needs to know about it,
+  // rather than every call site remembering to sync it separately.
+  setState({ view: "chat", listHighlightedSessionId: sessionId });
   void hydrateFromCacheThenConnect(initial);
 }
 

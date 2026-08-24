@@ -111,6 +111,24 @@ export function isDesktopPointer(): boolean {
   return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 }
 
+// Width-based, not device-based — a narrow desktop Chrome window falls
+// back to the single-pane layout same as phone, and a hypothetical wide
+// touch tablet gets the split view. views.ts's renderApp reads this to
+// decide whether to render the session-list rail alongside chat instead
+// of as its own full-screen view.
+const WIDE_LAYOUT_QUERY = "(min-width: 1000px)";
+
+export function isWideLayout(): boolean {
+  return window.matchMedia(WIDE_LAYOUT_QUERY).matches;
+}
+
+// Call once at boot. Re-renders on crossing the breakpoint so the
+// split/single-pane layout tracks a live window resize, not just the
+// value at last render.
+export function initWideLayoutWatcher(onChange: () => void): void {
+  window.matchMedia(WIDE_LAYOUT_QUERY).addEventListener("change", onChange);
+}
+
 export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
   let firedViaPointer = false;
   let startX = 0;
