@@ -4,7 +4,7 @@
 // makes UX iteration easier than chasing pieces across files.
 
 import { state, setState } from "./state.js";
-import { render } from "./renderer.js";
+import { render, noteTypingActivity } from "./renderer.js";
 import { el, tapHandler, isFormControl, TAP_MOVE_THRESHOLD } from "./dom.js";
 import { renderMarkdown, escapeHtml } from "./markdown.js";
 import { highlightCode } from "./hljs.js";
@@ -1897,6 +1897,7 @@ function renderChat(c: ChatState): HTMLElement {
         addPastedImages(c, files);
       },
       oninput: (e: Event) => {
+        noteTypingActivity();
         const t = e.target as HTMLTextAreaElement;
         c.composerValue = t.value;
         queueDraftWrite(c.sessionId, t.value);

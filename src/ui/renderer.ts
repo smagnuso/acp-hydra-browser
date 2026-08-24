@@ -101,6 +101,36 @@ document.addEventListener(
   true,
 );
 
+// Same idea as the pointer gate above, extended to keystrokes. During
+// an active turn, render() gets called roughly every
+// MIN_RENDER_INTERVAL_MS for the turn's whole duration (each streamed
+// chunk retriggers it), and actuallyRender/tryPatchChat's real cost —
+// see the comment below — lands on the same main thread as keystroke
+// handling every single time, not just once. That's what made typing
+// specifically feel worse while a turn was streaming, separate from
+// (and on top of) the render cost itself. Defer while there's been a
+// keystroke in the last TYPING_HOLDOFF_MS; whatever triggers the next
+// render() call — the next chunk, turn_complete, anything — naturally
+// re-evaluates and either defers again or flushes once typing has
+// actually paused, the same self-chaining way the pointer gate doesn't
+// need an explicit "still down" poll loop either.
+const TYPING_HOLDOFF_MS = 250;
+let lastKeystrokeAt = 0;
+export function noteTypingActivity(): void {
+  lastKeystrokeAt = performance.now();
+}
+function isActivelyTyping(): boolean {
+  const active = document.activeElement;
+  if (
+    !(active instanceof HTMLTextAreaElement) &&
+    !(active instanceof HTMLInputElement)
+  ) {
+    return false;
+  }
+  return performance.now() - lastKeystrokeAt < TYPING_HOLDOFF_MS;
+}
+let renderHeldByTyping = false;
+
 export function render(): void {
   if (scheduled) return;
   scheduled = true;
@@ -112,6 +142,16 @@ export function render(): void {
       // Park it; pointerup/pointercancel flushes. No rAF respin — that
       // was a busy-loop for the whole duration of every press.
       renderHeldByPress = true;
+      return;
+    }
+    if (isActivelyTyping()) {
+      renderHeldByTyping = true;
+      setTimeout(() => {
+        if (renderHeldByTyping) {
+          renderHeldByTyping = false;
+          render();
+        }
+      }, TYPING_HOLDOFF_MS);
       return;
     }
     lastRenderAt = performance.now();
