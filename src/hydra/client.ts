@@ -111,6 +111,14 @@ export class HydraRestClient {
     return this.json("GET", `/v1/sessions${suffix}`);
   }
 
+  // Single-session equivalent of listSessions — used to keep one
+  // session's live metadata (title/cwd/model/workspace) fresh while a
+  // client is viewing it, without paying to list and serialize every
+  // other session on the install just to read one entry back out.
+  async getSession(sessionId: string): Promise<HydraSessionInfo> {
+    return this.json("GET", `/v1/sessions/${encodeURIComponent(sessionId)}`);
+  }
+
   async killSession(sessionId: string): Promise<void> {
     await this.json(
       "POST",

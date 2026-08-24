@@ -4,6 +4,7 @@
 
 import { setState, state, sameValue } from "./state.js";
 import { render } from "./renderer.js";
+import type { SessionInfo } from "./types.js";
 
 function hasActiveSelection(): boolean {
   const sel = window.getSelection();
@@ -54,6 +55,62 @@ export async function pollSessions(): Promise<void> {
   ) {
     return;
   }
+  // While viewing a single session, only that session's own metadata
+  // (title/cwd/agentId/currentModel/workspace) can possibly need
+  // refreshing — nothing else in state.sessions is read from chat view.
+  // Polling the full list just to read one entry back out means
+  // fetching, JSON-parsing, and (in pollAllSessions' sameValue check)
+  // re-serializing every other session on the install every 2s for no
+  // reason a long-lived install can have hundreds of entries. Hit the
+  // single-session endpoint instead.
+  if (state.view === "chat" && state.current) {
+    await pollCurrentSessionOnly(state.current.sessionId);
+    return;
+  }
+  await pollAllSessions();
+}
+
+// Merges the refreshed entry into state.sessions in place (by
+// sessionId) rather than replacing the array, so every other
+// state.sessions.find(...) call site elsewhere in the app still sees
+// whatever it last had — stale, but nothing else is on-screen to read
+// it while we're viewing one session.
+async function pollCurrentSessionOnly(sessionId: string): Promise<void> {
+  try {
+    const live = await api<SessionInfo>(
+      `/api/sessions/${encodeURIComponent(sessionId)}`,
+    );
+    const idx = state.sessions.findIndex((s) => s.sessionId === sessionId);
+    if (idx >= 0) {
+      state.sessions[idx] = live;
+    } else {
+      state.sessions.push(live);
+    }
+    // Navigated away (or the chat closed) while the request was in
+    // flight — the fetched data is still merged above for whenever the
+    // list is next shown, but there's no chat-view fingerprint to
+    // reconcile against anymore.
+    if (!state.current || state.current.sessionId !== sessionId) {
+      return;
+    }
+    // This is what makes deep-link reloads eventually pick up the real
+    // session title.
+    const fp = `${live.title}|${live.cwd}|${live.agentId}|${live.currentModel}|${live.workspace?.label}|${live.workspace?.vcs?.branch}|${live.workspace?.clean}`;
+    if (fp !== state.current._lastMetaFp) {
+      state.current._lastMetaFp = fp;
+      render();
+    }
+  } catch {
+    // Best-effort — a transient failure just skips this cycle's
+    // refresh; the next poll tries again. A genuinely closed/deleted
+    // session is already surfaced via the WS-level
+    // hydra-acp/session/closed banner (bridge.ts), so duplicating that
+    // here as a second, possibly-stale error banner would just be
+    // noise.
+  }
+}
+
+async function pollAllSessions(): Promise<void> {
   try {
     // Daemon's default `/v1/sessions` view already excludes one-shot
     // `hydra cat` runs and editor-spawned empty sessions (anything not
@@ -81,26 +138,7 @@ export async function pollSessions(): Promise<void> {
     if (!hadBanner && state.modal) {
       return;
     }
-    // While the user is typing in chat view, re-rendering blows away
-    // the textarea (and focus). Render the list view normally; render
-    // chat view only when a banner was just cleared, or when the
-    // current session's visible metadata (title/cwd/agentId) changed
-    // since the last poll. This is what makes deep-link reloads
-    // eventually pick up the real session title.
-    if (state.view === "list" || hadBanner) {
-      render();
-    } else if (state.view === "chat" && state.current) {
-      const live = state.sessions.find(
-        (s) => s.sessionId === state.current!.sessionId,
-      );
-      const fp = live
-        ? `${live.title}|${live.cwd}|${live.agentId}|${live.currentModel}|${live.workspace?.label}|${live.workspace?.vcs?.branch}|${live.workspace?.clean}`
-        : "";
-      if (fp !== state.current._lastMetaFp) {
-        state.current._lastMetaFp = fp;
-        render();
-      }
-    }
+    render();
   } catch (err) {
     // Could be from hydra-acp-browser (auth, CSRF, host allowlist) or
     // from the upstream hydra daemon (502). The error text comes from

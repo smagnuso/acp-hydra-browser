@@ -81,6 +81,19 @@ export function registerSessionRoutes(
     }
   });
 
+  // Single-session lookup, used by the SPA to keep the currently-open
+  // session's metadata fresh without polling the full list.
+  app.get("/api/sessions/:id", async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    try {
+      const result = await clientFor(ctx, request).getSession(id);
+      reply.send(result);
+    } catch (err) {
+      const status = err instanceof HydraRestError ? err.status : 502;
+      reply.code(status).send({ error: (err as Error).message });
+    }
+  });
+
   app.post("/api/kill", async (request, reply) => {
     const body = (request.body ?? {}) as KillBody;
     if (!body.sessionId) {
