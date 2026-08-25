@@ -155,7 +155,10 @@ pre code { background: transparent; padding: 0; }
 @keyframes pill-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
 /* Session list */
-.list { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 1rem; }
+/* Top padding is deliberately smaller than the other sides: the filter
+   row above already contributes its own bottom padding, and the full
+   1rem on top of that left a visible gap before the first card. */
+.list { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 0.3rem 1rem 1rem; }
 .list .group { margin-bottom: 1.25rem; }
 .list .group h2 { font-size: 0.85rem; color: var(--muted); margin: 0 0 0.5rem; }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; cursor: pointer; }
@@ -241,13 +244,17 @@ pre code { background: transparent; padding: 0; }
    prev/next buttons from shifting sideways as the digit count changes
    between updates. */
 .turn-toast { min-width: 4.5rem; padding: 0.35rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.82rem; text-align: center; white-space: nowrap; pointer-events: none; }
-.session-search-row { position: relative; display: flex; align-items: center; padding: 0 0.75rem 0.5rem; flex: 0 0 auto; }
+/* Top padding matters: without it the row sits flush against .topbar's
+   bottom border and reads as part of the topbar rather than as the head
+   of the list. Horizontal padding matches .list's so the box lines up
+   with the cards underneath it. */
+.session-search-row { position: relative; display: flex; align-items: center; padding: 0.7rem 1rem 0.4rem; flex: 0 0 auto; }
 .session-search { flex: 1; min-width: 0; padding: 0.45rem 2rem 0.45rem 0.7rem; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.9rem; font-family: inherit; }
 .session-search:focus { outline: none; border-color: var(--accent, #4a9eff); }
 .session-search::placeholder { color: var(--muted); }
 /* Overlaid rather than a flex sibling so showing/hiding it as the term
    empties doesn't reflow the input's width mid-type. */
-.session-search-clear { position: absolute; right: 1.1rem; width: 1.4rem; height: 1.4rem; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 50%; }
+.session-search-clear { position: absolute; right: 1.35rem; width: 1.4rem; height: 1.4rem; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 50%; }
 .session-search-clear:hover { color: var(--fg); background: var(--panel); }
 .show-earlier { align-self: center; margin-bottom: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 0.82rem; cursor: pointer; }
 .show-earlier:hover { background: var(--panel); color: var(--fg); }
