@@ -184,7 +184,16 @@ async function hydrateFromCacheThenConnect(chat: ChatState): Promise<void> {
   }
   if (cached) {
     for (const frame of cached.frames) {
-      handleNotification(frame);
+      // One malformed frame must not cost us the rest of the
+      // transcript. This is a bare loop over every cached frame, so an
+      // exception here abandons all the frames after it — the whole
+      // remainder of the session silently missing, which is far worse
+      // than losing the single frame that actually failed.
+      try {
+        handleNotification(frame, true);
+      } catch (err) {
+        console.error("[hydra] cached frame failed to replay", err, frame);
+      }
     }
     chat.lastSeenMessageId = chat.lastSeenMessageId ?? cached.lastSeenMessageId;
     // The cache is byte-capped (history-cache.ts), so a hit doesn't
@@ -289,6 +298,23 @@ function connectChatSocket(chat: ChatState): void {
     /* wait for bridge/ready */
   });
   ws.addEventListener("message", (ev) => {
+    // Ignore frames from a socket that's already been superseded — the
+    // same guard the close handler below has always had, and for the
+    // same reason. closeChatSocket() calls ws.close() and drops the
+    // reference, but close() is asynchronous and does NOT detach this
+    // listener: frames already in flight (or buffered by the bridge
+    // mid-replay) keep arriving afterwards. Without this check they
+    // were merged into whatever transcript was current by then, so a
+    // session switch / reload / "Load full history" during a replay
+    // interleaved the dying socket's remaining frames with the new
+    // connection's fresh ones. Measured live as a full second copy of
+    // history landing in one log: 168 prompt_received frames against 88
+    // rendered prompts, agent bubbles duplicated verbatim (prompts
+    // dedupe by messageId, streamed chunks can't), turn-stamps stranded
+    // from the content they belonged to.
+    if (!state.current || state.current.ws !== ws) {
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(String(ev.data));
