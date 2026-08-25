@@ -9,6 +9,7 @@ import { extractEditDiff } from "./edit-diff.js";
 import { queueFrameForCache } from "./history-cache.js";
 import type {
   ArmedTask,
+  Attachment,
   ChatState,
   ConfigOption,
   EditDiffLogItem,
@@ -711,6 +712,7 @@ function onPromptReceived(update: AnyRecord, recordedAt?: number): void {
     text,
     closed: true,
     messageId,
+    attachments: extractImageAttachments(update.prompt),
   });
   // prompt_received IS the turn-open signal (cli's user-text handler
   // does exactly this): anchor the thinking block directly under the
@@ -824,6 +826,7 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
       text,
       closed: true,
       queueEntry: entry,
+      attachments: extractImageAttachments(e.prompt),
     });
   }
 }
@@ -873,6 +876,33 @@ function promptBlocksToText(prompt: unknown): string {
     }
   }
   return text;
+}
+
+// Mirrors promptBlocksToText for the image blocks buildContentBlocks
+// (queue.ts) sends alongside the text one — {type: "image", data,
+// mimeType}. The daemon persists and replays prompt content blocks
+// verbatim (unlike large tool-call results, which it can blob-reference
+// instead), so the actual image data is present on every path this
+// feeds: prompt_received replay, a peer's live prompt, and the queue
+// snapshot. sizeBytes is an estimate (base64 overhead, no way to
+// recover the original byte count) — only used for display, never sent
+// anywhere. Returns undefined rather than [] so a text-only bubble's
+// LogItem stays clean (no attachments field at all) and its
+// logItemSig/render path matches an ordinary bubble exactly.
+function extractImageAttachments(prompt: unknown): Attachment[] | undefined {
+  const blocks = Array.isArray(prompt) ? prompt : [];
+  const attachments: Attachment[] = [];
+  for (const block of blocks) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as AnyRecord;
+    if (b.type !== "image" || typeof b.data !== "string") continue;
+    attachments.push({
+      mimeType: typeof b.mimeType === "string" ? b.mimeType : "image/png",
+      data: b.data,
+      sizeBytes: Math.round((b.data.length * 3) / 4),
+    });
+  }
+  return attachments.length > 0 ? attachments : undefined;
 }
 
 function onPromptQueueAdded(params: AnyRecord): void {
@@ -1035,6 +1065,7 @@ function onPromptQueueAdded(params: AnyRecord): void {
     closed: true,
     queueEntry: entry,
     messageId,
+    attachments: extractImageAttachments(params.prompt),
   };
   if (position === 0) {
     // Peer is the new active turn — slot above any waiting-queued
@@ -1572,35 +1603,21 @@ export function handleNotification(frame: JsonRpcFrame): void {
       }
       const stopReason =
         typeof update.stopReason === "string" ? update.stopReason : undefined;
-      // Stale-completion guard: a reconnect delta can redeliver a
-      // turn_complete this client already processed, or deliver one for
-      // an older turn after a newer turn has opened its spinner.
-      // Finalizing then would freeze the LIVE turn's thinking block
-      // mid-flight (and a follow-up chunk would re-anchor a new one
-      // mid-transcript — the fossilized-spinner symptom). When the live
-      // spinner is owner-tagged with a bound messageId and this
-      // completion names a DIFFERENT message, it can't be the owner's
-      // end — ignore it for turn-teardown purposes. An anonymous or
-      // entry-id-tagged owner can't be verified, so those still accept
-      // the completion (best effort, matches prior behavior).
-      const owner = state.current?.spinnerOwner;
-      const ownerIsBoundMessage =
-        owner !== undefined &&
-        state.current !== null &&
-        (state.current.queueByMessageId.has(owner) ||
-          state.current.log.some(
-            (e) =>
-              e.kind === "stream" && e.role === "user" && e.messageId === owner,
-          ));
-      if (
-        updateMessageId !== undefined &&
-        owner !== undefined &&
-        state.current?.spinner &&
-        owner !== updateMessageId &&
-        ownerIsBoundMessage
-      ) {
-        break;
-      }
+      // REMOVED: a "stale completion" guard used to sit here, comparing
+      // the live spinner's owner (a PROMPT's messageId) against this
+      // update's own messageId and skipping finalizeTurn on a mismatch.
+      // That comparison is meaningless — turn_complete.messageId is a
+      // fresh id minted for the notification itself
+      // (broadcastTurnComplete's own generateMessageId() call,
+      // cli/src/core/session.ts), never the prompt's id, so the two are
+      // NEVER equal by construction. The guard therefore rejected
+      // essentially every legitimate own-turn completion whose spinner
+      // had a verified owner — the normal case, not an edge one —
+      // leaving the thinking block permanently stuck ("thought" never
+      // shown, session list reads warm/idle while the block still
+      // spins). Confirmed live on this exact session. If a genuine
+      // late/stale turn_complete race needs guarding against later, it
+      // needs a real correlation field, not this one.
       finalizeTurn(stopReason, recordedAt);
       break;
     }

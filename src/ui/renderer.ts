@@ -4,7 +4,7 @@
 // don't blow away the user's typing position.
 
 import { state } from "./state.js";
-import { renderApp, resyncChatScroll, tryPatchChat } from "./views.js";
+import { renderApp, resyncChatScroll, tryPatchChat, tryRestoreScrollAnchor } from "./views.js";
 
 let scheduled = false;
 
@@ -244,7 +244,16 @@ function actuallyRender(): void {
 
   const newBody = root.querySelector<HTMLElement>(".chat-body");
   if (newBody) {
-    if (oldScrollTop !== null) {
+    // requestFullHistory (routing.ts) rebuilds the log from scratch —
+    // brand-new LogItem objects, typically MORE history above what was
+    // previously loaded — so the raw scrollTop captured above no longer
+    // points at the same message; that's the "random place" a full
+    // reload used to land on. tryRestoreScrollAnchor (views.ts) is also
+    // called from tryPatchChat's patch path — the log reset can start
+    // matching that path's structural check before any replay content
+    // has arrived, well before this teardown branch would otherwise be
+    // the one to find it.
+    if (!tryRestoreScrollAnchor(newBody) && oldScrollTop !== null) {
       newBody.scrollTop = oldScrollTop;
     }
     if (state.current) {

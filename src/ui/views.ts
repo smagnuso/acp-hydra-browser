@@ -1738,6 +1738,33 @@ function ensureChatView(c: ChatState): ChatView {
     composerSlot.addEventListener("touchend", finish, { passive: true });
     composerSlot.addEventListener("touchcancel", finish, { passive: true });
   }
+  // Touch affordance for scrollToTurn (Cmd/Ctrl+PageUp/Down's mobile
+  // equivalent — no modifier keys on a phone keyboard to bind to).
+  // position:absolute against .chat (not the scrolling .chat-body), so
+  // it floats over the transcript rather than scrolling with it — same
+  // reasoning as jump-to-latest, just not scroll-position-gated: unlike
+  // "back at the bottom already, nothing to jump to", there's no cheap
+  // way to know in advance whether a press would have anywhere to go,
+  // and scrollToTurn already degrades to a harmless plain page when it
+  // doesn't.
+  const turnNavPrev = el(
+    "button",
+    {
+      class: "turn-nav turn-nav-prev",
+      ...tapHandler(() => scrollToTurn("prev")),
+      title: "Previous turn (Cmd/Ctrl+PageUp)",
+    },
+    "▲",
+  );
+  const turnNavNext = el(
+    "button",
+    {
+      class: "turn-nav turn-nav-next",
+      ...tapHandler(() => scrollToTurn("next")),
+      title: "Next turn (Cmd/Ctrl+PageDown)",
+    },
+    "▼",
+  );
   const root = el(
     "div",
     { class: "chat" },
@@ -1745,6 +1772,8 @@ function ensureChatView(c: ChatState): ChatView {
     detailsSlot,
     armedSlot,
     body,
+    turnNavPrev,
+    turnNavNext,
     composerSlot,
   );
   view = {
@@ -1889,6 +1918,35 @@ function reconcileChatBody(c: ChatState, view: ChatView): void {
 // banner/modal/overlay in play. Skips the renderer's full teardown so
 // .chat-body (and scroll momentum, and any in-progress tap) survives.
 // Returns false when the situation calls for the teardown path.
+// requestFullHistory's landing spot (see ChatState.scrollRestoreMessageId
+// and routing.ts). Finds the bubble carrying the remembered wire
+// messageId and scrolls it into view, clearing the anchor on success.
+// Returns false (leaving the anchor set, untouched) when the message
+// hasn't rendered yet, so the caller falls back to its own default and
+// the NEXT render — teardown or patched, see the two call sites below —
+// tries again.
+//
+// Has to be called from both: chatViews reuses the same view.root node
+// identity across a history reset (only ChatState.log gets cleared, not
+// the WeakMap entry), so once the freshly-reset (empty) chat matches
+// tryPatchChat's structural check — which can be as early as the very
+// next render, before any replay content has even arrived — every
+// following render takes the patch path and skips renderer.ts's
+// teardown branch entirely. An anchor hook living only in the teardown
+// branch silently never fires, and the reload lands whichever way
+// oldScrollTop happens to settle — the bug this exists to fix.
+export function tryRestoreScrollAnchor(chatBody: HTMLElement): boolean {
+  const anchorId = state.current?.scrollRestoreMessageId;
+  if (!anchorId) return false;
+  const anchor = chatBody.querySelector<HTMLElement>(
+    `[data-message-id="${CSS.escape(anchorId)}"]`,
+  );
+  if (!anchor) return false;
+  anchor.scrollIntoView({ block: "start" });
+  state.current!.scrollRestoreMessageId = undefined;
+  return true;
+}
+
 export function tryPatchChat(root: HTMLElement, s: AppState): boolean {
   if (s.view !== "chat" || !s.current) {
     return false;
@@ -1922,12 +1980,14 @@ export function tryPatchChat(root: HTMLElement, s: AppState): boolean {
     }
     refreshRailInPlace(rail);
     renderChat(s.current);
+    tryRestoreScrollAnchor(view.body);
     return true;
   }
   if (root.childNodes.length !== 1 || root.firstChild !== view.root) {
     return false;
   }
   renderChat(s.current);
+  tryRestoreScrollAnchor(view.body);
   return true;
 }
 
@@ -1964,6 +2024,57 @@ export function jumpToBottom(c: ChatState): void {
   if (!view) return;
   view.stickToBottom = true;
   pinIfDue(view);
+}
+
+// Cmd/Ctrl+PageUp/PageDown: jump by TURN instead of by screen — same
+// idea as the TUI's Alt+PageUp/PageDown (screen.ts's scrollToPrevTurn/
+// scrollToNextTurn), one stop per press, landing each prompt flush with
+// the top of the viewport. Stops are exactly the user-prompt bubbles
+// currently in the DOM (any status — sent, queued, cancelled, all
+// count); past the oldest, land at the very top; past the newest, fall
+// through to the live tail (jumpToBottom's .chat-body scroll listener
+// re-arms stickToBottom on its own once the scroll settles there, same
+// as any other scroll-to-bottom). A log with no prompts at all (a bare
+// agent-initiated replay) has nothing to step between, so this falls
+// back to a plain page — same distance and behavior as the un-modified
+// key.
+export function scrollToTurn(direction: "prev" | "next"): void {
+  const chatBody = document.querySelector<HTMLElement>(".chat-body");
+  if (!chatBody) return;
+  const stops = Array.from(chatBody.querySelectorAll<HTMLElement>(".msg.user"));
+  if (stops.length === 0) {
+    const delta = chatBody.clientHeight * 0.9;
+    chatBody.scrollBy({ top: direction === "next" ? delta : -delta, behavior: "smooth" });
+    return;
+  }
+  const containerTop = chatBody.getBoundingClientRect().top;
+  const EPSILON = 1;
+  let target: HTMLElement | null = null;
+  if (direction === "prev") {
+    for (let i = stops.length - 1; i >= 0; i--) {
+      if (stops[i]!.getBoundingClientRect().top < containerTop - EPSILON) {
+        target = stops[i]!;
+        break;
+      }
+    }
+    if (target) {
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+    } else {
+      chatBody.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    return;
+  }
+  for (const stop of stops) {
+    if (stop.getBoundingClientRect().top > containerTop + EPSILON) {
+      target = stop;
+      break;
+    }
+  }
+  if (target) {
+    target.scrollIntoView({ block: "start", behavior: "smooth" });
+  } else {
+    chatBody.scrollTo({ top: chatBody.scrollHeight, behavior: "smooth" });
+  }
 }
 
 function renderChat(c: ChatState): HTMLElement {
@@ -2439,7 +2550,12 @@ function renderLogItem(item: ChatState["log"][number]): Node {
         ? "msg system"
         : "msg agent";
     const isCollapsed = isThought && collapsedThoughts.has(item);
-    const node = el("div", { class: isCollapsed ? cls + " collapsed" : cls });
+    // Survives a full-history reload (new LogItem objects, same wire
+    // messageId) — see requestFullHistory's scroll-restore anchor below.
+    const node = el("div", {
+      class: isCollapsed ? cls + " collapsed" : cls,
+      "data-message-id": item.messageId,
+    });
     if (isThought) {
       node.addEventListener("click", () => {
         const collapsing = !collapsedThoughts.has(item);

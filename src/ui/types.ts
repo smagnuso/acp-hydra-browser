@@ -475,6 +475,16 @@ export interface ChatState {
   // scrolled to the top of what's locally available. Cleared by
   // routing.ts's requestFullHistory once a genuine full replay lands.
   historyIsPartial?: boolean;
+  // messageId of the bubble that was topmost-visible right before
+  // requestFullHistory wiped and reloaded the log — a full replay
+  // rebuilds brand-new LogItem objects and typically has MORE history
+  // above what was previously loaded, so the old raw scrollTop lands on
+  // a different message entirely. bridge.ts's bridge/ready consumes
+  // this once the replay lands (scroll to the matching
+  // data-message-id, then clear it) and gives up silently if the
+  // message isn't found — no anchor is exactly today's behavior, not a
+  // regression.
+  scrollRestoreMessageId?: string;
 }
 
 export interface SessionModalData {

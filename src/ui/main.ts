@@ -9,7 +9,7 @@ import { initViewportHeight } from "./viewport.js";
 import { initWideLayoutWatcher, isWideLayout } from "./dom.js";
 import { ensureServiceWorker, subscribeForPush } from "./notifications.js";
 import { reportPushEndpoint, reportVisibility } from "./bridge.js";
-import { handleListKeydown, focusListRail, closeModal } from "./views.js";
+import { handleListKeydown, focusListRail, closeModal, scrollToTurn } from "./views.js";
 import { state } from "./state.js";
 import { initTheme } from "./theme.js";
 
@@ -143,6 +143,13 @@ window.addEventListener("keydown", (e) => {
   const chatBody = document.querySelector<HTMLElement>(".chat-body");
   if (!chatBody) return;
   e.preventDefault();
+  // Cmd (Mac) or Ctrl (everywhere else) turns the same keys into a
+  // by-turn jump instead of a by-screen page — see views.ts's
+  // scrollToTurn for the TUI parity this mirrors.
+  if (e.metaKey || e.ctrlKey) {
+    scrollToTurn(e.key === "PageDown" ? "next" : "prev");
+    return;
+  }
   const delta = chatBody.clientHeight * 0.9;
   chatBody.scrollBy({ top: e.key === "PageDown" ? delta : -delta, behavior: "smooth" });
 });

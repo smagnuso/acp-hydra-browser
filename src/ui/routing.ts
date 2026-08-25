@@ -237,6 +237,22 @@ export function requestFullHistory(chat: ChatState): void {
   if (state.current !== chat) {
     return;
   }
+  // Remember which message was topmost on screen so renderer.ts can
+  // scroll back to it once the fresh replay lands, instead of leaving
+  // the user wherever the raw scrollTop happens to fall in a rebuilt
+  // (and likely now-longer) log. First bubble whose bottom edge is
+  // still below the container's top edge — i.e. not yet fully
+  // scrolled past.
+  const body = document.querySelector<HTMLElement>(".chat-body");
+  if (body) {
+    const containerTop = body.getBoundingClientRect().top;
+    for (const el of body.querySelectorAll<HTMLElement>("[data-message-id]")) {
+      if (el.getBoundingClientRect().bottom > containerTop) {
+        chat.scrollRestoreMessageId = el.dataset.messageId;
+        break;
+      }
+    }
+  }
   closeChatSocket();
   resetConnectionStateForReconnect(chat);
   resetChatHistoryState(chat);
