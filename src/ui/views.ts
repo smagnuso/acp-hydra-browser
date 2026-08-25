@@ -260,6 +260,7 @@ export function renderApp(root: HTMLElement, s: AppState): void {
     root.appendChild(renderSplitLayout(s));
   } else if (s.view === "list") {
     root.appendChild(renderTopbar());
+    root.appendChild(renderSessionSearch());
     root.appendChild(renderList());
   } else if (s.view === "chat" && s.current) {
     root.appendChild(renderChat(s.current));
@@ -308,7 +309,7 @@ export function renderApp(root: HTMLElement, s: AppState): void {
 // anything rail-relevant actually changed since the last one.
 
 function buildRailContents(): Node[] {
-  return [renderTopbar(), renderList()];
+  return [renderTopbar(), renderSessionSearch(), renderList()];
 }
 
 // The rail element itself — not its children — is what carries
@@ -329,8 +330,34 @@ function refreshRailInPlace(rail: HTMLElement): void {
   if (!isRailDirty()) return;
   const oldList = rail.querySelector<HTMLElement>(".list");
   const oldScrollTop = oldList ? oldList.scrollTop : null;
+  // replaceChildren destroys the focused node, and unlike a full #app
+  // teardown nothing else restores it on this path — so typing in the
+  // session filter (which marks the rail dirty on every keystroke, since
+  // it changes what the rail shows) would lose the caret each character.
+  // Same data-focus-key contract renderer.ts's actuallyRender uses.
+  const active = document.activeElement as HTMLElement | null;
+  const focusKey =
+    active && rail.contains(active) ? (active.dataset.focusKey ?? null) : null;
+  const selStart = focusKey ? (active as HTMLInputElement).selectionStart : null;
+  const selEnd = focusKey ? (active as HTMLInputElement).selectionEnd : null;
   rail.replaceChildren(...buildRailContents());
   markRailClean();
+  if (focusKey) {
+    const next = rail.querySelector<HTMLElement>(
+      `[data-focus-key="${CSS.escape(focusKey)}"]`,
+    );
+    if (next) {
+      next.focus();
+      const inputLike = next as HTMLInputElement;
+      if (selStart !== null && typeof inputLike.setSelectionRange === "function") {
+        try {
+          inputLike.setSelectionRange(selStart, selEnd!);
+        } catch {
+          // Non-text input types throw on selection access; ignore.
+        }
+      }
+    }
+  }
   if (oldScrollTop !== null) {
     const newList = rail.querySelector<HTMLElement>(".list");
     if (newList) newList.scrollTop = oldScrollTop;
@@ -389,6 +416,62 @@ export function focusListRail(): void {
 }
 
 // ---- Topbar ------------------------------------------------------
+
+// Sits between the topbar and the list, so it's outside .list's own
+// scroll container and stays put as the list scrolls. Carries a
+// data-focus-key: render() tears the whole tree down (poll ticks, WS
+// traffic), and without one the caret would be lost mid-word — see
+// renderer.ts's focus/selection restore.
+function renderSessionSearch(): HTMLElement {
+  const clear =
+    state.sessionSearch.length > 0
+      ? el(
+          "button",
+          {
+            class: "session-search-clear",
+            title: "Clear filter",
+            ...tapHandler(() => setState({ sessionSearch: "" })),
+          },
+          "×",
+        )
+      : null;
+  return el(
+    "div",
+    { class: "session-search-row" },
+    el("input", {
+      class: "session-search",
+      // Deliberately type=text, not type=search: the native search
+      // widget's own clear affordance varies by browser and would sit
+      // alongside ours.
+      type: "text",
+      placeholder: "Filter sessions…",
+      value: state.sessionSearch,
+      "data-focus-key": "session-search",
+      autocomplete: "off",
+      autocapitalize: "off",
+      autocorrect: "off",
+      spellcheck: "false",
+      oninput: (e: Event) => {
+        setState({ sessionSearch: (e.target as HTMLInputElement).value });
+      },
+      onkeydown: (e: KeyboardEvent) => {
+        if (e.key !== "Escape") return;
+        // Escape clears first and only gives up focus on a second
+        // press, so it can't strand a filter the user can no longer
+        // see the effect of. stopPropagation keeps the window-level
+        // list/modal Escape handlers out of it either way.
+        e.preventDefault();
+        e.stopPropagation();
+        if (state.sessionSearch.length > 0) {
+          setState({ sessionSearch: "" });
+        } else {
+          (e.target as HTMLInputElement).blur();
+        }
+      },
+    }),
+    clear,
+  );
+}
 
 function renderTopbar(): HTMLElement {
   return el(
@@ -492,6 +575,28 @@ function renderHostFilter(): HTMLElement {
 // renderList (which also needs raw `visible` for the empty-state check)
 // and flatVisibleSessionIds (keyboard nav needs the exact same set and
 // order the user is actually looking at).
+// Substring match across the same fields the TUI picker's `/` search
+// covers (cli/src/tui/picker.ts matchesSearch): id, upstream id, agent,
+// title and cwd. Case-insensitive, no fuzzy matching — typing a literal
+// fragment of a path or title is what people actually do, and fuzzy
+// matching makes short terms match almost everything.
+function matchesSessionSearch(s: SessionInfo, term: string): boolean {
+  if (term.length === 0) return true;
+  const t = term.toLowerCase();
+  const haystacks = [
+    shortSessionId(s.sessionId),
+    s.upstreamSessionId ?? "",
+    s.agentId ?? "",
+    s.title ?? "",
+    s.cwd,
+    // The cards display cwd home-shortened, so "~/dev/foo" has to match
+    // what the user can actually see. The TUI gets this from a real
+    // $HOME; we only have the path, so collapse the usual container.
+    s.cwd.replace(/^\/(?:home|Users)\/[^/]+/, "~"),
+  ];
+  return haystacks.some((h) => h.toLowerCase().includes(t));
+}
+
 function visibleFilteredSessions(): SessionInfo[] {
   let visible = state.showCold
     ? state.sessions
@@ -505,6 +610,10 @@ function visibleFilteredSessions(): SessionInfo[] {
       (s) =>
         s.importedFromMachine === state.hostFilter && !s.upstreamSessionId,
     );
+  }
+  const term = state.sessionSearch.trim();
+  if (term.length > 0) {
+    visible = visible.filter((v) => matchesSessionSearch(v, term));
   }
   return visible;
 }
@@ -641,7 +750,9 @@ function renderList(): HTMLElement {
   }
   if (visible.length === 0) {
     let msg: string;
-    if (state.sessions.length === 0) {
+    if (state.sessionSearch.trim().length > 0) {
+      msg = `No sessions match “${state.sessionSearch.trim()}”.`;
+    } else if (state.sessions.length === 0) {
       msg = "No sessions. Use + to create one, or run `hydra-acp launch <agent>` from your editor.";
     } else if (state.hostFilter === "__local") {
       msg = "No local sessions. Switch the host filter to see imported sessions.";
@@ -2679,6 +2790,12 @@ function renderLogItem(item: ChatState["log"][number]): Node {
       );
     }
     if (qe && qe.status === "editing") {
+      // A user bubble is a shrink-to-fit flex item sized by its text, so
+      // swapping that text for a textarea collapses it to the textarea's
+      // intrinsic width (~20 cols) — width:100% on the textarea can't
+      // recover it, since the parent it's 100% OF has already collapsed.
+      // This pins the bubble at its normal max width while editing.
+      node.classList.add("bubble-editing");
       // Inline editor over the queued bubble. Pre-fills with the
       // current text; Enter commits via hydra-acp/prompt/update,
       // Escape reverts. Disabled (and the entry returns to queued)
@@ -3038,10 +3155,20 @@ function renderQueueEditor(
 ): HTMLElement {
   const textarea = el("textarea", {
     class: "queue-edit-area",
-    rows: "3",
+    // rows=1 is a floor, not the intended size — autosize below grows it
+    // to fit. A fixed rows=3 made editing a long queued prompt happen
+    // through a 3-line porthole, much smaller than the bubble it
+    // replaced, with the surrounding text scrolled out of sight.
+    rows: "1",
     autocapitalize: "off",
   }) as HTMLTextAreaElement;
   textarea.value = entry.text;
+  // Same trick the composer uses: collapse, then adopt scrollHeight.
+  const autosize = (): void => {
+    textarea.style.height = "auto";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+  };
+  textarea.addEventListener("input", autosize);
   // Restore whatever the entry was before editing, not a hardcoded
   // "queued": an offline (held, never sent) entry promoted to "queued"
   // here would stop matching flushOfflineQueue and never get sent.
@@ -3073,6 +3200,9 @@ function renderQueueEditor(
   // Autofocus + place caret at end. Done in a microtask so the
   // textarea is in the DOM by the time we touch it.
   queueMicrotask(() => {
+    // Must run once attached — scrollHeight reads 0 while detached, so
+    // sizing here rather than at construction is load-bearing.
+    autosize();
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   });

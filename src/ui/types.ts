@@ -518,6 +518,11 @@ export interface AppState {
   defaultCwd: string | null;
   groupBy: "project" | "recent";
   showCold: boolean;
+  // Transient substring filter over the session list (the search box
+  // above it). Deliberately NOT persisted, mirroring the TUI picker's
+  // `/` search, which is dropped when the picker closes — a filter you
+  // forgot you left on is far more confusing than retyping it.
+  sessionSearch: string;
   // Hide agent_thought_chunk bubbles across every chat. Persisted
   // globally (not per-session) since it's a display preference, not
   // session state — thought chunks are still received and kept in

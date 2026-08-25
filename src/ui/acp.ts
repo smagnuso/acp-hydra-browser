@@ -1033,11 +1033,30 @@ function onPromptQueueAdded(params: AnyRecord): void {
     // entry this event was actually emitted for — the new entry then
     // sticks in "pending" forever, inflating every later send's ahead
     // count by one and compounding on each further mis-bind.
-    const awaiting = state.current.promptQueue.find(
+    //
+    // Among those, prefer the one whose text matches this event's own
+    // prompt, and only fall back to FIFO order when nothing matches.
+    // Position alone is not enough: the added events for two prompts
+    // sent in quick succession are not guaranteed to arrive in the
+    // order they were sent, and binding purely by position then staples
+    // the second prompt's messageId onto the first prompt's entry.
+    // Everything keyed off that mapping goes to the wrong bubble --
+    // queueByMessageId sends prompt_queue/updated's rewrite to the
+    // earlier bubble (observed as editing a queued prompt overwriting
+    // the in-flight one's text), while the entry that was actually
+    // skipped never binds at all, so stampBubbleMessageId and with it
+    // cacheOwnPromptFrame never run and that prompt is absent from the
+    // transcript after a reload. Identical texts are indistinguishable,
+    // but for those first-match IS FIFO, so the fallback is exact.
+    const awaitingCandidates = state.current.promptQueue.filter(
       (e) =>
         e.messageId === undefined &&
         (e.status === "pending" || e.status === "queued" || e.status === "editing"),
     );
+    const awaiting =
+      (eventText.length > 0
+        ? awaitingCandidates.find((e) => e.text === eventText)
+        : undefined) ?? awaitingCandidates[0];
     // Pass 2 (revival): nothing is awaiting a bind, so this event
     // describes a prompt whose ack we lost — the send reached the
     // daemon just before the socket died, and cancelUnboundQueued
