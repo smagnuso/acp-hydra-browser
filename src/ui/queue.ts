@@ -162,7 +162,7 @@ function dispatchPrompt(
     prompt: buildContentBlocks(text, attachments),
   });
   if (promptId !== undefined) {
-    c.ownPromptIds.add(String(promptId));
+    c.ownPromptIds.set(String(promptId), entry);
   }
   // "pending" means we believe nothing runs ahead of this prompt — its
   // turn is opening right now, so anchor its thinking block under the
@@ -219,7 +219,7 @@ export function flushOfflineQueue(c: ChatState): void {
       prompt: buildContentBlocks(entry.text, entry.attachments ?? []),
     });
     if (promptId !== undefined) {
-      c.ownPromptIds.add(String(promptId));
+      c.ownPromptIds.set(String(promptId), entry);
     }
     void removeOfflineEntry(c.sessionId, entry.id);
     // Re-seat now, which is correct and immediate whenever nothing was

@@ -145,7 +145,7 @@ export function openChat(sessionId: string, load: boolean): void {
       : "",
     promptQueue: [],
     queueByMessageId: new Map(),
-    ownPromptIds: new Set(),
+    ownPromptIds: new Map(),
     inTurn: false,
     idleListeners: [],
     readyListeners: [],
@@ -397,7 +397,7 @@ function resetConnectionStateForReconnect(chat: ChatState): void {
   // clientId, so it's no longer excluded from turn_complete fan-out as
   // the originator (see hydrateQueueFromSnapshot's comment), and the
   // bridge/ready busy=false reconciliation backstops even that.
-  chat.ownPromptIds = new Set();
+  chat.ownPromptIds = new Map();
   chat.idleListeners = [];
   chat.readyListeners = [];
   chat.nextId = undefined;

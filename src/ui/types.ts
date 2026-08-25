@@ -363,7 +363,12 @@ export interface ChatState {
   // the upstream session/attach response). Used to recognize our own
   // prompt_queue_added events.
   ownClientId?: string;
-  ownPromptIds: Set<string>;
+  // JSON-RPC id -> the queue entry that sent it. A Map, not a Set of
+  // ids: a session/prompt response only tells us THAT one of our
+  // prompts resolved, and the running turn must not be finalised on
+  // behalf of a queued prompt that resolved without ever running (see
+  // bridge.ts's response handling).
+  ownPromptIds: Map<string, QueueEntry>;
   inTurn: boolean;
   idleListeners: Array<() => void>;
   readyListeners: Array<() => void>;

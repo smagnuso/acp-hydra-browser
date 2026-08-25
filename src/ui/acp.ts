@@ -70,7 +70,7 @@ export function resetChatHistoryState(c: ChatState): void {
   c.recentOwnPrompts = [];
   c.promptQueue = [];
   c.queueByMessageId = new Map();
-  c.ownPromptIds = new Set();
+  c.ownPromptIds = new Map();
   c.inTurn = false;
   c.unsolicitedTurnOpen = new Set();
   c.currentPlanEntry = null;

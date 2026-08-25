@@ -359,6 +359,7 @@ export function handleFrame(frame: JsonRpcFrame): void {
     frame.id !== undefined &&
     state.current.ownPromptIds.has(String(frame.id))
   ) {
+    const entry = state.current.ownPromptIds.get(String(frame.id));
     state.current.ownPromptIds.delete(String(frame.id));
     // A live response (success or error) is proof of life, same as any
     // notification — see the matching check in acp.ts's
@@ -383,10 +384,31 @@ export function handleFrame(frame: JsonRpcFrame): void {
     const result = frame.result as { stopReason?: unknown } | undefined;
     const stopReason =
       typeof result?.stopReason === "string" ? result.stopReason : undefined;
-    // own=true: this response IS the end-of-turn signal for a turn we
-    // started, and the daemon sends us no turn_complete for it — see
-    // finalizeTurn.
-    finalizeTurn(stopReason, undefined, true);
+    // A response proves THIS prompt resolved — not that the live turn
+    // ended. Cancelling a queued prompt resolves its original
+    // session/prompt with stopReason "cancelled" (the daemon calls
+    // entry.resolve on the spliced-out entry), and that response is
+    // indistinguishable from the running turn's own by id alone. Left
+    // ungated it finalised whatever turn happened to be live: the
+    // running prompt's spinner froze into a "stopped (cancelled)"
+    // stamp and markIdleAndDrain declared the session idle, while the
+    // agent carried on and finished normally. Only the prompt that owns
+    // the live spinner may end the turn; anyone else just settles its
+    // own queue entry.
+    const owner = state.current.spinnerOwner;
+    const ownsLiveTurn =
+      entry === undefined ||
+      owner === undefined ||
+      owner === entry.id ||
+      (entry.messageId !== undefined && owner === entry.messageId);
+    if (ownsLiveTurn) {
+      // own=true: this response IS the end-of-turn signal for a turn we
+      // started, and the daemon sends us no turn_complete for it — see
+      // finalizeTurn.
+      finalizeTurn(stopReason, undefined, true);
+    } else if (stopReason === "cancelled" && entry.status !== "amended") {
+      entry.status = "cancelled";
+    }
     render();
     return;
   }
