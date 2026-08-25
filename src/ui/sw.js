@@ -17,12 +17,21 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// A no-op passthrough. Chrome's install-eligibility check wants a
-// fetch handler present, even though this worker does no offline
-// caching; without one, the install prompt doesn't show.
-self.addEventListener("fetch", (event) => {
-  event.respondWith(fetch(event.request));
-});
+// Chrome's install-eligibility check wants a fetch handler present,
+// even though this worker does no offline caching; without one, the
+// install prompt doesn't show. Registering the listener is enough — it
+// deliberately does NOT call respondWith, so every request falls
+// through to the network exactly as if no service worker existed.
+//
+// This used to be `event.respondWith(fetch(event.request))`, described
+// as a pure passthrough. It isn't: respondWith makes the worker the
+// responder, so a rejected fetch becomes a synthetic network-error
+// response plus an uncaught rejection in the worker, instead of the
+// ordinary failure the caller already handles. Any moment the server
+// is briefly unreachable (an extension restart, a dropped tailnet
+// link) surfaced as a hard ERR_FAILED and console noise rather than a
+// retryable poll error.
+self.addEventListener("fetch", () => {});
 
 // Payload shape is whatever turn-notify-callback.ts's sendPushToAll
 // sends: { title, body, url, tag }. No push subscription rides through
