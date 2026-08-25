@@ -293,6 +293,52 @@ export function cancelQueuedPrompt(entry: QueueEntry): void {
   render();
 }
 
+// Promote an accidentally-queued prompt into an amendment of the
+// running turn: steer the live turn with its content now instead of
+// waiting out the queue. The entry itself is repurposed as the
+// optimistic amend entry — same bubble, moved to the bottom (an
+// amendment is the newest user input), re-tagged with the "+" amend
+// marker — and its old queue slot is cancelled server-side. From there
+// it rides the exact composer-Amend plumbing (sendSteerRequest):
+// "injected" folds it into the live turn, "startedNewTurn" binds it to
+// the daemon's replacement entry via prompt_queue_added's
+// awaiting-FIFO pass, and a failure lands the text in the composer via
+// the shared rollback so nothing is lost.
+export function amendQueuedPrompt(entry: QueueEntry): void {
+  const c = state.current;
+  if (!c) return;
+  if (!c.daemonSupportsAmend || c.currentHeadMessageId === undefined) return;
+  if (entry.messageId === undefined || entry.status !== "queued") return;
+  // Same no-hold reasoning as amendPrompt: an amend targets a specific
+  // in-flight turn, so "retry when connectivity returns" has no
+  // sensible meaning. Leave the entry queued instead — that state is
+  // still valid — and let the user retry.
+  if (!c.connectionHealthy || !navigator.onLine || !c.ws || c.ws.readyState !== WebSocket.OPEN) {
+    setState({
+      banner: { kind: "warn", text: "Not connected — still queued, try again in a moment." },
+    });
+    return;
+  }
+  const target = c.currentHeadMessageId;
+  const oldMessageId = entry.messageId;
+  // Unmap before cancelling so the prompt_queue_removed{cancelled} echo
+  // for the old slot finds nothing and no-ops — the repurposed entry
+  // must never render as a struck-through cancelled bubble.
+  c.queueByMessageId.delete(oldMessageId);
+  entry.messageId = undefined;
+  entry.status = "pending";
+  entry.amendsMessageId = target;
+  entry.aheadAtEnqueue = 0;
+  reseatBubbleAtEnd(c, entry);
+  send("hydra-acp/prompt/cancel", {
+    sessionId: c.sessionId,
+    messageId: oldMessageId,
+  });
+  sendSteerRequest(entry, entry.text, target, entry.text);
+  jumpToBottom(c);
+  render();
+}
+
 // Rewrite a queued prompt's text. Same binding gate as cancel — only
 // possible once the entry has a messageId. If hydra returns
 // already_running, the entry is past the head and the edit won't take;

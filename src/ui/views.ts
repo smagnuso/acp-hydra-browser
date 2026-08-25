@@ -24,6 +24,7 @@ import {
 import { reportPushEndpoint, respondPermission } from "./bridge.js";
 import {
   amendPrompt,
+  amendQueuedPrompt,
   cancelProcessingPrompt,
   cancelQueuedPrompt,
   sendCancel,
@@ -2735,10 +2736,35 @@ function renderQueueChip(entry: QueueEntry): Node {
         ? "sending…"
         : `queued · ${Math.max(1, entry.aheadAtEnqueue)} ahead` +
           (entry.held ? " · held: agent resumed" : "");
+    // "Changed my mind — send it NOW as an amendment to the running
+    // turn" escape hatch for an accidental enqueue. Same gates as the
+    // composer's Amend button, plus a bound messageId (the server-side
+    // slot has to exist before it can be traded for a steer).
+    const canAmendNow =
+      entry.status === "queued" &&
+      entry.messageId !== undefined &&
+      state.current !== null &&
+      state.current.daemonSupportsAmend &&
+      state.current.currentHeadMessageId !== undefined &&
+      state.current.inTurn;
     return el(
       "div",
       { class: "queue-chip queue-queued" },
       el("span", null, label),
+      canAmendNow
+        ? el(
+            "button",
+            {
+              class: "queue-edit",
+              ...tapHandler(() => amendQueuedPrompt(entry)),
+              // "+" matches the amend badge the bubble gains once
+              // promoted (.amend-badge), so the button previews its
+              // own effect.
+              title: "Send now — amends the running turn instead of waiting",
+            },
+            el("span", { class: "queue-btn-glyph" }, "+"),
+          )
+        : null,
       el(
         "button",
         {
