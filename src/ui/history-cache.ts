@@ -127,9 +127,20 @@ function frameMessageId(frame: JsonRpcFrame): string | undefined {
 // Read a session's cached transcript and bump its LRU timestamp. Returns
 // null on a cache miss or any storage failure — always safe to treat the
 // same as "nothing cached".
+// Kill switch. Reading the cache is still producing transcripts that
+// drop content a full replay of the same session renders correctly, and
+// an unexplained corruption of what the user sees is worse than the cold
+// load this exists to avoid. Writes continue (so the write path can keep
+// being fixed and inspected); only hydration is bypassed, which makes
+// every session open take the verified-healthy full-replay path. Flip
+// back once the cache round-trip reproduces cleanly under
+// scripts/replay-debug.mts.
+const HISTORY_CACHE_READ_ENABLED = false;
+
 export async function loadCachedSession(
   sessionId: string,
 ): Promise<{ lastSeenMessageId?: string; frames: JsonRpcFrame[] } | null> {
+  if (!HISTORY_CACHE_READ_ENABLED) return null;
   const db = await openDb();
   if (!db) return null;
   return new Promise((resolve) => {
