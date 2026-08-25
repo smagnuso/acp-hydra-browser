@@ -179,18 +179,6 @@ pre code { background: transparent; padding: 0; }
 
 /* Chat */
 .chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-/* Floating prev/next-turn touch controls — see views.ts's scrollToTurn.
-   Anchored from the bottom (above the composer) rather than the top:
-   the chat-header's height swings a lot when its details panel /
-   armed-tasks list is showing, where the composer's is comparatively
-   stable, so bottom-anchoring drifts less. Exact offset is a first
-   guess pending on-device check — the composer's own height (a
-   multi-line draft grows it) isn't accounted for, so this may need
-   nudging same as the composer button spacing did. */
-.turn-nav { position: absolute; right: 0.6rem; width: 2.2rem; height: 2.2rem; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 0.9rem; line-height: 1; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.35); z-index: 5; }
-.turn-nav:hover { background: var(--panel); color: var(--fg); }
-.turn-nav-prev { bottom: 8rem; }
-.turn-nav-next { bottom: 5.4rem; }
 /* Persistent chrome slots around the reconciled .chat-body (views.ts
    ensureChatView). display:contents keeps their children participating
    in .chat's column flex directly, so the wrappers are layout-invisible. */
@@ -233,9 +221,26 @@ pre code { background: transparent; padding: 0; }
    (scrolling dead, taps still fine). Reproduces with zero app JS
    involved — pure scroll-chaining, not a render/pin timing bug. */
 .chat-body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 1rem max(1rem, calc(50% - 28rem)); display: flex; flex-direction: column; gap: 0.65rem; }
-.jump-to-latest { display: none; position: sticky; bottom: 0.5rem; align-self: center; margin-top: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.82rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.35); }
-.jump-to-latest.visible { display: inline-flex; align-items: center; }
-.jump-to-latest:hover { background: var(--panel); }
+/* Scroll toolbar: appears only while scrolled away from the bottom
+   (see ensureChatView's scroll listener), same trigger and sticky
+   positioning as the original lone "Jump to latest" button — now a
+   row of three. Keeping it conditional (rather than always-on, which
+   is what made two earlier placements — floating over the transcript,
+   the chat header, the composer row — all feel cramped or accident-
+   prone) means it only takes up space when there's somewhere to jump
+   to. */
+.jump-to-latest { display: none; position: sticky; bottom: 0.1rem; align-self: center; margin-top: 0.5rem; gap: 0.4rem; }
+.jump-to-latest.visible { display: flex; align-items: center; }
+.jump-to-latest-btn { padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.82rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.35); display: inline-flex; align-items: center; }
+.jump-to-latest-btn:hover { background: var(--panel); }
+.jump-to-latest-btn.icon { padding: 0.35rem 0.7rem; }
+/* Live "Turn N of M" readout (views.ts's updateTurnToast) — sits
+   between the prev/next turn buttons. No visibility of its own; it
+   rides on jump-to-latest's scroll-driven show/hide above. Fixed
+   min-width (sized for "Turn 99 of 99") plus centered text keeps the
+   prev/next buttons from shifting sideways as the digit count changes
+   between updates. */
+.turn-toast { min-width: 4.5rem; padding: 0.35rem 0.5rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.82rem; text-align: center; white-space: nowrap; pointer-events: none; }
 .show-earlier { align-self: center; margin-bottom: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 0.82rem; cursor: pointer; }
 .show-earlier:hover { background: var(--panel); color: var(--fg); }
 .msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }

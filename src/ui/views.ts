@@ -1461,7 +1461,7 @@ const CHAT_LOG_RENDER_WINDOW = 200;
 interface ChatView {
   root: HTMLElement;
   body: HTMLElement;
-  jump: HTMLButtonElement;
+  jump: HTMLDivElement;
   headerSlot: HTMLElement;
   detailsSlot: HTMLElement;
   armedSlot: HTMLElement;
@@ -1501,6 +1501,12 @@ interface ChatView {
   // pins also emit scroll events, so this doubles as a self-debounce on
   // pin frequency.
   lastScrollAt: number;
+  // "Turn N of M" readout, live-updated as the current scroll position
+  // crosses turn boundaries (see updateTurnToast) — not just after a
+  // scrollToTurn jump. Visibility rides on the same .jump-to-latest
+  // parent as the prev/next buttons, so it only needs its own text kept
+  // current, no separate show/hide of its own.
+  turnToast: HTMLDivElement;
 }
 
 const PIN_HOLDOFF_MS = 450;
@@ -1539,18 +1545,54 @@ function ensureChatView(c: ChatState): ChatView {
   // Sticky as the last flex item so it floats at the bottom of the
   // visible scroll area without needing to track the composer's
   // (variable) height. Toggled on scroll directly — not through a full
-  // render(), which would tank scroll responsiveness.
-  const jump = el(
+  // render(), which would tank scroll responsiveness. Three buttons:
+  // prev/next-turn (touch equivalent of Cmd/Ctrl+PageUp/PageDown, no
+  // modifier keys on a phone keyboard — see scrollToTurn) alongside the
+  // original jump-to-bottom, all sharing this same "only while scrolled
+  // away from the bottom" visibility instead of being permanently on
+  // screen.
+  const jumpBottomBtn = el(
     "button",
     {
-      class: "jump-to-latest",
+      class: "jump-to-latest-btn",
       ...tapHandler(() => {
         body.scrollTop = body.scrollHeight;
         jump.classList.remove("visible");
       }),
     },
-    "↓ Jump to latest",
-  ) as HTMLButtonElement;
+    "↓ Bottom",
+  );
+  const turnPrevBtn = el(
+    "button",
+    {
+      class: "jump-to-latest-btn icon",
+      ...tapHandler(() => scrollToTurn("prev")),
+      title: "Previous turn (Cmd/Ctrl+PageUp)",
+    },
+    "▲",
+  );
+  const turnNextBtn = el(
+    "button",
+    {
+      class: "jump-to-latest-btn icon",
+      ...tapHandler(() => scrollToTurn("next")),
+      title: "Next turn (Cmd/Ctrl+PageDown)",
+    },
+    "▼",
+  );
+  // "Turn N of M" readout — see the ChatView.turnToast comment. Sits
+  // between the two turn buttons so it reads as "what those buttons
+  // just did," and shares their parent's show/hide (no opacity/timer
+  // of its own — see updateTurnToast).
+  const turnToast = el("div", { class: "turn-toast" }) as HTMLDivElement;
+  const jump = el(
+    "div",
+    { class: "jump-to-latest" },
+    turnPrevBtn,
+    turnToast,
+    turnNextBtn,
+    jumpBottomBtn,
+  ) as HTMLDivElement;
   let jumpVisibilityRaf = 0;
   body.addEventListener(
     "scroll",
@@ -1573,6 +1615,7 @@ function ensureChatView(c: ChatState): ChatView {
       jumpVisibilityRaf = requestAnimationFrame(() => {
         jumpVisibilityRaf = 0;
         jump.classList.toggle("visible", !atBottom);
+        updateTurnToast(body, turnToast);
       });
     },
     { passive: true },
@@ -1738,33 +1781,6 @@ function ensureChatView(c: ChatState): ChatView {
     composerSlot.addEventListener("touchend", finish, { passive: true });
     composerSlot.addEventListener("touchcancel", finish, { passive: true });
   }
-  // Touch affordance for scrollToTurn (Cmd/Ctrl+PageUp/Down's mobile
-  // equivalent — no modifier keys on a phone keyboard to bind to).
-  // position:absolute against .chat (not the scrolling .chat-body), so
-  // it floats over the transcript rather than scrolling with it — same
-  // reasoning as jump-to-latest, just not scroll-position-gated: unlike
-  // "back at the bottom already, nothing to jump to", there's no cheap
-  // way to know in advance whether a press would have anywhere to go,
-  // and scrollToTurn already degrades to a harmless plain page when it
-  // doesn't.
-  const turnNavPrev = el(
-    "button",
-    {
-      class: "turn-nav turn-nav-prev",
-      ...tapHandler(() => scrollToTurn("prev")),
-      title: "Previous turn (Cmd/Ctrl+PageUp)",
-    },
-    "▲",
-  );
-  const turnNavNext = el(
-    "button",
-    {
-      class: "turn-nav turn-nav-next",
-      ...tapHandler(() => scrollToTurn("next")),
-      title: "Next turn (Cmd/Ctrl+PageDown)",
-    },
-    "▼",
-  );
   const root = el(
     "div",
     { class: "chat" },
@@ -1772,8 +1788,6 @@ function ensureChatView(c: ChatState): ChatView {
     detailsSlot,
     armedSlot,
     body,
-    turnNavPrev,
-    turnNavNext,
     composerSlot,
   );
   view = {
@@ -1788,6 +1802,7 @@ function ensureChatView(c: ChatState): ChatView {
     touchActive: false,
     lastTouchEndAt: 0,
     lastScrollAt: 0,
+    turnToast,
   };
   chatViews.set(c, view);
   return view;
@@ -2026,6 +2041,31 @@ export function jumpToBottom(c: ChatState): void {
   pinIfDue(view);
 }
 
+// Live "Turn N of M" position readout, recomputed on every scroll event
+// (see the .chat-body scroll listener in ensureChatView) so it tracks
+// manual scrolling the same as it tracks scrollToTurn jumps — not a
+// one-shot toast. Turn N is the last user-prompt bubble at or above the
+// viewport's top edge; "Start" once scrolled above the first one
+// entirely. Visibility itself isn't this function's job — it shares
+// jump's own show/hide, which is already gated on scroll position.
+export function updateTurnToast(chatBody: HTMLElement, toast: HTMLElement): void {
+  const stops = Array.from(chatBody.querySelectorAll<HTMLElement>(".msg.user"));
+  if (stops.length === 0) {
+    toast.textContent = "";
+    return;
+  }
+  const containerTop = chatBody.getBoundingClientRect().top;
+  const EPSILON = 1;
+  let idx = -1;
+  for (let i = stops.length - 1; i >= 0; i--) {
+    if (stops[i]!.getBoundingClientRect().top < containerTop + EPSILON) {
+      idx = i;
+      break;
+    }
+  }
+  toast.textContent = idx === -1 ? "Start" : `Turn ${idx + 1} of ${stops.length}`;
+}
+
 // Cmd/Ctrl+PageUp/PageDown: jump by TURN instead of by screen — same
 // idea as the TUI's Alt+PageUp/PageDown (screen.ts's scrollToPrevTurn/
 // scrollToNextTurn), one stop per press, landing each prompt flush with
@@ -2036,8 +2076,7 @@ export function jumpToBottom(c: ChatState): void {
 // re-arms stickToBottom on its own once the scroll settles there, same
 // as any other scroll-to-bottom). A log with no prompts at all (a bare
 // agent-initiated replay) has nothing to step between, so this falls
-// back to a plain page — same distance and behavior as the un-modified
-// key.
+// back to a plain page.
 export function scrollToTurn(direction: "prev" | "next"): void {
   const chatBody = document.querySelector<HTMLElement>(".chat-body");
   if (!chatBody) return;
@@ -2047,32 +2086,45 @@ export function scrollToTurn(direction: "prev" | "next"): void {
     chatBody.scrollBy({ top: direction === "next" ? delta : -delta, behavior: "smooth" });
     return;
   }
+  const view = state.current ? chatViews.get(state.current) : undefined;
   const containerTop = chatBody.getBoundingClientRect().top;
   const EPSILON = 1;
   let target: HTMLElement | null = null;
+  let targetIdx = -1;
   if (direction === "prev") {
     for (let i = stops.length - 1; i >= 0; i--) {
       if (stops[i]!.getBoundingClientRect().top < containerTop - EPSILON) {
         target = stops[i]!;
+        targetIdx = i;
         break;
       }
     }
     if (target) {
       target.scrollIntoView({ block: "start", behavior: "smooth" });
+      // Smooth scrolling hasn't moved yet on this same tick, so
+      // updateTurnToast would still read the OLD position — set the
+      // known answer directly for instant feedback; the scroll listener
+      // takes over (and stays in sync) once the animation is underway.
+      if (view) view.turnToast.textContent = `Turn ${targetIdx + 1} of ${stops.length}`;
     } else {
       chatBody.scrollTo({ top: 0, behavior: "smooth" });
+      if (view) view.turnToast.textContent = "Start";
     }
     return;
   }
-  for (const stop of stops) {
-    if (stop.getBoundingClientRect().top > containerTop + EPSILON) {
-      target = stop;
+  for (let i = 0; i < stops.length; i++) {
+    if (stops[i]!.getBoundingClientRect().top > containerTop + EPSILON) {
+      target = stops[i]!;
+      targetIdx = i;
       break;
     }
   }
   if (target) {
     target.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (view) view.turnToast.textContent = `Turn ${targetIdx + 1} of ${stops.length}`;
   } else {
+    // Landing at the live tail hides jump (and the toast with it) once
+    // the scroll settles — nothing to set here.
     chatBody.scrollTo({ top: chatBody.scrollHeight, behavior: "smooth" });
   }
 }
