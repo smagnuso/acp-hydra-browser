@@ -164,6 +164,33 @@ function stampBubbleMessageId(entry: QueueEntry): void {
 // carries the real messageId, so if a later full replay delivers the
 // daemon's own copy, mergeAndTrim's messageId dedup collapses the two
 // rather than double-rendering the prompt.
+// Synthesises the turn_complete the daemon withheld from us (see
+// finalizeTurn's `own` note). Keyed off the owning prompt's messageId so
+// the id is deterministic: replaying this frame twice is harmless —
+// freezeSpinner is a no-op once the spinner is already frozen — but a
+// random id per call would accumulate a fresh copy in the cache on every
+// merge, which the messageId dedup could never collapse.
+function cacheOwnTurnCompleteFrame(stopReason?: string, endedAt?: number): void {
+  const owner = state.current?.spinnerOwner;
+  if (!state.current || owner === undefined) return;
+  queueFrameForCache(
+    state.current.sessionId,
+    {
+      method: "session/update",
+      params: {
+        sessionId: state.current.sessionId,
+        update: {
+          sessionUpdate: "turn_complete",
+          messageId: `${owner}:turn_complete`,
+          ...(stopReason !== undefined ? { stopReason } : {}),
+        },
+        _meta: { "hydra-acp": { recordedAt: endedAt ?? Date.now() } },
+      },
+    },
+    `${owner}:turn_complete`,
+  );
+}
+
 function cacheOwnPromptFrame(entry: QueueEntry): void {
   if (!state.current || entry.messageId === undefined) return;
   queueFrameForCache(
@@ -650,8 +677,26 @@ function onToolCallUpdate(update: AnyRecord): void {
 // mid-flight-cancel case the TUI already flags loudly (app.ts's
 // "stopped (<reason>)" treatment) — the browser previously had no
 // equivalent, so a cancelled turn looked identical to a completed one.
-export function finalizeTurn(stopReason?: string, endedAt?: number): void {
+// `own` marks the one caller that finalises a turn WE started, driven by
+// the session/prompt response rather than a turn_complete notification —
+// the daemon excludes the originator from turn_complete fan-out exactly
+// as it does prompt_received, so no frame arrives and nothing would
+// otherwise be cached. Left alone, a reload rebuilds these turns with no
+// end: the spinner replays still-running and only gets closed out at
+// bridge/ready against Date.now(), stamping a duration measured from the
+// original turn's start to right now. That's the source of nonsense
+// stamps like "thought · 30m 36s" on a turn that took seconds, and of
+// the shortfall in cached turn-stamps (52) against real ones (80).
+// Mirrors cacheOwnPromptFrame; see the exclusion note there.
+export function finalizeTurn(
+  stopReason?: string,
+  endedAt?: number,
+  own = false,
+): void {
   if (!state.current) return;
+  if (own) {
+    cacheOwnTurnCompleteFrame(stopReason, endedAt);
+  }
   // Freeze the live spinner in place into a permanent turn-stamp,
   // timing the turn with the daemon's recordedAt when the caller has
   // one (replayed turn_completes carry it — real durations even for

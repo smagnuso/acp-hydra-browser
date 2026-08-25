@@ -383,7 +383,10 @@ export function handleFrame(frame: JsonRpcFrame): void {
     const result = frame.result as { stopReason?: unknown } | undefined;
     const stopReason =
       typeof result?.stopReason === "string" ? result.stopReason : undefined;
-    finalizeTurn(stopReason);
+    // own=true: this response IS the end-of-turn signal for a turn we
+    // started, and the daemon sends us no turn_complete for it — see
+    // finalizeTurn.
+    finalizeTurn(stopReason, undefined, true);
     render();
     return;
   }
