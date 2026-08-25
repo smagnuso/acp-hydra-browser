@@ -128,6 +128,24 @@ function insertAboveQueued(item: LogItem): void {
   state.current.log.splice(queuedBoundary(), 0, item);
 }
 
+// Copy a just-bound entry's messageId onto its log bubble. Bubbles
+// created at dispatch time (queue.ts) can't carry one — the daemon
+// hasn't assigned it yet — but the replay-dedup guards (pushChunk,
+// onPromptReceived) match by item.messageId, so an unstamped bubble is
+// invisible to them: a reconnect delta redelivering prompt_received for
+// an in-flight own prompt then re-renders it as a duplicate bubble at
+// the bottom of the log (observed live, complete with a freeze-then-new
+// spinner churn). Stamping at every bind site closes that hole.
+function stampBubbleMessageId(entry: QueueEntry): void {
+  if (!state.current || entry.messageId === undefined) return;
+  for (const item of state.current.log) {
+    if (item.kind === "stream" && item.queueEntry === entry) {
+      item.messageId = entry.messageId;
+      return;
+    }
+  }
+}
+
 // The turn-layout model (mirrors cli's tui/app.ts startToolsBlock):
 //
 //   [history][prompt][spinner][this turn's content …][queued tail]
@@ -308,10 +326,15 @@ function extractToolContent(content: unknown): string {
 // The canonical spinner is anchored by startTurnSpinner when a turn's
 // opening prompt is seen; this covers activity with no observed opener
 // (mid-turn delta reconnect that skipped the prompt frame, an
-// agent-initiated turn) by anchoring at the current bottom with a
-// best-effort clock. bridge.ts's turnStartedAt handling corrects the
-// clock at attach when the daemon knows better.
-export function ensureSpinner(): void {
+// agent-initiated turn) by anchoring at the current bottom. `startedAt`
+// is the triggering frame's daemon recordedAt when the caller has one —
+// load-bearing during replay: an anonymous spinner opened at
+// Date.now() but frozen by a replayed turn_ended's recordedAt (in the
+// past) computes a negative elapsed and stamps a bogus "thought · 0s";
+// observed live as a wall of 0s stamps, one per replayed
+// agent-initiated turn. bridge.ts's turnStartedAt handling further
+// corrects the clock at attach when the daemon knows better.
+export function ensureSpinner(startedAt?: number): void {
   if (!state.current) return;
   const c = state.current;
   if (c.spinner) {
@@ -322,7 +345,11 @@ export function ensureSpinner(): void {
     }
     return;
   }
-  c.spinner = { toolCallIds: [], expanded: false, startedAt: Date.now() };
+  c.spinner = {
+    toolCallIds: [],
+    expanded: false,
+    startedAt: startedAt ?? Date.now(),
+  };
   c.spinnerOwner = undefined;
   insertAboveQueued({ kind: "spinner", spinner: c.spinner });
 }
@@ -649,6 +676,30 @@ function onPromptReceived(update: AnyRecord, recordedAt?: number): void {
   if (consumeOwnPromptEcho({ text })) {
     return;
   }
+  // Bind-agnostic own-echo guard for the window the two checks above
+  // both miss: an own prompt whose prompt_queue_added never arrived
+  // (socket died first — no messageId anywhere) and whose
+  // recentOwnPrompts echo entry has aged out of its 60s window (long
+  // turns easily outlive it across a reconnect). If an own in-flight
+  // entry carries this exact text, this frame is its echo, not a new
+  // prompt: adopt the messageId onto the entry + bubble instead of
+  // rendering a duplicate at the bottom of the log.
+  const inFlightTwin = state.current.promptQueue.find(
+    (e) =>
+      e.text === text &&
+      (e.status === "pending" || e.status === "queued" || e.status === "processing"),
+  );
+  if (inFlightTwin) {
+    if (messageId !== undefined && inFlightTwin.messageId === undefined) {
+      inFlightTwin.messageId = messageId;
+      state.current.queueByMessageId.set(messageId, inFlightTwin);
+      stampBubbleMessageId(inFlightTwin);
+      if (state.current.spinnerOwner === inFlightTwin.id) {
+        state.current.spinnerOwner = messageId;
+      }
+    }
+    return;
+  }
   // Sibling or replayed prompt — insert above any waiting-queued
   // bubbles so it joins the live conversation flow, not the trailing
   // queue. closeOpenStream first so any in-flight agent stream is
@@ -732,6 +783,7 @@ export function hydrateQueueFromSnapshot(snapshot: unknown[]): void {
     if (revivable) {
       revivable.messageId = messageId;
       state.current.queueByMessageId.set(messageId, revivable);
+      stampBubbleMessageId(revivable);
       revivable.aheadAtEnqueue = Math.max(0, position);
       revivable.status = position === 0 ? "processing" : "queued";
       if (position === 0) {
@@ -882,6 +934,14 @@ function onPromptQueueAdded(params: AnyRecord): void {
     }
     unbound.messageId = messageId;
     state.current.queueByMessageId.set(messageId, unbound);
+    stampBubbleMessageId(unbound);
+    // The spinner opened for this prompt at dispatch was owner-tagged
+    // with the local entry id (no messageId existed yet). Upgrade the
+    // tag now so the stale-completion guard in the turn_complete
+    // handler can compare it against completing messageIds.
+    if (state.current.spinnerOwner === unbound.id) {
+      state.current.spinnerOwner = messageId;
+    }
     if (amendingTarget !== undefined) {
       unbound.amendsMessageId = amendingTarget;
       tagAmendedM1(amendingTarget, messageId);
@@ -974,6 +1034,7 @@ function onPromptQueueAdded(params: AnyRecord): void {
     text,
     closed: true,
     queueEntry: entry,
+    messageId,
   };
   if (position === 0) {
     // Peer is the new active turn — slot above any waiting-queued
@@ -1082,9 +1143,11 @@ function onPromptQueueRemoved(params: AnyRecord): void {
       (state.current.spinnerOwner === entry.id ||
         state.current.spinnerOwner === messageId);
     if (!owns) {
-      startTurnSpinner(undefined, entry.id);
+      startTurnSpinner(undefined, messageId);
     } else {
-      state.current.spinnerOwner = entry.id;
+      // Prefer the messageId form — the turn_complete stale-completion
+      // guard compares owner against completing messageIds.
+      state.current.spinnerOwner = messageId;
     }
     markActive();
   } else if (reason === "cancelled" || reason === "abandoned") {
@@ -1509,6 +1572,35 @@ export function handleNotification(frame: JsonRpcFrame): void {
       }
       const stopReason =
         typeof update.stopReason === "string" ? update.stopReason : undefined;
+      // Stale-completion guard: a reconnect delta can redeliver a
+      // turn_complete this client already processed, or deliver one for
+      // an older turn after a newer turn has opened its spinner.
+      // Finalizing then would freeze the LIVE turn's thinking block
+      // mid-flight (and a follow-up chunk would re-anchor a new one
+      // mid-transcript — the fossilized-spinner symptom). When the live
+      // spinner is owner-tagged with a bound messageId and this
+      // completion names a DIFFERENT message, it can't be the owner's
+      // end — ignore it for turn-teardown purposes. An anonymous or
+      // entry-id-tagged owner can't be verified, so those still accept
+      // the completion (best effort, matches prior behavior).
+      const owner = state.current?.spinnerOwner;
+      const ownerIsBoundMessage =
+        owner !== undefined &&
+        state.current !== null &&
+        (state.current.queueByMessageId.has(owner) ||
+          state.current.log.some(
+            (e) =>
+              e.kind === "stream" && e.role === "user" && e.messageId === owner,
+          ));
+      if (
+        updateMessageId !== undefined &&
+        owner !== undefined &&
+        state.current?.spinner &&
+        owner !== updateMessageId &&
+        ownerIsBoundMessage
+      ) {
+        break;
+      }
       finalizeTurn(stopReason, recordedAt);
       break;
     }
@@ -1583,12 +1675,11 @@ export function handleNotification(frame: JsonRpcFrame): void {
       break;
   }
   // After per-case dispatch, surface a "still working" spinner if the
-  // turn is active. Once present it doubles as the structural anchor
-  // for active content (see activeBoundary) — new items insert above
-  // it, so it stays at the bottom of the turn without ever being moved.
-  // finalizeTurn drops it at the end of the turn.
+  // turn is active (see the turn-layout model above). Threading the
+  // frame's recordedAt keeps a replay-minted fallback spinner on the
+  // daemon's clock. finalizeTurn freezes it at the end of the turn.
   if (state.current?.inTurn) {
-    ensureSpinner();
+    ensureSpinner(recordedAt);
   }
 }
 
