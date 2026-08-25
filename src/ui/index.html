@@ -227,7 +227,7 @@ pre code { background: transparent; padding: 0; }
 .show-earlier { align-self: center; margin-bottom: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 0.82rem; cursor: pointer; }
 .show-earlier:hover { background: var(--panel); color: var(--fg); }
 .msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }
-.msg.user { background: var(--user-bg); border: 1px solid var(--border); align-self: flex-end; max-width: 70%; }
+.msg.user { background: var(--user-bg); border: 1px solid var(--border); align-self: flex-end; max-width: 90%; }
 .msg.agent { background: var(--agent-bg); border: 1px solid var(--border); align-self: flex-start; max-width: 90%; }
 .msg.system { background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; align-self: flex-start; max-width: 70%; cursor: pointer; }
 .msg.system.collapsed .body { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
@@ -256,6 +256,11 @@ pre code { background: transparent; padding: 0; }
 .spinner ul { margin: 0.4rem 0 0; padding-left: 1rem; font-size: 0.85rem; color: var(--fg); }
 .spinner li { margin: 0.15rem 0; display: flex; gap: 0.4rem; align-items: center; }
 .spinner li .icon { font-family: ui-monospace, monospace; }
+/* Frozen turn-duration marker a spinner turns into at turn end — dim
+   text, no box, sits under the prompt it timed (see acp.ts's
+   turn-layout model). */
+.turn-stamp { align-self: stretch; color: var(--muted); font-size: 0.8rem; padding: 0 0.25rem; }
+.turn-stamp.bad { color: var(--bad); font-weight: 600; }
 
 .toolcard { background: var(--tool-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0; align-self: stretch; }
 .toolcard .head { padding: 0.5rem 0.75rem; display: flex; gap: 0.5rem; align-items: center; cursor: pointer; }

@@ -15,7 +15,12 @@
 import { state, setState } from "./state.js";
 import { render } from "./renderer.js";
 import { notify, send } from "./bridge.js";
-import { ensureSpinner, markActive, reseatBubbleAtEnd } from "./acp.js";
+import {
+  ensureSpinner,
+  markActive,
+  reseatBubbleAtEnd,
+  startTurnSpinner,
+} from "./acp.js";
 import { jumpToBottom } from "./views.js";
 import { clearDraft, queueDraftWrite } from "./composer-draft.js";
 import { removeOfflineEntry, saveOfflineEntry } from "./offline-queue.js";
@@ -159,7 +164,20 @@ function dispatchPrompt(
   if (promptId !== undefined) {
     c.ownPromptIds.add(String(promptId));
   }
-  ensureSpinner();
+  // "pending" means we believe nothing runs ahead of this prompt — its
+  // turn is opening right now, so anchor its thinking block under the
+  // bubble just pushed (startTurnSpinner freezes any stale predecessor
+  // in place first). Owner-tagged so the eventual
+  // prompt_queue/removed{started} for this same prompt doesn't
+  // double-open; if the daemon instead demotes it to queued (a turn
+  // was really still running), the pending→queued flip discards this
+  // spinner as a false start. A "queued" send changes nothing about
+  // the running turn, so it just keeps whatever marker is live.
+  if (entry.status === "pending") {
+    startTurnSpinner(undefined, entry.id);
+  } else {
+    ensureSpinner();
+  }
   markActive();
   jumpToBottom(c);
   if (opts.addToHistory ?? true) {
@@ -178,6 +196,9 @@ function dispatchPrompt(
 // entry gets created for what the user already sees on screen.
 export function flushOfflineQueue(c: ChatState): void {
   let flushed = false;
+  // First flushed entry that went out believing it's next up — the one
+  // whose turn is opening; later ones queue behind it.
+  let opener: QueueEntry | null = null;
   for (const entry of c.promptQueue) {
     if (entry.status !== "offline") continue;
     if (!c.ws || c.ws.readyState !== WebSocket.OPEN) break;
@@ -190,6 +211,9 @@ export function flushOfflineQueue(c: ChatState): void {
     const ahead = ownActive + (peerInFlight ? 1 : 0);
     entry.aheadAtEnqueue = ahead;
     entry.status = ahead > 0 ? "queued" : "pending";
+    if (!opener && entry.status === "pending") {
+      opener = entry;
+    }
     const promptId = send("session/prompt", {
       sessionId: c.sessionId,
       prompt: buildContentBlocks(entry.text, entry.attachments ?? []),
@@ -212,7 +236,14 @@ export function flushOfflineQueue(c: ChatState): void {
     }
   }
   if (flushed) {
-    ensureSpinner();
+    // Same open/keep split as dispatchPrompt: a pending head opens its
+    // turn's thinking block under its bubble; queued-behind flushes
+    // leave the running turn's marker alone.
+    if (opener) {
+      startTurnSpinner(undefined, opener.id);
+    } else {
+      ensureSpinner();
+    }
     markActive();
   }
 }

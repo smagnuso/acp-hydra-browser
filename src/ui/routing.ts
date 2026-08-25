@@ -342,6 +342,20 @@ function resetConnectionStateForReconnect(chat: ChatState): void {
   chat.ready = false;
   chat.pendingRequestById = new Map();
   chat.responseHandlers = new Map();
+  // JSON-RPC responses can't cross sockets, so an id awaiting its
+  // session/prompt response is unresolvable the moment the connection
+  // dies — and worse than useless to keep: nextId (below) restarts at 1
+  // per connection, so the new socket re-issues the same small ids and
+  // the first response to ANY request on it can false-match a stale
+  // entry, firing a phantom finalizeTurn mid-turn. That tears down the
+  // live spinner; the next streamed chunk re-creates it at what is then
+  // the bottom of the log, and it visibly fossilizes mid-transcript as
+  // the rest of the turn streams in below. The orphaned prompt's real
+  // turn-end still arrives: the reattached client carries a fresh
+  // clientId, so it's no longer excluded from turn_complete fan-out as
+  // the originator (see hydrateQueueFromSnapshot's comment), and the
+  // bridge/ready busy=false reconciliation backstops even that.
+  chat.ownPromptIds = new Set();
   chat.idleListeners = [];
   chat.readyListeners = [];
   chat.nextId = undefined;

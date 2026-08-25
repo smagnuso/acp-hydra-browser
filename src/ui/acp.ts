@@ -77,6 +77,23 @@ export function resetChatHistoryState(c: ChatState): void {
   c.ownClientId = undefined;
   c.currentHeadMessageId = undefined;
   c.lastSeenMessageId = undefined;
+  c.spinnerOwner = undefined;
+}
+
+// Daemon-stamped record time (PROTOCOL.md, params._meta["hydra-acp"]
+// .recordedAt). Present on recorded kinds, live and replayed alike;
+// absent on state kinds and pre-field daemons — callers fall back to
+// Date.now(). This is what lets a replayed turn's stamp show its real
+// duration instead of measuring the replay. Mirrors cli's
+// extractRecordedAt.
+function extractRecordedAt(params: unknown): number | undefined {
+  if (!params || typeof params !== "object") return undefined;
+  const meta = (params as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const inner = (meta as Record<string, unknown>)["hydra-acp"];
+  if (!inner || typeof inner !== "object") return undefined;
+  const at = (inner as { recordedAt?: unknown }).recordedAt;
+  return typeof at === "number" && Number.isFinite(at) ? at : undefined;
 }
 
 // True for bubbles representing a prompt still waiting in the queue.
@@ -110,6 +127,31 @@ function insertAboveQueued(item: LogItem): void {
   if (!state.current) return;
   state.current.log.splice(queuedBoundary(), 0, item);
 }
+
+// The turn-layout model (mirrors cli's tui/app.ts startToolsBlock):
+//
+//   [history][prompt][spinner][this turn's content …][queued tail]
+//
+// A spinner is anchored once, directly under the prompt that opened its
+// turn (startTurnSpinner), and NEVER moves afterwards — the turn's
+// content streams in below it via insertAboveQueued. At turn end
+// (finalizeTurn) it freezes in place into a "turn-stamp" recording how
+// long the turn took, the TUI's frozen "thought · Xs" block. If a new
+// turn opens while a spinner is still live (its end was never seen),
+// the old one freezes where it stands and a fresh one anchors under
+// the new prompt — freeze-then-new, no repositioning.
+//
+// Replay and live traffic take the SAME path: recorded frames carry
+// the daemon's recordedAt (extractRecordedAt above), so replayed turns
+// stamp their real durations, and a turn still in flight at replay end
+// simply keeps its spinner live — which is exactly what makes the
+// thinking block survive a mid-turn page reload.
+//
+// One residual repair: the queued boundary is computed from bubble
+// STATUS, and status changes over time (pending → queued). Content
+// spliced under one regime can strand when a later flip moves the
+// boundary past it, so the pending→queued flip in onPromptQueueAdded
+// moves the BUBBLE below the content that accumulated under it.
 
 // ---- inTurn signal ------------------------------------------------
 
@@ -149,17 +191,19 @@ export function pushChunk(
   role: "user" | "agent" | "thought",
   content: unknown,
   synthetic = false,
+  messageId?: string,
 ): void {
   if (!state.current) return;
   const text = contentToText(content);
   if (!text) return;
   const log = state.current.log;
-  // Active-turn content has to land above any waiting-queued bubbles
-  // (so the previous turn's response stays attached to its prompt
-  // instead of sliding below the queued ones). Scan backward from the
-  // queued boundary, skipping spinners — the spinner is a transient
-  // marker that shouldn't break streaming-chunk merging into the open
-  // bubble below it.
+  // Active-turn content lands above any waiting-queued bubbles (so the
+  // turn's output stays attached to its prompt and queued prompts trail
+  // at the bottom) and BELOW the spinner, which sits under the prompt
+  // (see the turn-layout model above). Scan backward from the boundary
+  // for the merge target, skipping spinners — right after a turn starts
+  // the spinner is the only thing between the boundary and the prompt,
+  // and it shouldn't break chunk merging.
   const boundary = queuedBoundary();
   let last: LogItem | undefined;
   for (let i = boundary - 1; i >= 0; i--) {
@@ -179,7 +223,28 @@ export function pushChunk(
     last.text += text;
     return;
   }
-  log.splice(boundary, 0, { kind: "stream", role, text, synthetic: synthetic || undefined });
+  // A reconnect's afterMessageId delta replay landing on top of content
+  // this tab already rendered re-delivers the same messageId — observed
+  // live as a fully-formed message appearing a second time as its own
+  // bubble right after a flaky-network reconnect. A still-streaming
+  // message's later chunks never reach this far (they hit the merge
+  // branch above, since that bubble isn't closed yet), so this only
+  // ever fires against a genuine repeat of an already-finished message.
+  if (
+    messageId &&
+    log.some(
+      (e) => e.kind === "stream" && e.role === role && e.closed && e.messageId === messageId,
+    )
+  ) {
+    return;
+  }
+  log.splice(boundary, 0, {
+    kind: "stream",
+    role,
+    text,
+    synthetic: synthetic || undefined,
+    messageId,
+  });
 }
 
 // Mark the most recent OPEN stream entry as closed so a subsequent
@@ -239,13 +304,13 @@ function extractToolContent(content: unknown): string {
   return "";
 }
 
-// Make sure a spinner item is present in the log. Doesn't move an
-// existing spinner — it stays where it was first posted, matching
-// slack's behavior of refreshing the same thread message in place.
-// Moving it broke streaming because pushChunk then saw the spinner as
-// the most recent entry and refused to merge new chunks into the
-// open agent bubble below it. (pushChunk now skips spinners when
-// looking for the merge target.)
+// Fallback: make sure SOME spinner exists while activity is flowing.
+// The canonical spinner is anchored by startTurnSpinner when a turn's
+// opening prompt is seen; this covers activity with no observed opener
+// (mid-turn delta reconnect that skipped the prompt frame, an
+// agent-initiated turn) by anchoring at the current bottom with a
+// best-effort clock. bridge.ts's turnStartedAt handling corrects the
+// clock at attach when the daemon knows better.
 export function ensureSpinner(): void {
   if (!state.current) return;
   const c = state.current;
@@ -257,7 +322,54 @@ export function ensureSpinner(): void {
     }
     return;
   }
-  c.spinner = { toolCallIds: [], expanded: false };
+  c.spinner = { toolCallIds: [], expanded: false, startedAt: Date.now() };
+  c.spinnerOwner = undefined;
+  insertAboveQueued({ kind: "spinner", spinner: c.spinner });
+}
+
+// Freeze the live spinner (if any) in place into a permanent
+// turn-stamp — the TUI's "thought · Xs" analogue. Position is wherever
+// the spinner was anchored: directly under the prompt whose turn it
+// timed. Shared by finalizeTurn (normal turn end) and startTurnSpinner
+// (a new turn opening implies the old one ended, at latest, now).
+function freezeSpinner(endedAt?: number, stopReason?: string): void {
+  if (!state.current) return;
+  const c = state.current;
+  const spinner = c.spinner;
+  if (spinner) {
+    const idx = c.log.findIndex((e) => e.kind === "spinner");
+    if (idx >= 0) {
+      c.log[idx] = {
+        kind: "turn-stamp",
+        elapsedMs: Math.max(0, (endedAt ?? Date.now()) - spinner.startedAt),
+        toolCount: spinner.toolCallIds.length,
+        stopReason,
+      };
+    }
+  }
+  c.spinner = null;
+  c.spinnerOwner = undefined;
+  c.log = c.log.filter((e) => e.kind !== "spinner");
+}
+
+// A turn just opened: freeze any live predecessor where it stands (its
+// end was never seen; it ended, at latest, when this turn began), then
+// anchor a fresh spinner at the queued boundary — directly under the
+// prompt bubble the caller just placed. `startedAt` is the opening
+// frame's daemon recordedAt when known (replay gets real durations),
+// else now. `owner` identifies the opening prompt so a later
+// prompt_queue/removed{started} for the same prompt doesn't double-open.
+// Mirrors cli's startToolsBlock.
+export function startTurnSpinner(startedAt?: number, owner?: string): void {
+  if (!state.current) return;
+  const c = state.current;
+  freezeSpinner(startedAt);
+  c.spinner = {
+    toolCallIds: [],
+    expanded: false,
+    startedAt: startedAt ?? Date.now(),
+  };
+  c.spinnerOwner = owner;
   insertAboveQueued({ kind: "spinner", spinner: c.spinner });
 }
 
@@ -405,7 +517,10 @@ function onToolCall(update: AnyRecord): void {
   };
   state.current.toolCalls.set(tc.toolCallId, tc);
   ensureSpinner();
-  state.current.spinner!.toolCallIds.push(tc.toolCallId);
+  // May still be null: ensureSpinner declines to create one during
+  // replay (c.ready false), where historical tool calls shouldn't mint
+  // a live marker. The toolCalls map above records the call either way.
+  state.current.spinner?.toolCallIds.push(tc.toolCallId);
   maybeResolvePermissionByToolCall(tc.toolCallId, tc.status);
 }
 
@@ -452,12 +567,14 @@ function onToolCallUpdate(update: AnyRecord): void {
 // mid-flight-cancel case the TUI already flags loudly (app.ts's
 // "stopped (<reason>)" treatment) — the browser previously had no
 // equivalent, so a cancelled turn looked identical to a completed one.
-export function finalizeTurn(stopReason?: string): void {
+export function finalizeTurn(stopReason?: string, endedAt?: number): void {
   if (!state.current) return;
-  // Drop the spinner entry; the tool call records remain in state but
-  // are no longer rendered as a clutter list.
-  state.current.spinner = null;
-  state.current.log = state.current.log.filter((e) => e.kind !== "spinner");
+  // Freeze the live spinner in place into a permanent turn-stamp,
+  // timing the turn with the daemon's recordedAt when the caller has
+  // one (replayed turn_completes carry it — real durations even for
+  // history). Tool-call records remain in state but are no longer
+  // rendered as a clutter list.
+  freezeSpinner(endedAt, stopReason);
   // Close the streaming agent message so the next turn starts a
   // fresh bubble even if the agent immediately resumes streaming.
   closeOpenStream();
@@ -502,7 +619,7 @@ export function finalizeTurn(stopReason?: string): void {
 
 // ---- Sibling-driven user / plan / permission updates ------------
 
-function onPromptReceived(update: AnyRecord): void {
+function onPromptReceived(update: AnyRecord, recordedAt?: number): void {
   if (!state.current) return;
   const blocks = Array.isArray(update.prompt) ? update.prompt : [];
   const text = blocks.map((b) => contentToText(b)).join("");
@@ -510,25 +627,49 @@ function onPromptReceived(update: AnyRecord): void {
   // If we already rendered this peer prompt via prompt_queue_added
   // (browser shows peer-queued bubbles with chips), skip the second
   // render — the bubble is already in the log, and the chip's
-  // queued→processing transition is driven by prompt_queue_removed.
+  // queued→processing transition is driven by prompt_queue_removed,
+  // which also opens the turn's spinner.
   const messageId =
     typeof update.messageId === "string" ? update.messageId : undefined;
   if (messageId && state.current.queueByMessageId.has(messageId)) {
     return;
   }
+  // Same replay-dedup as pushChunk's: a reconnect delta can redeliver a
+  // prompt_received this tab already rendered — without this it would
+  // duplicate the bubble AND churn the spinner (freeze-then-new against
+  // a repeat of the same turn-open).
+  if (
+    messageId &&
+    state.current.log.some(
+      (e) => e.kind === "stream" && e.role === "user" && e.messageId === messageId,
+    )
+  ) {
+    return;
+  }
   if (consumeOwnPromptEcho({ text })) {
     return;
   }
-  // Sibling prompt — insert above any waiting-queued bubbles so it
-  // joins the live conversation flow, not the trailing queue.
-  // closeOpenStream first so any in-flight agent stream is broken.
+  // Sibling or replayed prompt — insert above any waiting-queued
+  // bubbles so it joins the live conversation flow, not the trailing
+  // queue. closeOpenStream first so any in-flight agent stream is
+  // broken.
   closeOpenStream();
   insertAboveQueued({
     kind: "stream",
     role: "user",
     text,
     closed: true,
+    messageId,
   });
+  // prompt_received IS the turn-open signal (cli's user-text handler
+  // does exactly this): anchor the thinking block directly under the
+  // prompt, live and replay alike. With the frame's recordedAt a
+  // replayed turn stamps its real duration when its turn_complete
+  // replays behind it — and the turn still in flight at replay end
+  // keeps its spinner live, which is what makes the thinking block
+  // survive a mid-turn page reload.
+  startTurnSpinner(recordedAt, messageId);
+  markActive();
 }
 
 // ---- Server-driven prompt queue handlers -------------------------
@@ -759,6 +900,47 @@ function onPromptQueueAdded(params: AnyRecord): void {
       unbound.status = "processing";
     } else if (unbound.status === "pending" || unbound.status === "cancelled") {
       unbound.status = "queued";
+      // The prompt went out "pending" — optimistically the next head —
+      // and dispatchPrompt opened a spinner for the turn it expected to
+      // start. The daemon says it's actually waiting in line: no turn
+      // of ours began, so that spinner marks nothing — discard it
+      // outright (no stamp; freezing would fabricate a zero-length
+      // turn). The genuinely-running turn re-establishes its own via
+      // ensureSpinner on its next activity.
+      if (
+        state.current.spinnerOwner !== undefined &&
+        state.current.spinnerOwner === unbound.id &&
+        state.current.spinner
+      ) {
+        state.current.spinner = null;
+        state.current.spinnerOwner = undefined;
+        state.current.log = state.current.log.filter(
+          (e) => e.kind !== "spinner",
+        );
+      }
+      // While it was pending it didn't count as queued tail, so the
+      // still-running turn's content kept splicing in below it. Re-seat
+      // the bubble at the top of the queued tail (below everything
+      // active; anything enqueued later already sits further down).
+      // Leaving it would strand the active turn's remaining output
+      // beneath a waiting prompt — the exact misordering observed
+      // live. Remove first, then compute the boundary on the remaining
+      // log: the bubble is "queued" now and would otherwise match
+      // itself.
+      const log = state.current.log;
+      const bi = log.findIndex(
+        (e) => e.kind === "stream" && e.queueEntry === unbound,
+      );
+      if (bi >= 0) {
+        const [bubble] = log.splice(bi, 1);
+        const target = queuedBoundary();
+        if (target > bi) {
+          log.splice(target, 0, bubble!);
+        } else {
+          // Nothing active below it — put it back where it was.
+          log.splice(bi, 0, bubble!);
+        }
+      }
     }
     return;
   }
@@ -888,6 +1070,23 @@ function onPromptQueueRemoved(params: AnyRecord): void {
     // the agent has already begun replying, and re-seating at that
     // point drops the bubble below its own answer.
     entry.reseatAfterCurrentTurn = undefined;
+    // This prompt's turn is now the live one — open its spinner
+    // (freeze-then-new; see startTurnSpinner). Skip when this very
+    // prompt already opened the live spinner at dispatch time
+    // (immediate own sends go out "pending" and open it there), or
+    // freeze-then-new would stamp a seconds-old block and mint a
+    // duplicate. The status flip above moved the queued boundary past
+    // this bubble, so the fresh spinner anchors directly under it.
+    const owns =
+      state.current.spinnerOwner !== undefined &&
+      (state.current.spinnerOwner === entry.id ||
+        state.current.spinnerOwner === messageId);
+    if (!owns) {
+      startTurnSpinner(undefined, entry.id);
+    } else {
+      state.current.spinnerOwner = entry.id;
+    }
+    markActive();
   } else if (reason === "cancelled" || reason === "abandoned") {
     // If we already flagged this entry as amended (via prompt_amended
     // or the M2's _meta.amending hint) the bubble should render as
@@ -1186,6 +1385,13 @@ export function handleNotification(frame: JsonRpcFrame): void {
   const updateHydraMeta = (updateMeta["hydra-acp"] ?? {}) as AnyRecord;
   const isSyntheticChunk =
     kind === "agent_message_chunk" && updateHydraMeta.synthetic === true;
+  // Fed to pushChunk's replay-dedup guard below.
+  const updateMessageId =
+    typeof update.messageId === "string" ? update.messageId : undefined;
+  // Daemon record time for this frame (params-level _meta) — the clock
+  // the turn-stamps run on, so replayed turns time themselves and not
+  // the replay. Undefined on state kinds / live-only frames.
+  const recordedAt = extractRecordedAt(frame.params);
   switch (kind) {
     case "prompt_received":
     case "user_message_chunk":
@@ -1213,15 +1419,15 @@ export function handleNotification(frame: JsonRpcFrame): void {
       // Streaming user message from a sibling that *isn't* using
       // prompt_received yet. Suppress own-echo via recentOwnPrompts.
       if (!consumeOwnPromptEcho(update.content)) {
-        pushChunk("user", update.content);
+        pushChunk("user", update.content, false, updateMessageId);
       }
       break;
     }
     case "agent_message_chunk":
-      pushChunk("agent", update.content, isSyntheticChunk);
+      pushChunk("agent", update.content, isSyntheticChunk, updateMessageId);
       break;
     case "agent_thought_chunk":
-      pushChunk("thought", update.content);
+      pushChunk("thought", update.content, false, updateMessageId);
       break;
     case "tool_call":
       onToolCall(update);
@@ -1276,7 +1482,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
       onPlanUpdate(update);
       break;
     case "prompt_received":
-      onPromptReceived(update);
+      onPromptReceived(update, recordedAt);
       break;
     case "stop":
     case "turn_complete": {
@@ -1303,7 +1509,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
       }
       const stopReason =
         typeof update.stopReason === "string" ? update.stopReason : undefined;
-      finalizeTurn(stopReason);
+      finalizeTurn(stopReason, recordedAt);
       break;
     }
     // Agent-initiated ("unsolicited") turn: the agent restarted itself
@@ -1356,7 +1562,7 @@ export function handleNotification(frame: JsonRpcFrame): void {
       // onceIdle-swap retries); only finalize once none remain, since
       // finalizeTurn tears down the single shared inTurn/spinner state.
       if (state.current.unsolicitedTurnOpen.size > 0) break;
-      finalizeTurn();
+      finalizeTurn(undefined, recordedAt);
       break;
     }
     case "session_info_update":
@@ -1377,9 +1583,10 @@ export function handleNotification(frame: JsonRpcFrame): void {
       break;
   }
   // After per-case dispatch, surface a "still working" spinner if the
-  // turn is active. ensureSpinner pins it to the end of the log so it
-  // sits beneath whatever bubble we just added (user prompt mirror,
-  // agent stream, etc.). finalizeTurn drops it at the end of the turn.
+  // turn is active. Once present it doubles as the structural anchor
+  // for active content (see activeBoundary) — new items insert above
+  // it, so it stays at the bottom of the turn without ever being moved.
+  // finalizeTurn drops it at the end of the turn.
   if (state.current?.inTurn) {
     ensureSpinner();
   }

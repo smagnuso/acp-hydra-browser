@@ -6,10 +6,12 @@
 import { state } from "./state.js";
 import { render } from "./renderer.js";
 import {
+  ensureSpinner,
   finalizeTurn,
   handleAgentRequest,
   handleNotification,
   hydrateQueueFromSnapshot,
+  markActive,
   pushLog,
   resetChatHistoryState,
 } from "./acp.js";
@@ -193,6 +195,46 @@ export function handleFrame(frame: JsonRpcFrame): void {
     // snapshot lives at params._meta["hydra-acp"].queue.
     const meta = params._meta as Record<string, unknown> | undefined;
     const hydraMeta = meta?.["hydra-acp"] as Record<string, unknown> | undefined;
+    // Self-heal a turn that ended while we were disconnected. For our
+    // OWN prompts the only end-of-turn signal is the session/prompt RPC
+    // response (hydra excludes the originator from turn_complete
+    // fan-out), and that response dies with the socket. The reconnect's
+    // after_message delta doesn't reliably replace it either: the cursor
+    // is lastSeenMessageId, and turn_complete is recorded under that
+    // same messageId, so "everything after M" can skip the very frame
+    // that would have cleaned up. Left alone, inTurn stays true and the
+    // spinner sits in the log forever, which is what put a stale spinner
+    // above every subsequently-sent prompt. `busy` on the attach
+    // response is authoritative (PROTOCOL.md: "mid-turn flag, a prompt
+    // is in flight"), so trust it over our own stale belief. Checked
+    // before the queue snapshot hydrates below, so hydration gets the
+    // last word on per-entry status.
+    if (hydraMeta?.busy === false && state.current.inTurn) {
+      finalizeTurn();
+    }
+    // The other direction: the daemon says a turn IS in flight. Adopt
+    // that (pill, Stop button, elapsed ticker), and let the daemon's
+    // turnStartedAt — when this turn actually began — correct a
+    // thinking block whose clock was guessed. Replay normally anchors
+    // the block off the in-flight turn's own prompt_received with its
+    // recordedAt; this covers the paths that couldn't (a delta replay
+    // that skipped the prompt frame, ensureSpinner's Date.now()
+    // fallback), and only for anonymous blocks — one opened by a known
+    // prompt (spinnerOwner set) already has the right clock.
+    if (hydraMeta?.busy === true) {
+      markActive();
+      const turnStartedAt = hydraMeta.turnStartedAt;
+      if (typeof turnStartedAt === "number" && Number.isFinite(turnStartedAt)) {
+        if (!state.current.spinner) {
+          ensureSpinner();
+        }
+        if (state.current.spinner && state.current.spinnerOwner === undefined) {
+          state.current.spinner.startedAt = turnStartedAt;
+        }
+      } else if (!state.current.spinner) {
+        ensureSpinner();
+      }
+    }
     const snapshot = hydraMeta?.queue;
     if (Array.isArray(snapshot)) {
       hydrateQueueFromSnapshot(snapshot);
@@ -276,6 +318,17 @@ export function handleFrame(frame: JsonRpcFrame): void {
       state.current.ready = false;
       state.current.cold = true;
       cancelAllQueued(state.current);
+      // If a turn was actually streaming when the session died, its
+      // spinner and inTurn flag were never torn down — nothing else
+      // does that for an abrupt close the way finalizeTurn does for a
+      // normal turn_complete. Left alone, the stale spinner (and its
+      // still-truthy c.spinner) sits at its old position forever:
+      // ensureSpinner()'s "one already exists in the log" guard skips
+      // creating a fresh, correctly-positioned one for whatever turn
+      // eventually resurrects the session, so that turn's activity
+      // renders through the leftover spinner sitting ABOVE the new
+      // prompt that triggered it instead of below.
+      finalizeTurn();
     }
     render();
     return;

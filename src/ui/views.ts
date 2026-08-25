@@ -1796,6 +1796,9 @@ function logItemSig(item: ChatState["log"][number]): unknown[] | null {
   if (item.kind === "exit-plan-mode") {
     return [item.plan, item.status];
   }
+  if (item.kind === "turn-stamp") {
+    return [item.elapsedMs, item.toolCount, item.stopReason];
+  }
   return null;
 }
 
@@ -2555,6 +2558,9 @@ function renderLogItem(item: ChatState["log"][number]): Node {
   if (item.kind === "spinner") {
     return renderSpinner(item.spinner);
   }
+  if (item.kind === "turn-stamp") {
+    return renderTurnStamp(item);
+  }
   if (item.kind === "perm") {
     if (!state.current) return document.createTextNode("");
     const entry = state.current.pendingPermissions.get(item.toolCallId);
@@ -2889,6 +2895,34 @@ function renderQueueEditor(
   );
 }
 
+function formatElapsed(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+// The frozen remains of a turn's spinner (see acp.ts finalizeTurn) —
+// a dim, permanent marker under the prompt recording how long the turn
+// took, TUI-style. A non-natural end ("cancelled", "refusal", …) stamps
+// loudly instead so an interrupted turn can't be misread as a finished
+// one.
+function renderTurnStamp(item: {
+  elapsedMs: number;
+  toolCount: number;
+  stopReason?: string;
+}): HTMLElement {
+  const bad = item.stopReason !== undefined && item.stopReason !== "end_turn";
+  const label = bad
+    ? `stopped (${item.stopReason}) · ${formatElapsed(item.elapsedMs)}`
+    : item.toolCount > 0
+    ? `${item.toolCount} tool${item.toolCount === 1 ? "" : "s"} · took ${formatElapsed(item.elapsedMs)}`
+    : `thought · ${formatElapsed(item.elapsedMs)}`;
+  return el("div", { class: bad ? "turn-stamp bad" : "turn-stamp" }, label);
+}
+
 function renderSpinner(spinner: SpinnerState): HTMLElement {
   const cancelBtn = el(
     "button",
@@ -2899,6 +2933,7 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
     },
     el("span", { class: "queue-btn-glyph" }, "×"),
   );
+  const elapsed = formatElapsed(Date.now() - spinner.startedAt);
   if (!spinner.expanded) {
     return el(
       "div",
@@ -2917,10 +2952,10 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
           "span",
           null,
           spinner.toolCallIds.length === 0
-            ? "thinking…"
+            ? `thinking · ${elapsed}`
             : `working — ${spinner.toolCallIds.length} tool call${
                 spinner.toolCallIds.length === 1 ? "" : "s"
-              }`,
+              } · ${elapsed}`,
         ),
         cancelBtn,
       ),
@@ -2955,7 +2990,7 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
       "div",
       { class: "head" },
       el("span", { class: "dot" }),
-      el("span", null, "working"),
+      el("span", null, `working · ${elapsed}`),
       cancelBtn,
     ),
     el("ul", null, items),

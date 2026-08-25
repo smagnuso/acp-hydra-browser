@@ -185,6 +185,12 @@ export interface ToolCallState {
 export interface SpinnerState {
   toolCallIds: string[];
   expanded: boolean;
+  // Wall-clock start of the live turn this spinner marks. finalizeTurn
+  // uses it to mint the frozen turn-stamp's elapsed time. Spinners are
+  // only created for live turns (ensureSpinner gates on c.ready), so
+  // Date.now() at creation is the right clock — replayed history never
+  // instantiates one.
+  startedAt: number;
 }
 
 export interface PermissionEntry {
@@ -242,6 +248,12 @@ export type LogItem =
       role: "user" | "agent" | "thought";
       text: string;
       closed?: boolean;
+      // The session/update's own messageId, when pushChunk was given one
+      // (agent_message_chunk et al — see acp.ts). Lets pushChunk detect a
+      // redelivered replay landing on top of content already rendered
+      // (observed after a reconnect's afterMessageId delta) and skip
+      // creating a duplicate bubble instead of silently doubling it.
+      messageId?: string;
       queueEntry?: QueueEntry;
       // Images attached at submit time (pasted into the composer). Kept on
       // the log item so the sent bubble shows what was actually attached,
@@ -257,6 +269,13 @@ export type LogItem =
   | { kind: "system"; text: string }
   | { kind: "error"; text: string }
   | { kind: "spinner"; spinner: SpinnerState }
+  // What a live spinner freezes into at finalizeTurn: a permanent
+  // turn-boundary marker sitting where the spinner sat (directly under
+  // the prompt it answered), stamped with how long the turn took —
+  // mirrors the TUI's frozen "thought · Xs" / "N tools · took Xs"
+  // block. stopReason preserved so a cancelled/refused turn stamps
+  // loudly instead of reading like a normal finish.
+  | { kind: "turn-stamp"; elapsedMs: number; toolCount: number; stopReason?: string }
   | { kind: "perm"; toolCallId: string }
   | PlanLogItem
   | ExitPlanLogItem
@@ -283,6 +302,14 @@ export interface ChatState {
   agentId: string;
   ws: WebSocket | null;
   ready: boolean;
+  // Identity (entry.id or messageId) of the prompt that opened the live
+  // spinner via startTurnSpinner — undefined for ensureSpinner's
+  // anonymous activity fallback. Lets prompt_queue/removed{started}
+  // recognize "this turn already opened its own spinner at dispatch"
+  // instead of freezing a seconds-old block and minting a second one,
+  // and lets the pending→queued demotion discard a spinner that was
+  // opened for a turn that never started.
+  spinnerOwner?: string;
   // Set when the daemon reports this session closed cold (idle-close,
   // /hydra kill, disk-only) while we were attached — see bridge.ts's
   // hydra-acp/session/closed handling. Distinguishes "nothing to

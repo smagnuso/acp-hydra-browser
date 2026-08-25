@@ -63,6 +63,17 @@ window.addEventListener("blur", () => reportVisibility());
 // stale WebSocket to notice on its own. See routing.ts's forceReconnect.
 window.addEventListener("online", () => forceReconnect());
 
+// Keep the live spinner's elapsed readout ticking through silent
+// stretches (a long tool call streams nothing, so no notification would
+// otherwise trigger a repaint). render() is rAF-coalesced, throttled,
+// and takes the in-place patch path, so an extra call per second while
+// a turn is active is cheap; outside a turn this is a no-op.
+setInterval(() => {
+  if (state.current?.inTurn && state.current.spinner) {
+    render();
+  }
+}, 1000);
+
 // Ctrl-P: same binding as the TUI's session switcher (cli/src/tui/input.ts),
 // so muscle memory carries over between the two. Always preventDefault —
 // left alone the browser opens its print dialog, which nothing in this
