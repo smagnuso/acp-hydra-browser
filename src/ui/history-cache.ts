@@ -18,6 +18,24 @@
 //     the least-recently-opened session's entire cache once the count
 //     is exceeded.
 //
+// Trimming is NOT free the way a plain LRU usually is, which is what
+// makes MAX_BYTES_PER_SESSION's value load-bearing rather than a taste
+// call. Evicted frames aren't re-fetched later: the delta-replay cursor
+// (lastSeenMessageId) is the NEWEST frame cached, so on the next open
+// the daemon is only asked for what came after that — everything the
+// trim dropped is simply gone from this client's view until the user
+// hits "Load full history". A cap tight enough to evict real
+// conversation therefore permanently mangles the transcript, and does
+// it worst exactly where the frames are biggest.
+//
+// That's not hypothetical: a pasted screenshot rides inline as base64
+// on its prompt_received frame, measured at 470KB-1MB apiece in real
+// sessions. Against the original 1MB cap, ONE screenshot could evict
+// nearly the entire cached transcript, and did — observed live as
+// prompts vanishing while their replies and orphaned turn-stamps
+// stayed behind, surviving every reload. Size this to hold a working
+// window of image-bearing turns, not just text.
+//
 // A cache miss (nothing stored, or IndexedDB unavailable/blocked, e.g.
 // private browsing) is always safe — callers fall back to the existing
 // full-replay attach path, same as before this module existed.
@@ -25,9 +43,22 @@
 import type { JsonRpcFrame } from "./acp.js";
 
 const DB_NAME = "hydra-acp-history-cache";
-const DB_VERSION = 1;
+// Bumped to 2 to discard every cache written before the replay fixes
+// landed. Those entries can hold a transcript that's missing most of
+// its agent messages while keeping the prompts — measured on a real
+// session as 73 agent bubbles against 70 prompts, where a fresh full
+// replay of the same session yields 215 against 90. Nothing can repair
+// such an entry in place (the missing frames were trimmed away and are
+// not re-fetched: the delta cursor is the newest frame cached, so the
+// daemon is only ever asked for what came after it), and every reload
+// rehydrates the damage. Dropping the store is the only honest repair.
+// Cost is one full replay per session on first load after upgrading.
+const DB_VERSION = 2;
 const STORE = "sessions";
-const MAX_BYTES_PER_SESSION = 1_000_000;
+// 6MB holds several screenshot-bearing turns plus a long text
+// transcript; 10 sessions caps the whole store around 60MB, well inside
+// a normal IndexedDB origin quota.
+const MAX_BYTES_PER_SESSION = 6_000_000;
 const MAX_CACHED_SESSIONS = 10;
 const FLUSH_DEBOUNCE_MS = 2000;
 
@@ -61,6 +92,12 @@ function openDb(): Promise<IDBDatabase | null> {
       return;
     }
     req.onupgradeneeded = () => {
+      // Drop and recreate rather than create-if-absent: an upgrade from
+      // an older version must discard whatever it held (see DB_VERSION),
+      // and createObjectStore throws if the store already exists.
+      if (req.result.objectStoreNames.contains(STORE)) {
+        req.result.deleteObjectStore(STORE);
+      }
       req.result.createObjectStore(STORE, { keyPath: "sessionId" });
     };
     req.onsuccess = () => resolve(req.result);
@@ -75,6 +112,16 @@ function byteSize(frame: JsonRpcFrame): number {
   } catch {
     return 0;
   }
+}
+
+// Every recordable session/update frame carries a messageId (cli's
+// recordAndBroadcast stamps one on all of them, not just prompts/turn
+// boundaries) — the same field queueFrameForCache is keyed on. Used to
+// dedupe merges below; only session/update frames are ever queued, so
+// the other shapes here are defensive, not expected in practice.
+function frameMessageId(frame: JsonRpcFrame): string | undefined {
+  const update = (frame.params as { update?: { messageId?: unknown } } | undefined)?.update;
+  return typeof update?.messageId === "string" ? update.messageId : undefined;
 }
 
 // Read a session's cached transcript and bump its LRU timestamp. Returns
@@ -143,9 +190,31 @@ export function queueFrameForCache(
   if (flushTimer === undefined) {
     flushTimer = setTimeout(() => {
       flushTimer = undefined;
-      void flushPending();
+      enqueueFlush();
     }, FLUSH_DEBOUNCE_MS);
   }
+}
+
+// Flushes MUST NOT overlap. flushPending is a read-modify-write against
+// one IndexedDB record (get → merge → put) with an await in the middle,
+// and it has two independent triggers: the debounce timer above and
+// flushHistoryCacheNow below (pagehide / visibilitychange). Two in
+// flight at once both read the same record, both merge onto that same
+// snapshot, and the second put overwrites the first — silently dropping
+// a whole batch of frames. It's unrecoverable, too: flushPending clears
+// the batch out of pendingFrames before awaiting the write, and the
+// surviving put still advances lastSeenMessageId, so the daemon is
+// never asked to resend what was lost.
+//
+// Measured on a real session: a cache-hydrated transcript held 56
+// prompts / 79 agent bubbles where a full replay of the same session
+// gave 91 / 215, with the newest prompt missing entirely — losses the
+// oldest-first byte trim cannot explain. Chaining serialises every
+// flush so each one merges onto the previous one's committed result.
+let flushChain: Promise<void> = Promise.resolve();
+
+function enqueueFlush(): void {
+  flushChain = flushChain.then(flushPending).catch(() => undefined);
 }
 
 // Flushes synchronously-available pending writes right away — used when
@@ -156,7 +225,7 @@ export function flushHistoryCacheNow(): void {
     clearTimeout(flushTimer);
     flushTimer = undefined;
   }
-  void flushPending();
+  enqueueFlush();
 }
 
 async function flushPending(): Promise<void> {
@@ -197,15 +266,49 @@ function mergeAndTrim(
     const getReq = store.get(sessionId);
     getReq.onsuccess = () => {
       const existing = getReq.result as CachedSession | undefined;
+      // Two independent connections for the same session (a stale one
+      // still draining its own attach replay while a fresh one opens
+      // after a quick session-switch-and-back, or a forced-full replay
+      // landing on top of an already-cached partial one) can each queue
+      // the same historical frame for caching. mergeAndTrim used to
+      // concatenate blindly, so a redelivered frame didn't just render
+      // twice (acp.ts's own dedup guards catch that) — it also
+      // permanently doubled up in here, taking up budget the trim step
+      // below would then spend evicting genuinely older, still-needed
+      // frames to make room for (observed live: a duplicated response
+      // survived while the prompt that triggered it got trimmed out).
+      // Rebuild `existing.frames` through the same seen-set first so a
+      // record that already has a duplicate baked in from before this
+      // fix self-heals on its next write, not just stays merely
+      // non-worsening.
+      const seen = new Set<string>();
+      const keptExisting: CachedFrame[] = [];
+      for (const f of existing?.frames ?? []) {
+        const id = frameMessageId(f.frame);
+        if (id !== undefined) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        keptExisting.push(f);
+      }
+      const fresh: JsonRpcFrame[] = [];
+      for (const frame of newFrames) {
+        const id = frameMessageId(frame);
+        if (id !== undefined) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        fresh.push(frame);
+      }
       // Sizing happens here, once per debounce window, instead of per
       // frame at queue time — see queueFrameForCache.
-      const sized: CachedFrame[] = newFrames.map((frame) => ({
+      const sized: CachedFrame[] = fresh.map((frame) => ({
         frame,
         bytes: byteSize(frame),
       }));
-      const frames = [...(existing?.frames ?? []), ...sized];
+      const frames = [...keptExisting, ...sized];
       let totalBytes =
-        (existing?.totalBytes ?? 0) +
+        keptExisting.reduce((sum, f) => sum + f.bytes, 0) +
         sized.reduce((sum, f) => sum + f.bytes, 0);
       // Trim oldest-first until back under budget. A single oversized
       // frame (e.g. a huge tool-output blob) can still exceed the cap on

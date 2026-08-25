@@ -142,9 +142,46 @@ function stampBubbleMessageId(entry: QueueEntry): void {
   for (const item of state.current.log) {
     if (item.kind === "stream" && item.queueEntry === entry) {
       item.messageId = entry.messageId;
+      cacheOwnPromptFrame(entry);
       return;
     }
   }
+}
+
+// Our own prompts never arrive as frames, so nothing would otherwise
+// cache them: the daemon excludes the originator from prompt_received
+// (and turn_complete) fan-out — only prompt_queue/added comes back to
+// the sender. The bubble is created locally at dispatch, lives only in
+// memory, and is gone on reload. Worse, it can never be recovered: the
+// agent's reply chunks DO arrive and push lastSeenMessageId past this
+// prompt's messageId, so the delta reconnect only ever asks for what
+// came after it. Measured on a real session as 55 cached prompts
+// against 91 real ones, always missing the most recent — while the
+// replies to those same prompts survived, because those weren't
+// excluded.
+//
+// Synthesising the frame the daemon didn't send us closes the hole. It
+// carries the real messageId, so if a later full replay delivers the
+// daemon's own copy, mergeAndTrim's messageId dedup collapses the two
+// rather than double-rendering the prompt.
+function cacheOwnPromptFrame(entry: QueueEntry): void {
+  if (!state.current || entry.messageId === undefined) return;
+  queueFrameForCache(
+    state.current.sessionId,
+    {
+      method: "session/update",
+      params: {
+        sessionId: state.current.sessionId,
+        update: {
+          sessionUpdate: "prompt_received",
+          messageId: entry.messageId,
+          prompt: [{ type: "text", text: entry.text }],
+        },
+        _meta: { "hydra-acp": { recordedAt: Date.now() } },
+      },
+    },
+    entry.messageId,
+  );
 }
 
 // The turn-layout model (mirrors cli's tui/app.ts startToolsBlock):
@@ -240,6 +277,17 @@ export function pushChunk(
     !!last.synthetic === synthetic
   ) {
     last.text += text;
+    // Each chunk is its own recordable frame with its own messageId
+    // (cli's recordAndBroadcast stamps one per broadcast, not once per
+    // logical message) — track the latest one, not just the first.
+    // lastSeenMessageId (the reconnect cursor, set from this same
+    // per-chunk id) always advances to the newest chunk seen; leaving
+    // this bubble pinned to its first chunk's id would desync it from
+    // that cursor and starve the dedup check below on a later chunk's
+    // replay after a reconnect lands mid-message.
+    if (messageId !== undefined) {
+      last.messageId = messageId;
+    }
     return;
   }
   // A reconnect's afterMessageId delta replay landing on top of content
@@ -404,8 +452,15 @@ export function startTurnSpinner(startedAt?: number, owner?: string): void {
 // Recognise Claude's ExitPlanMode across casing variants (camelCase from
 // claude-acp today; snake_case left in for forward-compat). Case-insensitive
 // so name/title carry-overs from arbitrary upstreams still match.
-function isExitPlanModeTool(name: string | undefined): boolean {
-  if (!name) return false;
+// Not always a string on the wire despite the type: the daemon
+// externalises oversized values (a long Bash command, say) into
+// `{ __hydraBlob, bytes }` reference objects, and `title` is one of the
+// fields that can carry one. Calling .toLowerCase() on that threw a
+// TypeError out of handleNotification — fatal during replay, since the
+// cache-hydrate loop processes frames in a bare for-of and one throw
+// abandons every remaining frame in the transcript.
+function isExitPlanModeTool(name: unknown): boolean {
+  if (typeof name !== "string" || !name) return false;
   return name.toLowerCase().replace(/[_\s-]/g, "") === "exitplanmode";
 }
 
@@ -1397,7 +1452,12 @@ export interface JsonRpcFrame {
   error?: unknown;
 }
 
-export function handleNotification(frame: JsonRpcFrame): void {
+// `fromCache` marks frames being replayed OUT of the local history
+// cache (routing.ts's hydrateFromCacheThenConnect) rather than arriving
+// from the daemon. Everything about handling them is identical except
+// that they must not be written back to the cache they just came from —
+// see the queueFrameForCache call below.
+export function handleNotification(frame: JsonRpcFrame, fromCache = false): void {
   // Any live notification is proof the session is attached and running,
   // regardless of how it got that way (this connection's own
   // session/prompt auto-resurrecting a killed session server-side, a
@@ -1459,7 +1519,17 @@ export function handleNotification(frame: JsonRpcFrame): void {
     typeof update.messageId === "string"
   ) {
     state.current.lastSeenMessageId = update.messageId;
-    queueFrameForCache(state.current.sessionId, frame, update.messageId);
+    // Frames replayed out of the cache must not be written back into it.
+    // hydrateFromCacheThenConnect feeds every cached frame through here,
+    // so without this each session open re-queued that session's whole
+    // cached transcript for caching — which, before the messageId dedup
+    // in mergeAndTrim, appended a second copy of everything on every
+    // open. The byte-cap trim then cut into the front of that doubled
+    // array, leaving a partial first copy followed by a full second one:
+    // a cache that replays out of order and with duplicates.
+    if (!fromCache) {
+      queueFrameForCache(state.current.sessionId, frame, update.messageId);
+    }
   }
   // Sibling-resolved permission tear-down. Doesn't flip inTurn or
   // route through the per-case switch — it's a transient correlation
