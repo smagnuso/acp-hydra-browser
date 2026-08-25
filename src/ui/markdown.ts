@@ -13,6 +13,60 @@ export function escapeHtml(s: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+// Bare URLs. Agents emit them constantly without markdown link syntax,
+// and unlinked they're useless on a phone — you can't even select them
+// cleanly. Input here is already escaped, so `&` reads as `&amp;`; that
+// is also what an href wants, so it passes through untouched.
+function linkifyPlain(s: string): string {
+  return s.replace(/\bhttps?:\/\/[^\s<]+/g, (raw) => {
+    let url = raw;
+    let trail = "";
+    // Trailing punctuation is nearly always the sentence's, not the
+    // URL's. The entities are what escapeHtml made of quotes.
+    for (;;) {
+      const m = url.match(/(&quot;|&#39;|&gt;|[.,;:!?'\]}"])$/);
+      if (!m) break;
+      trail = m[0] + trail;
+      url = url.slice(0, -m[0].length);
+    }
+    // A closing paren only belongs to the sentence if it has no opener
+    // inside the URL — wikipedia-style paths legitimately end in one.
+    while (url.endsWith(")")) {
+      const opens = (url.match(/\(/g) ?? []).length;
+      const closes = (url.match(/\)/g) ?? []).length;
+      if (opens >= closes) break;
+      trail = ")" + trail;
+      url = url.slice(0, -1);
+    }
+    if (!url) return raw;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${trail}`;
+  });
+}
+
+// Linkify only the stretches that aren't already inside a tag this
+// renderer produced: never rewrite the innards of a markdown link, and
+// leave <code> alone EXCEPT when the span is nothing but a URL. Agents
+// habitually wrap a bare link in backticks, and treating that as
+// literal makes the common case unclickable, while a code span holding
+// a command (`curl https://…`) still stays verbatim.
+function autolink(s: string): string {
+  const protectedSpan = /<code>([\s\S]*?)<\/code>|<a\b[^>]*>[\s\S]*?<\/a>/g;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = protectedSpan.exec(s)) !== null) {
+    out += linkifyPlain(s.slice(last, m.index));
+    const codeInner = m[1];
+    if (codeInner !== undefined && /^https?:\/\/[^\s<]+$/.test(codeInner.trim())) {
+      out += `<code>${linkifyPlain(codeInner)}</code>`;
+    } else {
+      out += m[0];
+    }
+    last = m.index + m[0].length;
+  }
+  return out + linkifyPlain(s.slice(last));
+}
+
 // Apply inline markdown to a chunk of *already-escaped* HTML.
 function inlineMd(s: string): string {
   // Code spans first so their content isn't further transformed.
@@ -38,7 +92,9 @@ function inlineMd(s: string): string {
     }
     return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
   });
-  return s;
+  // Last: everything above has already produced its anchors, so this
+  // can skip them rather than nesting one inside another.
+  return autolink(s);
 }
 
 // Parse a `| a | b | c |` row into trimmed cell strings, or null if
