@@ -1122,30 +1122,28 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
             ]
           : []),
       ),
-      el(
-        "div",
-        { class: "actions" },
-        el(
-          "button",
-          {
-            class: "ghost",
-            title: "Export session as *.hydra bundle",
-            ...tapHandler(() => triggerExportDownload(s.sessionId)),
-          },
-          "↓",
-        ),
-        el(
-          "button",
-          {
-            class: "danger",
-            ...tapHandler(() => void killSession(s)),
-          },
-          "×",
-        ),
-      ),
     ),
     showCwd
       ? el("div", { class: "row3" }, s.cwd ? shortenCwd(s.cwd) : "?")
+      : null,
+    // Pinned to the card's own top-right corner rather than living in
+    // the badge row. In that row its position drifted with whichever
+    // badges a given card happened to have, and an action styled to sit
+    // among status chips read as a fourth status. Only for sessions that
+    // are actually running — there is nothing to kill on a cold
+    // (disk-only) one. Not gated on the "warm" badge, which is
+    // suppressed while a session is busy or blocked (warm is implied by
+    // both) — those are exactly the sessions worth stopping.
+    s.status !== "cold"
+      ? el(
+          "button",
+          {
+            class: "card-kill",
+            title: "Kill this session",
+            ...tapHandler(() => void killSession(s)),
+          },
+          "×",
+        )
       : null,
   );
 }
