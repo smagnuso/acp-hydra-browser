@@ -33,7 +33,7 @@ import { join } from "node:path";
 (globalThis as { indexedDB?: unknown }).indexedDB ??= undefined;
 
 const { state } = await import("../src/ui/state.js");
-const { handleNotification, replayDebugReport } = await import("../src/ui/acp.js");
+const { handleNotification } = await import("../src/ui/acp.js");
 import type { ChatState } from "../src/ui/types.js";
 
 function makeChatState(sessionId: string): ChatState {
@@ -75,7 +75,7 @@ function makeChatState(sessionId: string): ChatState {
     currentPlanEntry: null,
     daemonSupportsAmend: false,
     headerExpanded: false,
-    unsolicitedTurnOpen: false,
+    unsolicitedTurnOpen: new Set(),
   } as unknown as ChatState;
 }
 
@@ -144,8 +144,14 @@ if (throwSamples.length > 0) {
   console.log(JSON.stringify(throwSamples[0]!.frame, null, 2).slice(0, 1200));
 }
 
-console.log("\n=== frame accounting ===");
-console.log(JSON.stringify(replayDebugReport(), null, 2));
+const counts = new Map<string, number>();
+for (const item of state.current!.log) {
+  const k = item.kind === "stream" ? `stream:${(item as { role: string }).role}` : item.kind;
+  counts.set(k, (counts.get(k) ?? 0) + 1);
+}
+console.log("\n=== log composition ===");
+console.log(JSON.stringify(Object.fromEntries(counts), null, 2));
+console.log("logLength", state.current!.log.length, "toolCards", state.current!.toolCalls.size);
 
 console.log("\n=== resulting transcript structure ===");
 const log = state.current!.log;

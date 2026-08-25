@@ -53,7 +53,14 @@ const DB_NAME = "hydra-acp-history-cache";
 // daemon is only ever asked for what came after it), and every reload
 // rehydrates the damage. Dropping the store is the only honest repair.
 // Cost is one full replay per session on first load after upgrading.
-const DB_VERSION = 2;
+// Bumped to 3 to discard caches written while the messageId dedup was
+// live (between its introduction and removal earlier the same day). That
+// dedup kept only the first chunk of every multi-chunk agent message, so
+// affected entries hydrate as a wall of turn-stamps with little or no
+// text between them, and no amount of reloading repairs them -- the rest
+// of each message was never stored. Load full history recovers a session
+// immediately; this makes the repair automatic.
+const DB_VERSION = 3;
 const STORE = "sessions";
 // 6MB holds several screenshot-bearing turns plus a long text
 // transcript; 10 sessions caps the whole store around 60MB, well inside
