@@ -114,16 +114,6 @@ function byteSize(frame: JsonRpcFrame): number {
   }
 }
 
-// Every recordable session/update frame carries a messageId (cli's
-// recordAndBroadcast stamps one on all of them, not just prompts/turn
-// boundaries) — the same field queueFrameForCache is keyed on. Used to
-// dedupe merges below; only session/update frames are ever queued, so
-// the other shapes here are defensive, not expected in practice.
-function frameMessageId(frame: JsonRpcFrame): string | undefined {
-  const update = (frame.params as { update?: { messageId?: unknown } } | undefined)?.update;
-  return typeof update?.messageId === "string" ? update.messageId : undefined;
-}
-
 // Read a session's cached transcript and bump its LRU timestamp. Returns
 // null on a cache miss or any storage failure — always safe to treat the
 // same as "nothing cached".
@@ -266,50 +256,25 @@ function mergeAndTrim(
     const getReq = store.get(sessionId);
     getReq.onsuccess = () => {
       const existing = getReq.result as CachedSession | undefined;
-      // Two independent connections for the same session (a stale one
-      // still draining its own attach replay while a fresh one opens
-      // after a quick session-switch-and-back, or a forced-full replay
-      // landing on top of an already-cached partial one) can each queue
-      // the same historical frame for caching. mergeAndTrim used to
-      // concatenate blindly, so a redelivered frame didn't just render
-      // twice (acp.ts's own dedup guards catch that) — it also
-      // permanently doubled up in here, taking up budget the trim step
-      // below would then spend evicting genuinely older, still-needed
-      // frames to make room for (observed live: a duplicated response
-      // survived while the prompt that triggered it got trimmed out).
-      // Rebuild `existing.frames` through the same seen-set first so a
-      // record that already has a duplicate baked in from before this
-      // fix self-heals on its next write, not just stays merely
-      // non-worsening.
-      const seen = new Set<string>();
-      const keptExisting: CachedFrame[] = [];
-      for (const f of existing?.frames ?? []) {
-        const id = frameMessageId(f.frame);
-        if (id !== undefined) {
-          if (seen.has(id)) continue;
-          seen.add(id);
-        }
-        keptExisting.push(f);
-      }
-      const fresh: JsonRpcFrame[] = [];
-      for (const frame of newFrames) {
-        const id = frameMessageId(frame);
-        if (id !== undefined) {
-          if (seen.has(id)) continue;
-          seen.add(id);
-        }
-        fresh.push(frame);
-      }
+      // Do NOT dedupe these by update.messageId. It reads like a
+      // natural key but isn't unique per frame: some agents stamp their
+      // own message id (Claude's msg_01…) on every chunk of one reply,
+      // so all of that reply's chunks share it, and dropping repeats
+      // keeps only the first chunk. That truncated every agent bubble
+      // to a few characters on the next hydrate. Duplicate frames are
+      // prevented at the source instead — handleNotification skips
+      // caching anything replayed out of the cache (its fromCache
+      // argument), which is what was appending a second copy of the
+      // transcript on every session open.
       // Sizing happens here, once per debounce window, instead of per
       // frame at queue time — see queueFrameForCache.
-      const sized: CachedFrame[] = fresh.map((frame) => ({
+      const sized: CachedFrame[] = newFrames.map((frame) => ({
         frame,
         bytes: byteSize(frame),
       }));
-      const frames = [...keptExisting, ...sized];
+      const frames = [...(existing?.frames ?? []), ...sized];
       let totalBytes =
-        keptExisting.reduce((sum, f) => sum + f.bytes, 0) +
-        sized.reduce((sum, f) => sum + f.bytes, 0);
+        (existing?.totalBytes ?? 0) + sized.reduce((sum, f) => sum + f.bytes, 0);
       // Trim oldest-first until back under budget. A single oversized
       // frame (e.g. a huge tool-output blob) can still exceed the cap on
       // its own — that's fine, it just means this session temporarily
