@@ -86,7 +86,7 @@ export function el(tag: string, attrs?: Attrs, ...children: Child[]): HTMLElemen
 // landed on a form control, so it gets fully native behavior.
 export const TAP_MOVE_THRESHOLD = 10;
 
-function hasActiveSelection(): boolean {
+export function hasActiveSelection(): boolean {
   const sel = window.getSelection();
   return !!sel && !sel.isCollapsed && sel.toString().length > 0;
 }

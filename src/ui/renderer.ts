@@ -4,7 +4,14 @@
 // don't blow away the user's typing position.
 
 import { state } from "./state.js";
-import { renderApp, resyncChatScroll, tryPatchChat, tryRestoreScrollAnchor } from "./views.js";
+import { hasActiveSelection } from "./dom.js";
+import {
+  renderApp,
+  resyncChatScroll,
+  tryPatchChat,
+  tryRestoreScrollAnchor,
+  updateTurnToast,
+} from "./views.js";
 
 let scheduled = false;
 
@@ -69,6 +76,16 @@ document.addEventListener(
     pointerDown = false;
     if (!renderHeldByPress) return;
     renderHeldByPress = false;
+    // A click-and-drag text selection resolves exactly on this same
+    // pointerup — flushing the held render right here tears down (or,
+    // on the patch path, moves) the bubble the selection lives in and
+    // the browser drops it before the user ever sees it land. Hold off
+    // the same way a form control's native UI does below; selectionGate
+    // below picks it back up once the selection is gone.
+    if (hasActiveSelection()) {
+      renderHeldBySelection = true;
+      return;
+    }
     const target = e.target as HTMLElement | null;
     const tag = target?.tagName;
     if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") {
@@ -87,6 +104,19 @@ document.addEventListener(
   },
   true,
 );
+// Selecting text isn't only a pointer-drag gesture (double-click,
+// shift+arrow, "select all") and a selection can also sit there for a
+// while after it's made — any of the render triggers that fire
+// continuously during an active turn (streaming chunks, polling) would
+// otherwise land moments later and clear it anyway. Picks back up
+// automatically once the selection is gone, whether that's the user
+// clicking elsewhere or copying it out.
+let renderHeldBySelection = false;
+document.addEventListener("selectionchange", () => {
+  if (!renderHeldBySelection || hasActiveSelection()) return;
+  renderHeldBySelection = false;
+  render();
+});
 document.addEventListener(
   "pointercancel",
   () => {
@@ -154,6 +184,14 @@ export function render(): void {
           render();
         }
       }, TYPING_HOLDOFF_MS);
+      return;
+    }
+    if (hasActiveSelection()) {
+      // A selection can just be sitting there, made moments ago and not
+      // yet acted on — same risk as the pointerup case above (see its
+      // comment), just without a gesture in flight to hang the gate off
+      // of. selectionchange (above) flushes this once it's gone.
+      renderHeldBySelection = true;
       return;
     }
     lastRenderAt = performance.now();
@@ -268,6 +306,10 @@ function actuallyRender(): void {
     if (jumpToLatest) {
       const atBottom = newBody.scrollHeight - newBody.scrollTop - newBody.clientHeight < 50;
       jumpToLatest.classList.toggle("visible", !atBottom);
+    }
+    const turnToast = newBody.querySelector<HTMLElement>(".turn-toast");
+    if (turnToast) {
+      updateTurnToast(newBody, turnToast);
     }
   }
   const newList = root.querySelector<HTMLElement>(".list");
