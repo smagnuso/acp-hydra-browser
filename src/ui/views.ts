@@ -2255,18 +2255,21 @@ function renderChat(c: ChatState): HTMLElement {
     el(
       "div",
       { class: "chat-title-row" },
-      el(
-        "button",
-        {
-          class: "chat-back",
-          title: "Back to session list",
-          // Split view keeps the chat open and visible the whole
-          // time — "back" just moves keyboard focus to the rail
-          // instead of navigating away from it (see focusListRail).
-          ...tapHandler(() => (isWideLayout() ? focusListRail() : closeChat())),
-        },
-        "←",
-      ),
+      // Split view has the list on screen already, so there is nowhere
+      // to go "back" to — the arrow only ever moved keyboard focus, and
+      // Ctrl-P / Escape already do that. Narrow mode still needs it as
+      // real navigation.
+      isWideLayout()
+        ? null
+        : el(
+            "button",
+            {
+              class: "chat-back",
+              title: "Back to session list",
+              ...tapHandler(() => closeChat()),
+            },
+            "←",
+          ),
       el(
         "div",
         {
@@ -2382,7 +2385,13 @@ function renderChat(c: ChatState): HTMLElement {
             fmtCost(c.cost) as string,
           )
         : null,
-      el("button", { ...tapHandler(openOptionsModal), title: "Options" }, "⚙"),
+      // The rail's own topbar carries a gear in split view, and two of
+      // them a few hundred pixels apart opening the same modal is just
+      // noise. Narrow mode never shows the topbar alongside a chat, so
+      // this is the only one there.
+      isWideLayout()
+        ? null
+        : el("button", { ...tapHandler(openOptionsModal), title: "Options" }, "⚙"),
       el("button", { ...tapHandler(openFiles), title: "Files" }, "📁"),
       el(
         "button",
