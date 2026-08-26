@@ -1785,6 +1785,10 @@ interface ChatView {
   // parent as the prev/next buttons, so it only needs its own text kept
   // current, no separate show/hide of its own.
   turnToast: HTMLDivElement;
+  // The composer's textarea, built once and reused for this chat's whole
+  // lifetime. Rebuilding it per render tore down the browser's native
+  // IME/autocorrect session mid-word — see renderChat.
+  composerTextarea?: HTMLTextAreaElement;
 }
 
 const PIN_HOLDOFF_MS = 450;
@@ -2708,7 +2712,8 @@ function renderChat(c: ChatState): HTMLElement {
     e.preventDefault();
     sendPrompt();
   };
-  const textarea = el(
+  const buildTextarea = (): HTMLTextAreaElement =>
+    el(
     "textarea",
     {
       "data-focus-key": "composer",
@@ -2773,8 +2778,38 @@ function renderChat(c: ChatState): HTMLElement {
     },
     c.composerValue,
   ) as HTMLTextAreaElement;
+
+  // Reuse the existing node rather than building a new one. A render
+  // triggered by streaming would otherwise replace the textarea the user
+  // is typing into, which destroys the browser's IME/autocorrect session
+  // mid-word — dropped characters and useless suggestions while a turn is
+  // in flight. The typing holdoff can't prevent this: after a rebuild,
+  // focus is restored asynchronously, so document.activeElement briefly
+  // isn't the textarea and isActivelyTyping() reports false, letting the
+  // next rebuild through too.
+  //
+  // oninput keeps c.composerValue in step with the element, so the two
+  // only diverge when something else changed it (a send clearing it,
+  // history navigation, a restored draft) — which makes an unconditional
+  // sync safe rather than something that would fight the user's typing.
+  let textarea = view.composerTextarea;
+  if (!textarea) {
+    textarea = buildTextarea();
+    view.composerTextarea = textarea;
+  }
+  textarea.placeholder = c.ready
+    ? "Message…"
+    : c.cold
+    ? "Message… (wakes the session)"
+    : "Connecting…";
+  if (textarea.value !== c.composerValue) {
+    textarea.value = c.composerValue;
+    const ta = textarea;
+    queueMicrotask(() => autosize(ta));
+  }
   if (c.composerValue && c.composerValue.length > 0) {
-    queueMicrotask(() => autosize(textarea));
+    const ta = textarea;
+    queueMicrotask(() => autosize(ta));
   }
   // Desktop only, and only the chat's first render — see composerAutoFocused
   // in types.ts for why this can't just run on every renderChat call.
