@@ -523,6 +523,13 @@ export interface AppState {
   // `/` search, which is dropped when the picker closes — a filter you
   // forgot you left on is far more confusing than retyping it.
   sessionSearch: string;
+  // Root font-size multiplier. The whole UI is sized in rem, so scaling
+  // the root element scales every pane together rather than needing a
+  // per-component knob.
+  fontScale: number;
+  // Width of the session rail in split view, in px. null = the CSS
+  // default (flex-basis). Persisted so a chosen split survives reloads.
+  railWidth: number | null;
   // Hide agent_thought_chunk bubbles across every chat. Persisted
   // globally (not per-session) since it's a display preference, not
   // session state — thought chunks are still received and kept in

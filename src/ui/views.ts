@@ -44,7 +44,7 @@ import {
   unsubscribeFromPush,
 } from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
-import { applyTheme } from "./theme.js";
+import { applyFontScale, applyTheme } from "./theme.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
@@ -322,6 +322,9 @@ function renderRail(): HTMLElement {
     { class: "rail", tabindex: "-1", "data-focus-key": "list-rail" },
     ...buildRailContents(),
   );
+  if (state.railWidth !== null) {
+    rail.style.flex = `0 0 ${clampRailWidth(state.railWidth)}px`;
+  }
   markRailClean();
   return rail;
 }
@@ -364,6 +367,48 @@ function refreshRailInPlace(rail: HTMLElement): void {
   }
 }
 
+// Keeps the rail usable at both ends: narrow enough to be mostly chat,
+// wide enough that session titles aren't all ellipsis, and never so wide
+// the chat pane is squeezed out.
+function clampRailWidth(px: number): number {
+  const max = Math.max(280, Math.min(window.innerWidth * 0.6, window.innerWidth - 360));
+  return Math.round(Math.max(240, Math.min(px, max)));
+}
+
+// Drag handle between the rail and the chat. Resizes by writing to the
+// rail's own style during the drag rather than going through render() —
+// a full rebuild per pointermove would be both janky and pointless,
+// since only one element's width is changing. State is committed once,
+// on release.
+function renderSplitter(): HTMLElement {
+  const sp = el("div", { class: "splitter", title: "Drag to resize" });
+  sp.addEventListener("pointerdown", (e: PointerEvent) => {
+    const rail = sp.previousElementSibling as HTMLElement | null;
+    if (!rail) return;
+    // Stops the gesture turning into a text selection across both panes.
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = rail.getBoundingClientRect().width;
+    sp.setPointerCapture(e.pointerId);
+    sp.classList.add("dragging");
+    const move = (ev: PointerEvent): void => {
+      rail.style.flex = `0 0 ${clampRailWidth(startW + (ev.clientX - startX))}px`;
+    };
+    const done = (): void => {
+      sp.releasePointerCapture(e.pointerId);
+      sp.classList.remove("dragging");
+      sp.removeEventListener("pointermove", move);
+      sp.removeEventListener("pointerup", done);
+      sp.removeEventListener("pointercancel", done);
+      setState({ railWidth: clampRailWidth(rail.getBoundingClientRect().width) });
+    };
+    sp.addEventListener("pointermove", move);
+    sp.addEventListener("pointerup", done);
+    sp.addEventListener("pointercancel", done);
+  });
+  return sp;
+}
+
 function renderSplitLayout(s: AppState): HTMLElement {
   // "split-detail", not "detail" — that name collides with the
   // pre-existing generic .detail label+control row class used all over
@@ -382,7 +427,7 @@ function renderSplitLayout(s: AppState): HTMLElement {
       el("div", { class: "split-detail-empty" }, "Select a session from the list"),
     );
   }
-  return el("div", { class: "split" }, renderRail(), detail);
+  return el("div", { class: "split" }, renderRail(), renderSplitter(), detail);
 }
 
 // Moves keyboard focus to the session-list rail (wide layout only) so
@@ -937,6 +982,32 @@ const THEME_OPTIONS: Array<{ value: AppState["theme"]; label: string }> = [
   { value: "light", label: "light" },
 ];
 
+const FONT_SCALE_OPTIONS = [
+  { value: 0.85, label: "smaller" },
+  { value: 0.95, label: "small" },
+  { value: 1, label: "normal" },
+  { value: 1.15, label: "large" },
+  { value: 1.3, label: "larger" },
+  { value: 1.5, label: "largest" },
+];
+
+function fontSizeRow(): HTMLElement {
+  const select = el(
+    "select",
+    {
+      onchange: (e: Event) => {
+        setState({ fontScale: Number((e.target as HTMLSelectElement).value) });
+        applyFontScale();
+      },
+    },
+    ...FONT_SCALE_OPTIONS.map((opt) =>
+      el("option", { value: String(opt.value) }, opt.label),
+    ),
+  ) as HTMLSelectElement;
+  select.value = String(state.fontScale);
+  return el("div", { class: "detail" }, el("span", { class: "k" }, "text size"), select);
+}
+
 function themeRow(): HTMLElement {
   const select = el(
     "select",
@@ -975,6 +1046,7 @@ function renderOptionsModal(): HTMLElement {
       { class: "modal" },
       el("h2", null, "Options"),
       themeRow(),
+      fontSizeRow(),
       hideThoughtsRow(),
       notifyOnTurnEndRow(),
       el(
@@ -1388,7 +1460,9 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
       el(
         "div",
         { class: "actions" },
-        el("button", { ...tapHandler(closeModal), disabled: m.busy }, "Cancel"),
+        // Deliberately NOT disabled while busy: a create that stalls
+        // would otherwise leave no way out but a reload.
+        el("button", { ...tapHandler(closeModal) }, "Cancel"),
         el(
           "button",
           { class: "primary", ...tapHandler(createSession), disabled: m.busy },
@@ -1434,17 +1508,26 @@ async function createSession(): Promise<void> {
     if (m.agentId) body.agentId = m.agentId;
     if (m.name) body.name = m.name;
     if (m.prompt) body.prompt = m.prompt;
+    // Generous, because this spawns an agent — but bounded, so a stalled
+    // request surfaces as an error the user can act on instead of a
+    // dialog wedged on "Creating…" forever.
     const data = await api<{ sessionId?: string }>("/api/sessions", {
       method: "POST",
       body: JSON.stringify(body),
+      timeoutMs: 60_000,
     });
     saveLastCwd(m.cwd);
-    closeModal();
     void pollSessions();
+    // The dialog is dismissable while this is in flight, so it may
+    // already be gone. If the user gave up on it, don't yank them into
+    // a session they stopped waiting for — it's in the list either way.
+    if (state.modal !== m) return;
+    closeModal();
     if (data && data.sessionId) {
       openChat(data.sessionId, false);
     }
   } catch (err) {
+    if (state.modal !== m) return;
     m.err = (err as Error).message;
     m.busy = false;
     render();

@@ -15,15 +15,36 @@ function hasActiveSelection(): boolean {
   return sel.toString().length > 0;
 }
 
+// `timeoutMs` guards against a request that never settles. A bare fetch
+// has no timeout: if the connection stalls (a cell/wifi handoff, the tab
+// backgrounded mid-flight) the promise simply never resolves, and any UI
+// gated on its completion is stuck until a reload.
 export async function api<T = unknown>(
   path: string,
-  opts?: RequestInit,
+  opts?: RequestInit & { timeoutMs?: number },
 ): Promise<T> {
-  const r = await fetch(path, {
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
+  const { timeoutMs, ...init } = opts ?? {};
+  const controller = timeoutMs !== undefined ? new AbortController() : undefined;
+  const timer =
+    controller !== undefined
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : undefined;
+  let r: Response;
+  try {
+    r = await fetch(path, {
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      ...(controller ? { signal: controller.signal } : {}),
+      ...init,
+    });
+  } catch (err) {
+    if (controller?.signal.aborted) {
+      throw new Error("timed out — it may still have completed; check the session list");
+    }
+    throw err;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`;
     try {

@@ -20,6 +20,14 @@ function resolvedTheme(): "light" | "dark" {
   return state.theme;
 }
 
+// Everything in this UI is sized in rem, so scaling the root element
+// scales the entire app — text, padding, control hit targets — in one
+// move, and keeps the proportions the layout was designed around. 16 is
+// the browser default this stylesheet assumes.
+export function applyFontScale(): void {
+  document.documentElement.style.fontSize = `${16 * state.fontScale}px`;
+}
+
 export function applyTheme(): void {
   const resolved = resolvedTheme();
   document.documentElement.setAttribute("data-theme", resolved);

@@ -16,6 +16,8 @@ const PERSISTED_KEYS = [
   "hideThoughts",
   "notifyOnTurnEnd",
   "theme",
+  "fontScale",
+  "railWidth",
 ] as const;
 
 function loadPersistedFilters(): Partial<AppState> {
@@ -48,6 +50,8 @@ export const state: AppState = {
   // WSS, which causes hydra to resurrect it from disk automatically.
   showCold: false,
   sessionSearch: "",
+  fontScale: 1,
+  railWidth: null,
   // Default to local: imported sessions (from peer hosts via the
   // archiver) are noisy if they all show up alongside the user's own
   // work. The dropdown lets them switch to a specific peer or "all".

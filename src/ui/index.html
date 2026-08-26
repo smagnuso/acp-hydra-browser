@@ -130,23 +130,28 @@ pre code { background: transparent; padding: 0; }
 /* Split (wide-layout) view — session-list rail alongside the active
    chat instead of either taking the whole screen. Breakpoint mirrors
    dom.ts's isWideLayout() (min-width: 1000px); keep the two in sync.
-   .split-detail's flex-grow:0 caps it at 58rem (the chat-body/composer
-   content column's own ~56rem clamp, calc(50% - 28rem), plus its
-   1rem-each-side floor) — past that, widening the window further does
-   nothing for the chat, so .rail (the only flex-grow item left, no
-   max-width of its own) is what absorbs the extra width instead of it
-   going to dead padding. Unlike the chat's cap, .rail's isn't a
-   readability constraint — a wider list of session cards doesn't get
-   harder to use, so there's no reason to freeze it too. Named
+   The chat pane takes all the leftover width and the rail holds its
+   basis (or whatever the splitter last set). Readability is already
+   handled one level down, by .chat-body's own centering clamp, so a
+   second cap here just stopped the app short of the window edge and
+   handed the surplus to the rail — which is not where extra width is
+   wanted. The rail stays resizable via .splitter for anyone who does
+   want a wider list. Named
    "split-detail", not "detail" — the latter is already a generic
    label+control row class used all over the app (options modal,
    chat-details panel, permission rows, …); reusing it here silently
    applied this wrapper's column-flex/max-width to every one of those
    rows too. */
 .split { flex: 1; display: flex; overflow: hidden; }
-.rail { flex: 1 1 20rem; min-width: 18rem; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
+.rail { flex: 0 0 22rem; min-width: 18rem; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
 .rail:focus { outline: none; box-shadow: inset 3px 0 0 var(--accent); }
-.split-detail { flex: 0 1 58rem; max-width: 58rem; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* Sits in the flex row between rail and chat. Deliberately wider than it
+   looks: the visible line is the 1px border on .rail, while the handle
+   itself spans a few px either side so it's grabbable without precision
+   aiming. */
+.splitter { flex: 0 0 6px; margin-left: -3px; margin-right: -3px; z-index: 3; cursor: col-resize; background: transparent; }
+.splitter:hover, .splitter.dragging { background: var(--accent); opacity: 0.5; }
+.split-detail { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .split-detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 
 /* Header */
@@ -161,7 +166,10 @@ pre code { background: transparent; padding: 0; }
 .pill.cold { color: var(--temp-cold); border-color: var(--temp-cold); }
 .pill.working { color: var(--busy); border-color: var(--busy); }
 .pill.working .dot { animation: pill-pulse 1.1s ease-in-out infinite; }
-.pill.waiting { color: var(--accent); border-color: var(--accent); }
+/* Same yellow as busy: an armed background task and a turn in flight
+   are both "work is happening", and splitting them across two hues
+   suggested a distinction that isn't there. */
+.pill.waiting { color: var(--busy); border-color: var(--busy); }
 .pill.compacting { color: var(--warn); border-color: var(--warn); animation: pill-pulse 1.1s ease-in-out infinite; cursor: default; }
 @keyframes pill-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 
@@ -228,7 +236,7 @@ pre code { background: transparent; padding: 0; }
    tasks sidebar gadget. No "done" state: a row just stops appearing. */
 .armed-tasks { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.4rem 0.9rem; background: var(--panel); border-bottom: 1px solid var(--border); font-size: 0.82rem; }
 .armed-task { display: flex; gap: 0.4rem; align-items: baseline; }
-.armed-task .dot { color: var(--accent); }
+.armed-task .dot { color: var(--busy); }
 .armed-task .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .armed-task .elapsed { color: var(--muted); font-variant-numeric: tabular-nums; }
 .armed-tasks-more { color: var(--muted); font-size: 0.78rem; padding-left: 1.1rem; }
@@ -242,7 +250,7 @@ pre code { background: transparent; padding: 0; }
    gestures until an unrelated touch resets its internal state
    (scrolling dead, taps still fine). Reproduces with zero app JS
    involved — pure scroll-chaining, not a render/pin timing bug. */
-.chat-body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 1rem max(1rem, calc(50% - 28rem)); display: flex; flex-direction: column; gap: 0.65rem; }
+.chat-body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 1rem max(1rem, calc(50% - 52rem)); display: flex; flex-direction: column; gap: 0.65rem; }
 /* Scroll toolbar: appears only while scrolled away from the bottom
    (see ensureChatView's scroll listener), same trigger and sticky
    positioning as the original lone "Jump to latest" button — now a
@@ -278,8 +286,8 @@ pre code { background: transparent; padding: 0; }
 .show-earlier { align-self: center; margin-bottom: 0.5rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted); font-size: 0.82rem; cursor: pointer; }
 .show-earlier:hover { background: var(--panel); color: var(--fg); }
 .msg { padding: 0.6rem 0.9rem; border-radius: 10px; max-width: 100%; word-wrap: break-word; }
-.msg.user { background: var(--user-bg); border: 1px solid var(--border); align-self: flex-end; max-width: 90%; }
-.msg.agent { background: var(--agent-bg); border: 1px solid var(--border); align-self: flex-start; max-width: 90%; }
+.msg.user { background: var(--user-bg); border: 1px solid var(--border); align-self: flex-end; max-width: 97%; }
+.msg.agent { background: var(--agent-bg); border: 1px solid var(--border); align-self: flex-start; max-width: 97%; }
 .msg.system { background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; align-self: flex-start; max-width: 70%; cursor: pointer; }
 .msg.system.collapsed .body { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .msg.error { background: rgba(249,117,131,0.1); border: 1px solid var(--bad); color: var(--bad); }
@@ -332,15 +340,22 @@ pre code { background: transparent; padding: 0; }
 .detail { font-size: 0.82rem; margin-bottom: 0.3rem; display: flex; gap: 0.4rem; align-items: baseline; }
 .detail .k { color: var(--muted); flex: 0 0 6rem; text-transform: capitalize; }
 .detail code { word-break: break-all; }
+/* Explicit background/colour rather than transparent: a transparent
+   select leaves the native popup to pick its own backdrop (white), while
+   the option text keeps the theme's light foreground — unreadable grey
+   on white in dark mode. The options need stating too, since the popup
+   is OS-drawn and doesn't inherit from the closed control. */
 .detail select {
   font-size: inherit;
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
-  background: transparent;
+  background: var(--panel-2);
+  color: var(--fg);
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
 }
+.detail select option { background: var(--panel); color: var(--fg); }
 .detail .checkbox-label { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
 .perm .detail.note { color: var(--muted); font-style: italic; }
 .perm .opts { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
@@ -376,7 +391,7 @@ pre code { background: transparent; padding: 0; }
 .queue-editor { margin-bottom: 0.3rem; width: 100%; }
 /* Matches .msg.user's own max-width, so the bubble keeps the width it
    had as text instead of collapsing around the textarea (views.ts). */
-.msg.user.bubble-editing { width: 90%; }
+.msg.user.bubble-editing { width: 97%; }
 .queue-editor textarea { width: 100%; min-height: 2rem; max-height: 60vh; resize: vertical; font: inherit; padding: 0.4rem 0.5rem; box-sizing: border-box; overflow-y: auto; }
 .queue-editor-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.4rem; }
 .queue-editor-actions button { min-height: 2.75rem; padding: 0.4rem 1rem; }

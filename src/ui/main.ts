@@ -11,11 +11,14 @@ import { ensureServiceWorker, subscribeForPush } from "./notifications.js";
 import { reportPushEndpoint, reportVisibility } from "./bridge.js";
 import { handleListKeydown, focusListRail, closeModal, scrollToTurn } from "./views.js";
 import { state } from "./state.js";
-import { initTheme } from "./theme.js";
+import { applyFontScale, initTheme } from "./theme.js";
 
 // As early as possible, before the first render() — applying the
 // persisted theme after paint would flash the wrong one.
 initTheme();
+// Before first paint, same as the theme — applying it after would
+// visibly reflow the whole app.
+applyFontScale();
 
 initViewportHeight();
 
@@ -102,7 +105,10 @@ window.addEventListener("keydown", (e) => {
 // over the list's own Escape handling while both could otherwise apply.
 window.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || !state.modal) return;
-  if (state.modal.kind === "session" && state.modal.busy) return;
+  // The session dialog used to be exempt while busy, on the theory that
+  // Escape shouldn't do what its own disabled Cancel button refuses. But
+  // a create that never settles then had no exit at all — see
+  // createSession's timeout and its now always-enabled Cancel.
   e.preventDefault();
   // stopImmediatePropagation, not stopPropagation: handleListKeydown
   // below is a SIBLING listener on this same window target (a separate
