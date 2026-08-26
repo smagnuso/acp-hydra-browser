@@ -1020,20 +1020,58 @@ function fontSizeRow(): HTMLElement {
 // Which bundle this client is actually running. A stale cached PWA and
 // a real bug present identically, and there's no inspector to hand on a
 // phone — this makes the difference readable in two taps.
+// Tap to copy. These exist to be reported back, and retyping a build
+// stamp or a frame breakdown off a phone screen is exactly the friction
+// that stops someone bothering. Falls back to a selection when the
+// clipboard API isn't available (it needs a secure context, and this is
+// reachable over plain http on a LAN), so the value is still grabbable.
+function copyableDiagnostic(label: string, value: string): HTMLElement {
+  const shown = el("span", { class: "diag-value" }, value);
+  const row = el(
+    "div",
+    {
+      class: "detail diag-copy",
+      title: "Tap to copy",
+      ...tapHandler(() => {
+        const done = (): void => {
+          const prev = shown.textContent;
+          shown.textContent = "copied";
+          setTimeout(() => {
+            shown.textContent = prev;
+          }, 1200);
+        };
+        const text = `${label}: ${value}`;
+        if (navigator.clipboard?.writeText) {
+          void navigator.clipboard.writeText(text).then(done, () => selectFallback(shown));
+        } else {
+          selectFallback(shown);
+        }
+      }),
+    },
+    el("span", { class: "k" }, label),
+    shown,
+  );
+  return row;
+}
+
+// No clipboard API — select the text so a long-press "Copy" still works.
+function selectFallback(node: HTMLElement): void {
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
 // What this client's history cache holds for the open session. Readable
 // on a phone, where the console isn't.
 function cacheRow(): HTMLElement {
-  return el(
-    "div",
-    { class: "detail" },
-    el("span", { class: "k" }, "cache"),
-    el("span", { style: "font-size:0.75rem;word-break:break-all" }, state.cacheInfo ?? "…"),
-  );
+  return copyableDiagnostic("cache", state.cacheInfo ?? "…");
 }
 
 function buildRow(): HTMLElement {
   const id = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
-  return el("div", { class: "detail" }, el("span", { class: "k" }, "build"), el("span", null, id));
+  return copyableDiagnostic("build", id);
 }
 
 function themeRow(): HTMLElement {
@@ -1075,10 +1113,14 @@ function renderOptionsModal(): HTMLElement {
       el("h2", null, "Options"),
       themeRow(),
       fontSizeRow(),
-      buildRow(),
-      cacheRow(),
       hideThoughtsRow(),
       notifyOnTurnEndRow(),
+      // Diagnostics, not settings — nothing here is adjustable. Kept
+      // because both have already earned their place: "which bundle is
+      // this client on" and "what does its cache actually hold" were
+      // each unanswerable on a phone, and each one cost a wrong
+      // conclusion before it existed.
+      el("div", { class: "diagnostics" }, buildRow(), cacheRow()),
       el(
         "div",
         { class: "actions" },
