@@ -2695,16 +2695,23 @@ function renderChat(c: ChatState): HTMLElement {
           c.historyDraft = null;
         }
         autosize(t);
-        // Sync the send/enqueue/amend buttons' disabled state directly
-        // rather than going through a full render() — a full teardown
-        // on every keystroke tanks typing responsiveness and resets
-        // the textarea node out from under the browser's native
-        // spellcheck/autocorrect session.
+        // Dim/undim the send/enqueue/amend buttons directly rather than
+        // going through a full render() — a full teardown on every
+        // keystroke tanks typing responsiveness and resets the textarea
+        // node out from under the browser's native spellcheck session.
+        //
+        // A class, NOT the disabled property. A disabled button swallows
+        // a tap silently, so any moment this state lags reality — a tap
+        // landing between keystroke and sync, a re-render carrying a
+        // stale value, a layout shift as the mobile keyboard dismisses —
+        // costs a press with no feedback, which is what made Send need
+        // two or three taps. sendPrompt already no-ops on an empty
+        // composer, so leaving it enabled is safe.
         const nowHasContent = t.value.trim().length > 0 || c.attachments.length > 0;
         const buttons =
           t.closest(".composer")?.querySelectorAll<HTMLButtonElement>(".content-gated") ?? [];
         for (const btn of buttons) {
-          btn.disabled = !nowHasContent;
+          btn.classList.toggle("empty", !nowHasContent);
         }
       },
     },
@@ -2742,8 +2749,7 @@ function renderChat(c: ChatState): HTMLElement {
         el(
           "button",
           {
-            class: "content-gated",
-            disabled: !hasContent,
+            class: `content-gated${hasContent ? "" : " empty"}`,
             ...tapHandler(amendPrompt),
             title: "Cancel the current turn and replace its prompt",
           },
@@ -2755,8 +2761,7 @@ function renderChat(c: ChatState): HTMLElement {
       el(
         "button",
         {
-          class: "primary content-gated",
-          disabled: !hasContent,
+          class: `primary content-gated${hasContent ? "" : " empty"}`,
           ...tapHandler(sendPrompt),
           title: "Queue this prompt to run after the current turn",
         },
@@ -2767,7 +2772,7 @@ function renderChat(c: ChatState): HTMLElement {
     sendButtons.push(
       el(
         "button",
-        { class: "primary content-gated", disabled: !hasContent, ...tapHandler(sendPrompt) },
+        { class: `primary content-gated${hasContent ? "" : " empty"}`, ...tapHandler(sendPrompt) },
         "Send",
       ),
     );
