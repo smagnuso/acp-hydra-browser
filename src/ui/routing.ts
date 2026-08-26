@@ -6,6 +6,7 @@ import { setState, state } from "./state.js";
 import { handleFrame, stopHeartbeat } from "./bridge.js";
 import { cancelUnboundQueued } from "./queue.js";
 import { render } from "./renderer.js";
+import { isWideLayout } from "./dom.js";
 import { handleNotification, resetChatHistoryState } from "./acp.js";
 import { loadCachedSession } from "./history-cache.js";
 import { loadDraft } from "./composer-draft.js";
@@ -66,11 +67,21 @@ export function applyProtocolLaunch(): void {
 // hashWriting still defends against a re-entrant applyHashRoute if a
 // future browser variant queues hashchange synchronously off pushState.
 let hashWriting = false;
+// Set for a navigation that restores state rather than expressing an
+// intent to navigate — currently just the boot-time last-session
+// restore. Such a navigation must REPLACE the current history entry:
+// pushing one means the restored session becomes a phantom step that
+// Back walks into on the way out of the app, which made Back behave
+// differently depending on how the page was reached.
+let replaceNextHash = false;
 function setLocationHash(hash: string): void {
   if (window.location.hash === hash) return;
   hashWriting = true;
+  const write = replaceNextHash ? history.replaceState : history.pushState;
+  replaceNextHash = false;
   try {
-    history.pushState(
+    write.call(
+      history,
       null,
       "",
       hash || window.location.pathname + window.location.search,
@@ -164,7 +175,7 @@ export function openChat(sessionId: string, load: boolean): void {
   // Enter, a fresh deep link, session creation) funnels through here, so
   // this one line is the single place that needs to know about it,
   // rather than every call site remembering to sync it separately.
-  setState({ view: "chat", listHighlightedSessionId: sessionId });
+  setState({ view: "chat", listHighlightedSessionId: sessionId, lastSessionId: sessionId });
   void hydrateFromCacheThenConnect(initial);
 }
 
@@ -405,6 +416,38 @@ function resetConnectionStateForReconnect(chat: ChatState): void {
   // whatever socket replaces it — bridge.ts's startHeartbeat (fired
   // from the new connection's bridge/ready) sets up fresh ones.
   stopHeartbeat(chat);
+}
+
+// On a cold load with no session in the URL, fall back to whichever
+// session was open last: highlight it in the list, and in split layout
+// (where the chat pane would otherwise sit empty next to the rail) open
+// it outright.
+//
+// Deliberately waits for the first session list rather than opening
+// blind. Attaching to a cold, disk-only session resurrects it, and doing
+// that unbidden just because a tab was reloaded would spin an agent back
+// up nobody asked for — so a cold session is highlighted but not opened.
+export function maybeRestoreLastSession(): void {
+  // A hash route already picked a session; it wins.
+  if (state.view === "chat") return;
+  const id = state.lastSessionId;
+  if (!id) return;
+  setState({ listHighlightedSessionId: id });
+  if (!isWideLayout()) return;
+  const attempt = (n: number): void => {
+    // The user got there first, or navigated away while we waited.
+    if (state.view === "chat") return;
+    const found = state.sessions.find((s) => s.sessionId === id);
+    if (found) {
+      if (found.status !== "cold") {
+        replaceNextHash = true;
+        openChat(id, false);
+      }
+      return;
+    }
+    if (n < 20) setTimeout(() => attempt(n + 1), 250);
+  };
+  attempt(0);
 }
 
 export function closeChat(): void {

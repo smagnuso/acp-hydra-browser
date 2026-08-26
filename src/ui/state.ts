@@ -18,6 +18,9 @@ const PERSISTED_KEYS = [
   "theme",
   "fontScale",
   "railWidth",
+  // Which session to come back to on a cold load — see
+  // maybeRestoreLastSession.
+  "lastSessionId",
 ] as const;
 
 function loadPersistedFilters(): Partial<AppState> {

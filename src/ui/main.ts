@@ -1,7 +1,13 @@
 // Boot. Wires up DOM events that drive the rest of the SPA.
 
 import { startPolling, loadAgents, loadConfig } from "./api.js";
-import { applyHashRoute, applyProtocolLaunch, closeChat, forceReconnect } from "./routing.js";
+import {
+  applyHashRoute,
+  applyProtocolLaunch,
+  closeChat,
+  forceReconnect,
+  maybeRestoreLastSession,
+} from "./routing.js";
 import { render } from "./renderer.js";
 import { initPullToRefresh } from "./pull-refresh.js";
 import { initSwipeBack } from "./swipe-nav.js";
@@ -46,6 +52,7 @@ window.addEventListener("DOMContentLoaded", () => {
   }
   applyProtocolLaunch();
   applyHashRoute();
+  maybeRestoreLastSession();
   render();
   initPullToRefresh();
   initSwipeBack();
