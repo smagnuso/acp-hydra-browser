@@ -5,7 +5,8 @@
 import { setState, state } from "./state.js";
 import { handleFrame, stopHeartbeat } from "./bridge.js";
 import { cancelUnboundQueued } from "./queue.js";
-import { render } from "./renderer.js";
+import { render, renderNow } from "./renderer.js";
+import { timed } from "./perf.js";
 import { isWideLayout } from "./dom.js";
 import { handleNotification, resetChatHistoryState } from "./acp.js";
 import { loadCachedSession } from "./history-cache.js";
@@ -194,6 +195,7 @@ async function hydrateFromCacheThenConnect(chat: ChatState): Promise<void> {
     return;
   }
   if (cached) {
+    timed("cache-replay", () => {
     for (const frame of cached.frames) {
       // One malformed frame must not cost us the rest of the
       // transcript. This is a bare loop over every cached frame, so an
@@ -206,6 +208,7 @@ async function hydrateFromCacheThenConnect(chat: ChatState): Promise<void> {
         console.error("[hydra] cached frame failed to replay", err, frame);
       }
     }
+    });
     chat.lastSeenMessageId = chat.lastSeenMessageId ?? cached.lastSeenMessageId;
     // The cache is byte-capped (history-cache.ts), so a hit doesn't
     // guarantee we have this session's whole history — just render()
@@ -463,6 +466,10 @@ export function closeChat(): void {
     // on return — matches the TUI's session picker behavior.
     listHighlightedSessionId: returningFrom ?? state.listHighlightedSessionId,
   });
+  // Paint the list and its highlight together on the next frame — see
+  // renderNow. setState's own render is throttled, which is what made
+  // the highlight arrive after the list it belongs to.
+  renderNow();
 }
 
 // Called from main.ts's `online` listener. A WebSocket left open

@@ -8,7 +8,7 @@ import {
   forceReconnect,
   maybeRestoreLastSession,
 } from "./routing.js";
-import { render } from "./renderer.js";
+import { render, renderNow } from "./renderer.js";
 import { initPullToRefresh } from "./pull-refresh.js";
 import { initSwipeBack } from "./swipe-nav.js";
 import { initViewportHeight } from "./viewport.js";
@@ -18,10 +18,12 @@ import { reportPushEndpoint, reportVisibility } from "./bridge.js";
 import { handleListKeydown, focusListRail, closeModal, scrollToTurn } from "./views.js";
 import { state } from "./state.js";
 import { applyFontScale, initTheme } from "./theme.js";
+import { initPerfObserver } from "./perf.js";
 
 // As early as possible, before the first render() — applying the
 // persisted theme after paint would flash the wrong one.
 initTheme();
+initPerfObserver();
 // Before first paint, same as the theme — applying it after would
 // visibly reflow the whole app.
 applyFontScale();
@@ -65,6 +67,20 @@ window.addEventListener("hashchange", () => {
 // Keeps the server's per-session visibility registry (ws-bridge.ts)
 // current so a turn-end push can be suppressed while this tab is
 // actually the one being looked at — see turn-notify-callback.ts.
+// Mobile browsers freeze the page during a back transition and may
+// restore it from the bfcache. rAF is paused throughout, and every
+// render() is scheduled through rAF — so a view change made just before
+// the freeze has its repaint stranded until the page fully resumes,
+// which showed up as the session list taking seconds to appear
+// highlighted after Back on a phone (and never on desktop, which does
+// not freeze the page for same-document navigation). Nothing in the
+// render gates can rescue that; the paint has to be re-requested once
+// frames are running again.
+window.addEventListener("pageshow", () => renderNow());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") renderNow();
+});
+
 document.addEventListener("visibilitychange", () => reportVisibility());
 window.addEventListener("focus", () => reportVisibility());
 window.addEventListener("blur", () => reportVisibility());

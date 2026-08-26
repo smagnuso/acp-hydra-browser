@@ -41,6 +41,7 @@
 // full-replay attach path, same as before this module existed.
 
 import type { JsonRpcFrame } from "./acp.js";
+import { timed } from "./perf.js";
 
 const DB_NAME = "hydra-acp-history-cache";
 // Bumped to 2 to discard every cache written before the replay fixes
@@ -65,6 +66,14 @@ const STORE = "sessions";
 // 6MB holds several screenshot-bearing turns plus a long text
 // transcript; 10 sessions caps the whole store around 60MB, well inside
 // a normal IndexedDB origin quota.
+// 6MB holds several screenshot-bearing turns plus a long text
+// transcript; 10 sessions caps the whole store around 60MB, well inside
+// a normal IndexedDB origin quota.
+//
+// Briefly cut to 1.5MB on a theory that the flush's structured clone was
+// blocking the main thread on mobile. On-device timing disproved it --
+// no cache-* operation registered above 120ms -- so the cap is back
+// where it belongs.
 const MAX_BYTES_PER_SESSION = 6_000_000;
 const MAX_CACHED_SESSIONS = 10;
 const FLUSH_DEBOUNCE_MS = 2000;
@@ -149,7 +158,7 @@ export async function loadCachedSession(
       store.put(rec);
       resolve({
         lastSeenMessageId: rec.lastSeenMessageId,
-        frames: rec.frames.map((f) => f.frame),
+        frames: timed("cache-read-map", () => rec.frames.map((f) => f.frame)),
       });
     };
     req.onerror = () => resolve(null);
@@ -313,10 +322,9 @@ function mergeAndTrim(
       // transcript on every session open.
       // Sizing happens here, once per debounce window, instead of per
       // frame at queue time — see queueFrameForCache.
-      const sized: CachedFrame[] = newFrames.map((frame) => ({
-        frame,
-        bytes: byteSize(frame),
-      }));
+      const sized: CachedFrame[] = timed("cache-size", () =>
+        newFrames.map((frame) => ({ frame, bytes: byteSize(frame) })),
+      );
       const frames = [...(existing?.frames ?? []), ...sized];
       let totalBytes =
         (existing?.totalBytes ?? 0) + sized.reduce((sum, f) => sum + f.bytes, 0);
@@ -335,7 +343,7 @@ function mergeAndTrim(
         totalBytes,
         lastAccessed: Date.now(),
       };
-      store.put(rec);
+      timed("cache-put", () => store.put(rec));
       resolve();
     };
     getReq.onerror = () => resolve();

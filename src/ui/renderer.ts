@@ -4,6 +4,7 @@
 // don't blow away the user's typing position.
 
 import { state } from "./state.js";
+import { timed } from "./perf.js";
 import { hasActiveSelection } from "./dom.js";
 import {
   renderApp,
@@ -74,6 +75,10 @@ document.addEventListener(
   (e) => {
     if (!pointerDown) return;
     pointerDown = false;
+    if (stuckPointerTimer !== undefined) {
+      clearTimeout(stuckPointerTimer);
+      stuckPointerTimer = undefined;
+    }
     if (!renderHeldByPress) return;
     renderHeldByPress = false;
     // A click-and-drag text selection resolves exactly on this same
@@ -162,6 +167,23 @@ export function isActivelyTyping(): boolean {
   return performance.now() - lastKeystrokeAt < TYPING_HOLDOFF_MS;
 }
 let renderHeldByTyping = false;
+// How long a pointer may claim to be down before we stop believing it.
+const STUCK_POINTER_MS = 700;
+let stuckPointerTimer: ReturnType<typeof setTimeout> | undefined;
+
+// A view transition (list <-> chat) should paint on the next frame, not
+// wait out MIN_RENDER_INTERVAL_MS. The throttle is there to bound the
+// cost of streaming repaints; a navigation happens once and is exactly
+// the moment latency is felt — it's what made the session list's
+// highlight land a beat after the list itself.
+//
+// Only the throttle is bypassed. The pointer gate still applies, because
+// tearing the DOM out from under a live gesture is what it exists to
+// prevent, and a swipe-back is a live gesture.
+export function renderNow(): void {
+  lastRenderAt = 0;
+  render();
+}
 
 export function render(): void {
   if (scheduled) return;
@@ -174,6 +196,24 @@ export function render(): void {
       // Park it; pointerup/pointercancel flushes. No rAF respin — that
       // was a busy-loop for the whole duration of every press.
       renderHeldByPress = true;
+      // ...but don't trust that a release is coming. A pointerdown whose
+      // pointerup never arrives — a browser Back gesture, a press that
+      // ends in navigation, a pointer the OS captures — leaves this
+      // latched forever, and every render after it is held until the
+      // user happens to touch the screen again. Observed as a view
+      // transition sitting unpainted for seconds. A real press is over
+      // in well under a second, so a release after this long means the
+      // event isn't coming.
+      if (stuckPointerTimer !== undefined) clearTimeout(stuckPointerTimer);
+      stuckPointerTimer = setTimeout(() => {
+        stuckPointerTimer = undefined;
+        if (!pointerDown) return;
+        pointerDown = false;
+        if (renderHeldByPress) {
+          renderHeldByPress = false;
+          render();
+        }
+      }, STUCK_POINTER_MS);
       return;
     }
     if (isActivelyTyping()) {
@@ -195,7 +235,7 @@ export function render(): void {
       return;
     }
     lastRenderAt = performance.now();
-    actuallyRender();
+    timed("render", actuallyRender);
   };
   if (delay > 0) {
     setTimeout(() => requestAnimationFrame(fire), delay);

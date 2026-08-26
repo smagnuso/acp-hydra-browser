@@ -46,6 +46,7 @@ import {
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import { applyFontScale, applyTheme } from "./theme.js";
 import { describeCachedSession } from "./history-cache.js";
+import { describeSlow } from "./perf.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
@@ -1120,7 +1121,13 @@ function renderOptionsModal(): HTMLElement {
       // this client on" and "what does its cache actually hold" were
       // each unanswerable on a phone, and each one cost a wrong
       // conclusion before it existed.
-      el("div", { class: "diagnostics" }, buildRow(), cacheRow()),
+      el(
+        "div",
+        { class: "diagnostics" },
+        buildRow(),
+        cacheRow(),
+        copyableDiagnostic("slow", describeSlow()),
+      ),
       el(
         "div",
         { class: "actions" },
@@ -1709,6 +1716,13 @@ function renderArmedTasksBlock(c: ChatState): Node {
 // feel frozen with scrolling unresponsive. Cap the initial paint to the
 // recent tail; "show earlier" (renderAllHistory) opts back into the
 // full log for the rest of this ChatState's life.
+// How many log items are in the DOM at once.
+//
+// Tried at 70 on narrow screens on the theory that tearing down a large
+// chat subtree was what froze the UI on mobile after Back. On-device
+// timing showed render cost unchanged (~140ms either way), so log size
+// is not what makes a render expensive, and the smaller window only cost
+// reachable history. Left at 200 until something measured says otherwise.
 const CHAT_LOG_RENDER_WINDOW = 200;
 
 // Persistent per-session chat scaffolding. The full-teardown render model
