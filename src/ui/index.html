@@ -124,6 +124,30 @@ input, select, textarea {
   input, select, textarea { font-size: max(16px, 1em); }
 }
 input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* Themed scrollbars, desktop only. Touch platforms already draw thin
+   overlay scrollbars that disappear when idle and cost no layout width,
+   so restyling there would only make them worse; a fine pointer gets the
+   chunky always-present kind that reads as browser chrome sitting inside
+   the app. Gated on pointer, not width, since a touch tablet can be as
+   wide as a laptop.
+
+   The thumb's transparent border plus background-clip is what makes it
+   look slim without shrinking the hit area — the track stays a
+   comfortable target while the visible bar is a few px. */
+@media (hover: hover) and (pointer: fine) {
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    background-clip: content-box;
+    border: 3px solid transparent;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+}
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code { background: var(--panel-2); padding: 0.1rem 0.4rem; border-radius: 4px; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.9em; }
