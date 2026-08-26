@@ -34,14 +34,14 @@ export function pushLog(item: LogItem): void {
 // STATE_UPDATE_KINDS.
 const STATE_UPDATE_KINDS = new Set([
   "session_info_update",
-  "current_model_update",
+  "_hydra_current_model_update",
   "current_mode_update",
   "available_commands_update",
-  "available_modes_update",
+  "_hydra_available_modes_update",
   "usage_update",
   "config_option_update",
-  "hydra_compaction",
-  "hydra_workspace",
+  "_hydra_compaction",
+  "_hydra_workspace",
   "clarifier_question_asked",
   "clarifier_question_answered",
   "clarifier_question_dismissed",
@@ -1375,7 +1375,7 @@ export function parseArmedTaskList(raw: unknown): ArmedTask[] | undefined {
   return out;
 }
 
-// session/update kind "hydra_compaction": agent-side history summarization
+// session/update kind "_hydra_compaction": agent-side history summarization
 // + generation swap, not tied to a turn (can fire while idle, or be
 // deferred until the session quiesces). Mirrors the TUI's persistent
 // compactionIndicator/transient notify() split (app.ts
@@ -1670,13 +1670,13 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
         render();
       }
       break;
-    case "available_modes_update":
+    case "_hydra_available_modes_update":
       if (state.current && Array.isArray(update.availableModes)) {
         state.current.modes = update.availableModes as never;
         render();
       }
       break;
-    case "current_model_update":
+    case "_hydra_current_model_update":
       if (state.current) {
         state.current.model = (update.modelId ?? update.currentModelId ?? null) as string | null;
         if (Array.isArray(update.availableModels)) {
@@ -1758,7 +1758,7 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
     // Deliberately NOT turn_complete (see PROTOCOL.md's "Agent-initiated
     // turns"), so we track it via a dedicated flag rather than folding
     // it into the normal turn_complete pairing.
-    case "turn_started": {
+    case "_hydra_turn_started": {
       if (!state.current) break;
       const meta = (update._meta ?? {}) as AnyRecord;
       const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
@@ -1779,7 +1779,7 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
       });
       break;
     }
-    case "turn_ended": {
+    case "_hydra_turn_ended": {
       if (!state.current) break;
       const meta = (update._meta ?? {}) as AnyRecord;
       const hydraMeta = (meta["hydra-acp"] ?? {}) as AnyRecord;
@@ -1816,7 +1816,7 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
         state.current.title = update.title;
       }
       break;
-    case "hydra_compaction":
+    case "_hydra_compaction":
       onCompactionUpdate(update);
       break;
     default:
