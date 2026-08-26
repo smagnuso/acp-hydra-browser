@@ -4,7 +4,7 @@
 // don't blow away the user's typing position.
 
 import { state } from "./state.js";
-import { timed } from "./perf.js";
+import { bump, timed } from "./perf.js";
 import { hasActiveSelection } from "./dom.js";
 import {
   renderApp,
@@ -293,9 +293,14 @@ function actuallyRender(): void {
   // Falls through to the teardown path on view/session/banner/modal
   // transitions.
   if (tryPatchChat(root, state)) {
+    bump("patch");
     restoreFocus();
     return;
   }
+  // Full teardown: every node in #app is discarded and rebuilt, so the
+  // per-item node cache buys nothing on this path and any DOM-held state
+  // (a code block's horizontal scroll, for one) is lost.
+  bump("teardown");
 
   // Capture chat-body's scrollTop so a teardown-then-reattach (this path
   // runs whenever a banner/modal/file-overlay makes tryPatchChat bail —

@@ -46,7 +46,7 @@ import {
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import { applyFontScale, applyTheme } from "./theme.js";
 import { describeCachedSession } from "./history-cache.js";
-import { describeSlow } from "./perf.js";
+import { bump, describeSlow, describeCounts } from "./perf.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
@@ -1127,6 +1127,7 @@ function renderOptionsModal(): HTMLElement {
         buildRow(),
         cacheRow(),
         copyableDiagnostic("slow", describeSlow()),
+        copyableDiagnostic("paths", describeCounts()),
       ),
       el(
         "div",
@@ -2129,6 +2130,28 @@ function logItemSig(item: ChatState["log"][number]): unknown[] | null {
   return null;
 }
 
+const SCROLLABLE_IN_BUBBLE = "pre, table";
+
+function carryScrollAcross(oldNode: Node, newNode: Node): void {
+  if (!(oldNode instanceof HTMLElement) || !(newNode instanceof HTMLElement)) return;
+  const before = oldNode.querySelectorAll<HTMLElement>(SCROLLABLE_IN_BUBBLE);
+  if (before.length === 0) return;
+  const offsets: Array<[number, number]> = [];
+  before.forEach((el_, i) => {
+    if (el_.scrollLeft !== 0 || el_.scrollTop !== 0) {
+      offsets.push([i, el_.scrollLeft]);
+    }
+  });
+  if (offsets.length === 0) return;
+  queueMicrotask(() => {
+    const after = newNode.querySelectorAll<HTMLElement>(SCROLLABLE_IN_BUBBLE);
+    for (const [i, left] of offsets) {
+      const target = after[i];
+      if (target) target.scrollLeft = left;
+    }
+  });
+}
+
 function cachedLogNode(item: ChatState["log"][number]): Node {
   const sig = logItemSig(item);
   if (sig === null) {
@@ -2136,9 +2159,24 @@ function cachedLogNode(item: ChatState["log"][number]): Node {
   }
   const hit = logNodeCache.get(item);
   if (hit && hit.sig.length === sig.length && hit.sig.every((v, i) => v === sig[i])) {
+    bump("node-hit");
     return hit.node;
   }
+  bump(hit ? "node-resig" : "node-new");
   const node = renderLogItem(item);
+  // A rebuilt node starts scrolled to 0, which is right for its content
+  // and wrong for the user: the bubble still streaming is exactly the one
+  // being rebuilt every chunk, so a horizontally-scrolled code block
+  // inside it snapped back constantly while its own message was still
+  // arriving. The text is new; where the reader had scrolled to is not.
+  //
+  // Matched by position rather than identity — the old and new trees are
+  // built by the same code from the same item, so the nth scrollable in
+  // one is the nth in the other. Restored after the caller has attached
+  // it, since scrollLeft doesn't stick on a detached node.
+  if (hit) {
+    carryScrollAcross(hit.node, node);
+  }
   logNodeCache.set(item, { node, sig });
   return node;
 }
@@ -2149,6 +2187,28 @@ function cachedLogNode(item: ChatState["log"][number]): Node {
 // typical streaming repaint touches exactly one child — the growing
 // bubble — and the scroll container itself is never rebuilt.
 function syncChildren(parent: HTMLElement, desired: Node[]): void {
+  // Drop anything no longer wanted BEFORE walking positions. Otherwise a
+  // single replaced node cascades: the new node is inserted ahead of the
+  // stale one, the stale one still occupies a slot, and every node after
+  // it is then one position out and gets insertBefore'd back into place.
+  // Those are moves of nodes that never changed — visually identical, so
+  // nothing looks wrong, but a move resets DOM-held state, and a code
+  // block's horizontal scroll is DOM-held state.
+  //
+  // It fires constantly rather than rarely: the spinner's signature is
+  // null (it re-renders by design, to tick its elapsed time), so it is a
+  // fresh node every render, and it sits directly above the whole of the
+  // current turn's output. Every streamed chunk was therefore moving
+  // every bubble below it — measured as node-hit:8819 against
+  // node-resig:18, i.e. the nodes were being reused correctly and then
+  // shuffled anyway.
+  const wanted = new Set(desired);
+  for (let i = parent.childNodes.length - 1; i >= 0; i--) {
+    const node = parent.childNodes[i]!;
+    if (!wanted.has(node)) {
+      parent.removeChild(node);
+    }
+  }
   for (let i = 0; i < desired.length; i++) {
     const want = desired[i]!;
     const have = parent.childNodes[i] ?? null;

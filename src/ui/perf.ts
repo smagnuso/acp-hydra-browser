@@ -62,6 +62,19 @@ export function initPerfObserver(): void {
   }
 }
 
+// Plain event counters, for questions of the form "which path is this
+// taking" rather than "how long did it take".
+const counts = new Map<string, number>();
+
+export function bump(label: string): void {
+  counts.set(label, (counts.get(label) ?? 0) + 1);
+}
+
+export function describeCounts(): string {
+  if (counts.size === 0) return "none";
+  return [...counts.entries()].map(([k, n]) => `${k}:${n}`).join(" ");
+}
+
 export function describeSlow(): string {
   if (slow.length === 0) return "none >120ms";
   return slow.map((e) => `${e.label} ${Math.round(e.ms)}ms`).join(" | ");
