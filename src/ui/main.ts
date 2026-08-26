@@ -76,9 +76,36 @@ window.addEventListener("hashchange", () => {
 // not freeze the page for same-document navigation). Nothing in the
 // render gates can rescue that; the paint has to be re-requested once
 // frames are running again.
-window.addEventListener("pageshow", () => renderNow());
+// Producing the right DOM isn't enough coming back from a back
+// navigation on iOS: an inspector timeline showed the session list's
+// first frame already correct while the phone screen stayed frozen and
+// unscrollable for seconds. That combination — correct DOM, dead screen,
+// no long JS task — is the compositor still presenting the navigation
+// snapshot iOS captured for the transition, rather than the live page.
+//
+// Nothing in JS can force a present directly, but changing a property
+// that invalidates compositing gets the layer rebuilt, which in practice
+// makes the snapshot go. translateZ(0) rather than opacity: it only
+// touches the compositor, so there's no visible flash if this turns out
+// to be unnecessary.
+function nudgeCompositor(): void {
+  const app = document.getElementById("app");
+  if (!app) return;
+  app.style.transform = "translateZ(0)";
+  requestAnimationFrame(() => {
+    app.style.transform = "";
+  });
+}
+
+window.addEventListener("pageshow", () => {
+  renderNow();
+  nudgeCompositor();
+});
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") renderNow();
+  if (document.visibilityState === "visible") {
+    renderNow();
+    nudgeCompositor();
+  }
 });
 
 document.addEventListener("visibilitychange", () => reportVisibility());
