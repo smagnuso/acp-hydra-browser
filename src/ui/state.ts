@@ -47,11 +47,11 @@ export const state: AppState = {
   sessions: [],
   agents: [],
   defaultCwd: null,
-  groupBy: "project",
-  // Hide cold (disk-only) sessions by default. The "show cold"
-  // toggle in the topbar reveals them; clicking one attaches over
+  groupBy: "recent",
+  // Show cold (disk-only) sessions by default. The "show cold"
+  // toggle in the topbar can hide them; clicking one attaches over
   // WSS, which causes hydra to resurrect it from disk automatically.
-  showCold: false,
+  showCold: true,
   sessionSearch: "",
   fontScale: 1,
   railWidth: null,
