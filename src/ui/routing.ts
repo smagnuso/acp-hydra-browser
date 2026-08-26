@@ -75,10 +75,39 @@ let hashWriting = false;
 // Back walks into on the way out of the app, which made Back behave
 // differently depending on how the page was reached.
 let replaceNextHash = false;
+
+// Installed PWA (no browser chrome, so no Back button — Back is the edge
+// swipe). iOS does not reliably keep a standalone app alive across a
+// history back: the gesture unwinds past our entry and the whole app cold
+// boots, which is a multi-second freeze while the bundle parses, the
+// cache hydrates, frames replay and the socket reconnects.
+//
+// Measured, not inferred: the diagnostics counters only reset on a fresh
+// page load, and a back that had been sitting at node-hit:19217 came back
+// reading 178.
+//
+// So in standalone we keep exactly one history entry. Back then does what
+// the platform intends — leaves the app — instead of restarting it, and
+// chat <-> list stays with the in-app control, which never touched
+// history anyway. Browsers are unaffected: both Safari and Chrome paint
+// this transition instantly, because there the entry is browser history,
+// not the app's whole lifetime.
+function isStandalonePwa(): boolean {
+  try {
+    return (
+      window.matchMedia?.("(display-mode: standalone)").matches === true ||
+      (navigator as unknown as { standalone?: boolean }).standalone === true
+    );
+  } catch {
+    return false;
+  }
+}
+
 function setLocationHash(hash: string): void {
   if (window.location.hash === hash) return;
   hashWriting = true;
-  const write = replaceNextHash ? history.replaceState : history.pushState;
+  const write =
+    replaceNextHash || isStandalonePwa() ? history.replaceState : history.pushState;
   replaceNextHash = false;
   try {
     write.call(
