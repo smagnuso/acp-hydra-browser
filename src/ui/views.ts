@@ -2104,7 +2104,25 @@ function syncChildren(parent: HTMLElement, desired: Node[]): void {
 function reconcileChatBody(c: ChatState, view: ChatView): void {
   const body = view.body;
   const capped = !c.renderAllHistory && c.log.length > CHAT_LOG_RENDER_WINDOW;
-  const visibleLog = capped ? c.log.slice(c.log.length - CHAT_LOG_RENDER_WINDOW) : c.log;
+  // Snap the cut back to a turn boundary. A flat "last N items" slice
+  // lands wherever it lands, and a long turn (dozens of thought chunks
+  // and tool calls before its first message) can easily be bigger than
+  // the window on its own — so the prompt falls above the cut while its
+  // own output stays below, and the turn renders headless. That reads
+  // exactly like the prompt was lost. Bounded at twice the window so a
+  // single enormous turn can't drag an unbounded amount into view.
+  let start = capped ? c.log.length - CHAT_LOG_RENDER_WINDOW : 0;
+  if (capped) {
+    const floor = Math.max(0, c.log.length - CHAT_LOG_RENDER_WINDOW * 2);
+    for (let i = start; i >= floor; i--) {
+      const item = c.log[i];
+      if (item && item.kind === "stream" && item.role === "user") {
+        start = i;
+        break;
+      }
+    }
+  }
+  const visibleLog = capped ? c.log.slice(start) : c.log;
   const desired: Node[] = [];
   // Only once the user has scrolled past everything locally available
   // (the DOM window AND the cache-seeded log itself) — this is the true
@@ -2122,7 +2140,9 @@ function reconcileChatBody(c: ChatState, view: ChatView): void {
     );
   }
   if (capped) {
-    const hiddenCount = c.log.length - CHAT_LOG_RENDER_WINDOW;
+    // Counts what's actually above the cut, which the turn-boundary snap
+    // above may have moved earlier than the raw window size.
+    const hiddenCount = start;
     desired.push(
       el(
         "button",
