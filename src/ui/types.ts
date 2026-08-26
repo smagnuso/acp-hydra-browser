@@ -530,6 +530,8 @@ export interface AppState {
   // Width of the session rail in split view, in px. null = the CSS
   // default (flex-basis). Persisted so a chosen split survives reloads.
   railWidth: number | null;
+  // Filled in when the options modal opens — see describeCachedSession.
+  cacheInfo?: string;
   // Hide agent_thought_chunk bubbles across every chat. Persisted
   // globally (not per-session) since it's a display preference, not
   // session state — thought chunks are still received and kept in

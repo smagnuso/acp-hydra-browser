@@ -45,6 +45,7 @@ import {
 } from "./notifications.js";
 import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import { applyFontScale, applyTheme } from "./theme.js";
+import { describeCachedSession } from "./history-cache.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
@@ -969,6 +970,14 @@ function notifyOnTurnEndRow(): HTMLElement {
 }
 
 function openOptionsModal(): void {
+  const sid = state.current?.sessionId;
+  state.cacheInfo = sid ? "…" : "no session open";
+  if (sid) {
+    void describeCachedSession(sid).then((info: string) => {
+      state.cacheInfo = info;
+      render();
+    });
+  }
   setState({ modal: { kind: "options" } });
 }
 
@@ -1006,6 +1015,25 @@ function fontSizeRow(): HTMLElement {
   ) as HTMLSelectElement;
   select.value = String(state.fontScale);
   return el("div", { class: "detail" }, el("span", { class: "k" }, "text size"), select);
+}
+
+// Which bundle this client is actually running. A stale cached PWA and
+// a real bug present identically, and there's no inspector to hand on a
+// phone — this makes the difference readable in two taps.
+// What this client's history cache holds for the open session. Readable
+// on a phone, where the console isn't.
+function cacheRow(): HTMLElement {
+  return el(
+    "div",
+    { class: "detail" },
+    el("span", { class: "k" }, "cache"),
+    el("span", { style: "font-size:0.75rem;word-break:break-all" }, state.cacheInfo ?? "…"),
+  );
+}
+
+function buildRow(): HTMLElement {
+  const id = typeof __BUILD_ID__ === "string" ? __BUILD_ID__ : "dev";
+  return el("div", { class: "detail" }, el("span", { class: "k" }, "build"), el("span", null, id));
 }
 
 function themeRow(): HTMLElement {
@@ -1047,6 +1075,8 @@ function renderOptionsModal(): HTMLElement {
       el("h2", null, "Options"),
       themeRow(),
       fontSizeRow(),
+      buildRow(),
+      cacheRow(),
       hideThoughtsRow(),
       notifyOnTurnEndRow(),
       el(

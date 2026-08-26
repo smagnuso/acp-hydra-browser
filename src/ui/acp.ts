@@ -317,21 +317,19 @@ export function pushChunk(
     }
     return;
   }
-  // A reconnect's afterMessageId delta replay landing on top of content
-  // this tab already rendered re-delivers the same messageId — observed
-  // live as a fully-formed message appearing a second time as its own
-  // bubble right after a flaky-network reconnect. A still-streaming
-  // message's later chunks never reach this far (they hit the merge
-  // branch above, since that bubble isn't closed yet), so this only
-  // ever fires against a genuine repeat of an already-finished message.
-  if (
-    messageId &&
-    log.some(
-      (e) => e.kind === "stream" && e.role === role && e.closed && e.messageId === messageId,
-    )
-  ) {
-    return;
-  }
+  // NO messageId dedup here. It reads like a natural key but isn't
+  // unique per frame: agents stamp their own id (Claude's msg_01…) on
+  // every chunk of one reply, and a reply routinely continues after a
+  // tool call — text, tool_call (which closes the bubble), then more
+  // text carrying that same id. Treating the repeat as redundant
+  // delivery discarded every continuation, so the more tool-heavy the
+  // turn, the more of the answer vanished; a heavily-tooled session
+  // hydrated as little but turn-stamps.
+  //
+  // The duplicate this was written for — a reconnect delta redelivering
+  // already-rendered content — is prevented at the source now, by
+  // routing.ts ignoring frames from a superseded socket. Same lesson as
+  // the identical dedup removed from history-cache's mergeAndTrim.
   log.splice(boundary, 0, {
     kind: "stream",
     role,

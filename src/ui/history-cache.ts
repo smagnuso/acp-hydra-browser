@@ -156,6 +156,44 @@ export async function loadCachedSession(
   });
 }
 
+// Diagnostic: what does this client's cache ACTUALLY hold for a session?
+// The whole transcript-corruption hunt kept stalling on the difference
+// between what the cache was assumed to contain and what it did, which
+// is invisible on a phone with no inspector.
+export async function describeCachedSession(sessionId: string): Promise<string> {
+  const db = await openDb();
+  if (!db) return "unavailable";
+  return new Promise((resolve) => {
+    let tx: IDBTransaction;
+    try {
+      tx = db.transaction(STORE, "readonly");
+    } catch {
+      resolve("unreadable");
+      return;
+    }
+    const req = tx.objectStore(STORE).get(sessionId);
+    req.onsuccess = () => {
+      const rec = req.result as CachedSession | undefined;
+      if (!rec) {
+        resolve("empty");
+        return;
+      }
+      const kinds = new Map<string, number>();
+      for (const f of rec.frames) {
+        const u = (f.frame.params as { update?: { sessionUpdate?: unknown } } | undefined)?.update;
+        const k = typeof u?.sessionUpdate === "string" ? u.sessionUpdate : "?";
+        kinds.set(k, (kinds.get(k) ?? 0) + 1);
+      }
+      const top = [...kinds.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, n]) => `${k.replace(/_chunk$/, "")}:${n}`)
+        .join(" ");
+      resolve(`${rec.frames.length}f ${(rec.totalBytes / 1e6).toFixed(1)}MB — ${top}`);
+    };
+    req.onerror = () => resolve("unreadable");
+  });
+}
+
 // In-memory buffer of not-yet-flushed frames per session, so a burst of
 // chunks during an active turn costs one debounced write instead of one
 // IndexedDB round trip per frame.

@@ -14,7 +14,14 @@ const entry = join(root, "src", "ui", "main.ts");
 const swIn = join(root, "src", "ui", "sw.js");
 const swOut = join(root, "dist", "ui", "sw.js");
 
+// Stamped into the bundle so a running client can report which build it
+// is actually on. Without it there's no way to tell a stale cached PWA
+// from a genuine bug — the same symptom either way, and mobile has no
+// convenient inspector to check.
+const buildId = new Date().toISOString().replace("T", " ").slice(0, 16) + "Z";
+
 const result = await esbuild.build({
+  define: { __BUILD_ID__: JSON.stringify(buildId) },
   entryPoints: [entry],
   bundle: true,
   format: "iife",
@@ -44,5 +51,5 @@ writeFileSync(htmlOut, html, "utf8");
 copyFileSync(swIn, swOut);
 
 const sizeKb = (Buffer.byteLength(bundle, "utf8") / 1024).toFixed(1);
-console.log(`wrote ${htmlOut} (bundle ${sizeKb} KB)`);
+console.log(`wrote ${htmlOut} (bundle ${sizeKb} KB, build ${buildId})`);
 console.log(`wrote ${swOut}`);
