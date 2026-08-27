@@ -40,9 +40,16 @@
 //
 // Mirrors pull-refresh.ts's touch-gesture shape otherwise: module-level
 // touch state, document-level listeners, a direction lock so a normal
-// vertical scroll is never disturbed. Entirely passive — no
-// preventDefault — so unlike pull-refresh this can never fight the
-// browser's own scrolling.
+// vertical scroll is never disturbed. touchmove only calls
+// preventDefault() once locked into a confirmed horizontal swipe (same
+// override pull-refresh.ts uses for its own gesture) — before that,
+// while a touch is still an undecided candidate, it's left completely
+// alone. Without it, the touch's target (still whatever was under the
+// finger at touchstart — the departing chat's own scrollable body, on a
+// back swipe) can keep honoring the browser's native vertical scroll
+// for the rest of THIS SAME touch even after the horizontal drag has
+// locked in, since a passive listener never gets the chance to say
+// otherwise — the two visibly fighting over the one finger.
 
 import { state } from "./state.js";
 import {
@@ -379,6 +386,9 @@ function onTouchMove(e: TouchEvent): void {
       return;
     }
   }
+  // Locked in as our gesture now — stop the browser from also scrolling
+  // whatever's still nominally under this touch alongside it.
+  e.preventDefault();
   paint(dx, mode);
 }
 
@@ -407,7 +417,10 @@ function onTouchCancel(): void {
 
 export function initSwipeBack(): void {
   document.addEventListener("touchstart", onTouchStart, { passive: true });
-  document.addEventListener("touchmove", onTouchMove, { passive: true });
+  // Non-passive: onTouchMove calls preventDefault() once locked into a
+  // confirmed horizontal swipe, to override the browser's native
+  // scroll for the rest of that touch. See the module comment.
+  document.addEventListener("touchmove", onTouchMove, { passive: false });
   document.addEventListener("touchend", onTouchEnd, { passive: true });
   document.addEventListener("touchcancel", onTouchCancel, { passive: true });
 }
