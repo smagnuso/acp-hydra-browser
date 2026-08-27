@@ -1189,20 +1189,62 @@ function configOptionRow(option: ConfigOption): HTMLElement {
   );
 }
 
+// compareSessions resorts by activity on every poll, which is fine while
+// the pointer is elsewhere but dangerous the instant it isn't: hover a
+// card, a poll lands, the card you're about to click slides down as
+// something else takes its slot, and the click that follows a moment
+// later hits whatever moved in underneath. Freezing the sort order for
+// as long as the pointer is over .list — resuming only once it actually
+// leaves — closes that window without needing to hold up unrelated
+// renders (chat, badges, etc. keep updating live).
+let listHovered = false;
+let frozenListOrder: string[] | null = null;
+document.addEventListener("pointermove", (e) => {
+  listHovered = !!(e.target as Element | null)?.closest?.(".list");
+});
+
+function stableSortSessions(sessions: SessionInfo[]): SessionInfo[] {
+  const natural = sessions.slice().sort(compareSessions);
+  if (!listHovered) {
+    frozenListOrder = null;
+    return natural;
+  }
+  if (!frozenListOrder) {
+    frozenListOrder = natural.map((s) => s.sessionId);
+    return natural;
+  }
+  const rank = new Map(frozenListOrder.map((id, i) => [id, i]));
+  return natural
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => {
+      const ra = rank.get(a.s.sessionId);
+      const rb = rank.get(b.s.sessionId);
+      // Both previously seen: keep their frozen relative order. Only one
+      // seen: the known one keeps its place, the newcomer goes after
+      // every frozen row rather than jumping in among them. Neither
+      // seen (both new since the hover began): fall back to natural
+      // order between themselves.
+      if (ra !== undefined && rb !== undefined) return ra - rb;
+      if (ra !== undefined) return -1;
+      if (rb !== undefined) return 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.s);
+}
+
 function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): SessionGroup[] {
+  const ordered = stableSortSessions(sessions);
   if (mode === "recent") {
-    const sorted = sessions.slice().sort(compareSessions);
-    return [{ label: null, sessions: sorted }];
+    return [{ label: null, sessions: ordered }];
   }
   const map = new Map<string, SessionInfo[]>();
-  for (const s of sessions) {
+  for (const s of ordered) {
     const key = s.cwd || "(unknown)";
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(s);
   }
   const out: SessionGroup[] = [];
   for (const [cwd, items] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    items.sort(compareSessions);
     out.push({ label: shortenCwd(cwd), sessions: items });
   }
   return out;
