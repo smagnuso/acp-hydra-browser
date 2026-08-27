@@ -1198,20 +1198,68 @@ function configOptionRow(option: ConfigOption): HTMLElement {
   );
 }
 
+// compareSessions resorts by activity on every poll, which can slide a
+// card out from under the cursor in the instant between hovering it and
+// clicking. An earlier attempt froze the order for as long as the
+// pointer merely hovered .list at all — but a click leaves the cursor
+// resting exactly on the card it landed on, so opening a session and
+// then reading its reply (mouse untouched, still over that same rail
+// card the whole time) froze that card's position indefinitely: it
+// looked like the highlighted entry had simply stopped responding to
+// its own activity changing. Keying off recent pointer MOVEMENT instead
+// of mere presence self-heals — a stationary mouse goes idle after
+// REORDER_HOLDOFF_MS and reordering resumes on its own, while an
+// approaching click (which involves actual motion right up to the
+// moment of contact) still finds the order held still.
+const REORDER_HOLDOFF_MS = 500;
+let lastListPointerMoveAt = 0;
+document.addEventListener("pointermove", (e) => {
+  if ((e.target as Element | null)?.closest?.(".list")) {
+    lastListPointerMoveAt = performance.now();
+  }
+});
+
+let lastCommittedOrder: string[] | null = null;
+
+function stableSortSessions(sessions: SessionInfo[]): SessionInfo[] {
+  const natural = sessions.slice().sort(compareSessions);
+  const idle = performance.now() - lastListPointerMoveAt > REORDER_HOLDOFF_MS;
+  if (idle || !lastCommittedOrder) {
+    lastCommittedOrder = natural.map((s) => s.sessionId);
+    return natural;
+  }
+  const rank = new Map(lastCommittedOrder.map((id, i) => [id, i]));
+  return natural
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => {
+      const ra = rank.get(a.s.sessionId);
+      const rb = rank.get(b.s.sessionId);
+      // Both previously ranked: keep their held order. Only one ranked:
+      // it keeps its place and the newcomer goes after every held row
+      // rather than jumping in among them. Neither ranked (both new
+      // since the hold began): fall back to natural order between
+      // themselves.
+      if (ra !== undefined && rb !== undefined) return ra - rb;
+      if (ra !== undefined) return -1;
+      if (rb !== undefined) return 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.s);
+}
+
 function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): SessionGroup[] {
+  const ordered = stableSortSessions(sessions);
   if (mode === "recent") {
-    const sorted = sessions.slice().sort(compareSessions);
-    return [{ label: null, sessions: sorted }];
+    return [{ label: null, sessions: ordered }];
   }
   const map = new Map<string, SessionInfo[]>();
-  for (const s of sessions) {
+  for (const s of ordered) {
     const key = s.cwd || "(unknown)";
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(s);
   }
   const out: SessionGroup[] = [];
   for (const [cwd, items] of [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
-    items.sort(compareSessions);
     out.push({ label: shortenCwd(cwd), sessions: items });
   }
   return out;
@@ -1239,6 +1287,16 @@ export interface ListScrollAnchor {
 }
 
 export function captureListAnchor(list: HTMLElement): ListScrollAnchor | null {
+  // Scrolled to the very top means "show me the top of the list",
+  // not "keep this particular card exactly here" — pinning to
+  // whichever card happened to be first, by identity, is what made a
+  // reorder that promoted a different card to first place scroll the
+  // list DOWN to drag the old first card back to the top, hiding the
+  // new arrival above the fold instead of just leaving the view at 0
+  // like the user was already looking at. A fresh .list defaults its
+  // own scrollTop to 0, so returning null here and doing nothing is
+  // sufficient to keep it there.
+  if (list.scrollTop <= 0) return null;
   const listTop = list.getBoundingClientRect().top;
   for (const card of list.querySelectorAll<HTMLElement>(".card")) {
     const cardRect = card.getBoundingClientRect();
