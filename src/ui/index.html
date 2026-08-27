@@ -153,13 +153,16 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
   }
   /* .list's vertical scrollbar (when it overflows) eats into its content
      width on top of its own padding, while .session-search-row above it
-     has no scrollbar to do the same — so the search input reads wider
-     than the session cards below it by exactly the scrollbar's width.
+     has no scrollbar to do the same — so the cards read narrower than
+     the search input above them by exactly the scrollbar's width.
      scrollbar-gutter: stable reserves that width unconditionally (so
      cards don't also change width depending on whether the list happens
-     to overflow), and the search row/clear-button overrides compensate
-     by the same amount so both line up. */
-  .list { scrollbar-gutter: stable; }
+     to overflow), and .list's own right padding gives back the same
+     amount so the reservation doesn't ALSO shrink the cards on top of
+     the space it already claims — net effect, the cards get back up to
+     the search bar's width instead of the search bar shrinking to
+     theirs. */
+  .list { scrollbar-gutter: stable; padding-right: calc(1rem - var(--scrollbar-w)); }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
   ::-webkit-scrollbar-corner { background: transparent; }
 }
@@ -337,16 +340,13 @@ pre code { background: transparent; padding: 0; }
    bottom border and reads as part of the topbar rather than as the head
    of the list. Horizontal padding matches .list's so the box lines up
    with the cards underneath it. */
-.session-search-row { position: relative; display: flex; align-items: center; padding: 0.7rem calc(1rem + var(--scrollbar-w)) 0.4rem 1rem; flex: 0 0 auto; }
+.session-search-row { position: relative; display: flex; align-items: center; padding: 0.7rem 1rem 0.4rem; flex: 0 0 auto; }
 .session-search { flex: 1; min-width: 0; padding: 0.45rem 2rem 0.45rem 0.7rem; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.9rem; font-family: inherit; }
 .session-search:focus { outline: none; border-color: var(--accent, #4a9eff); }
 .session-search::placeholder { color: var(--muted); }
 /* Overlaid rather than a flex sibling so showing/hiding it as the term
    empties doesn't reflow the input's width mid-type. */
-/* right offset is anchored to .session-search-row's own edge, not the
-   input's — has to track the row's scrollbar-width compensation above
-   or it drifts out from over the input as that padding changes. */
-.session-search-clear { position: absolute; right: calc(1.35rem + var(--scrollbar-w)); width: 1.4rem; height: 1.4rem; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 50%; }
+.session-search-clear { position: absolute; right: 1.35rem; width: 1.4rem; height: 1.4rem; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 50%; }
 .session-search-clear:hover { color: var(--fg); background: var(--panel); }
 .content-gated.empty { opacity: 0.45; }
 /* Read-only diagnostics at the foot of the options modal — visibly not
