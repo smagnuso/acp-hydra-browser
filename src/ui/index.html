@@ -47,6 +47,11 @@
   --agent-bg: #161b22;
   --tool-bg: #19202d;
   --code-bg: #0a0d12;
+  /* 0 by default; the themed-scrollbar media query below overrides this
+     to match ::-webkit-scrollbar's width on desktop. .session-search-row
+     and .session-search-clear read it to compensate their own padding —
+     see that media query's comment for why. */
+  --scrollbar-w: 0px;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
 }
@@ -136,8 +141,9 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
    look slim without shrinking the hit area — the track stays a
    comfortable target while the visible bar is a few px. */
 @media (hover: hover) and (pointer: fine) {
+  :root { --scrollbar-w: 11px; }
   * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar { width: var(--scrollbar-w); height: var(--scrollbar-w); }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
     background: var(--border);
@@ -145,6 +151,15 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
     border: 3px solid transparent;
     border-radius: 999px;
   }
+  /* .list's vertical scrollbar (when it overflows) eats into its content
+     width on top of its own padding, while .session-search-row above it
+     has no scrollbar to do the same — so the search input reads wider
+     than the session cards below it by exactly the scrollbar's width.
+     scrollbar-gutter: stable reserves that width unconditionally (so
+     cards don't also change width depending on whether the list happens
+     to overflow), and the search row/clear-button overrides compensate
+     by the same amount so both line up. */
+  .list { scrollbar-gutter: stable; }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
   ::-webkit-scrollbar-corner { background: transparent; }
 }
@@ -174,7 +189,12 @@ pre code { background: transparent; padding: 0; }
    applied this wrapper's column-flex/max-width to every one of those
    rows too. */
 .split { flex: 1; display: flex; overflow: hidden; }
-.rail { flex: 0 0 22rem; min-width: 18rem; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
+/* Basis/min bumped up from 22rem/18rem now that the themed desktop
+   scrollbar (11px, styled) is thinner than an unstyled native one —
+   .list's vertical scrollbar was eating into the same fixed rail width,
+   so the cards inside it (which have no max-width of their own; they
+   fill .list) get that reclaimed room back as usable card width. */
+.rail { flex: 0 0 24rem; min-width: 20rem; display: flex; flex-direction: column; overflow: hidden; border-right: 1px solid var(--border); }
 .rail:focus { outline: none; box-shadow: inset 3px 0 0 var(--accent); }
 /* Sits in the flex row between rail and chat. Deliberately wider than it
    looks: the visible line is the 1px border on .rail, while the handle
@@ -184,6 +204,13 @@ pre code { background: transparent; padding: 0; }
 .splitter:hover, .splitter.dragging { background: var(--accent); opacity: 0.5; }
 .split-detail { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .split-detail-empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+/* .chat-body/.composer's reading-column clamp (below) sizes off 50% of
+   their own containing block. In split view that's .split-detail, whose
+   width the user already controls via .splitter and the window itself —
+   clamping again on top of that just leaves dead space on a wide monitor
+   instead of growing the bubbles to fill the pane they sized. */
+.split-detail .chat-body { padding-inline: 1rem; }
+.split-detail .composer { padding-inline: 0.6rem; }
 
 /* Header */
 .topbar { display: flex; align-items: center; gap: 0.5rem; padding: calc(0.6rem + env(safe-area-inset-top)) calc(0.6rem + env(safe-area-inset-right)) 0.6rem calc(0.6rem + env(safe-area-inset-left)); border-bottom: 1px solid var(--border); background: var(--panel); }
@@ -310,13 +337,16 @@ pre code { background: transparent; padding: 0; }
    bottom border and reads as part of the topbar rather than as the head
    of the list. Horizontal padding matches .list's so the box lines up
    with the cards underneath it. */
-.session-search-row { position: relative; display: flex; align-items: center; padding: 0.7rem 1rem 0.4rem; flex: 0 0 auto; }
+.session-search-row { position: relative; display: flex; align-items: center; padding: 0.7rem calc(1rem + var(--scrollbar-w)) 0.4rem 1rem; flex: 0 0 auto; }
 .session-search { flex: 1; min-width: 0; padding: 0.45rem 2rem 0.45rem 0.7rem; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.9rem; font-family: inherit; }
 .session-search:focus { outline: none; border-color: var(--accent, #4a9eff); }
 .session-search::placeholder { color: var(--muted); }
 /* Overlaid rather than a flex sibling so showing/hiding it as the term
    empties doesn't reflow the input's width mid-type. */
-.session-search-clear { position: absolute; right: 1.35rem; width: 1.4rem; height: 1.4rem; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 50%; }
+/* right offset is anchored to .session-search-row's own edge, not the
+   input's — has to track the row's scrollbar-width compensation above
+   or it drifts out from over the input as that padding changes. */
+.session-search-clear { position: absolute; right: calc(1.35rem + var(--scrollbar-w)); width: 1.4rem; height: 1.4rem; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--muted); font-size: 1rem; line-height: 1; cursor: pointer; border-radius: 50%; }
 .session-search-clear:hover { color: var(--fg); background: var(--panel); }
 .content-gated.empty { opacity: 0.45; }
 /* Read-only diagnostics at the foot of the options modal — visibly not
