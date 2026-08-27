@@ -7,7 +7,9 @@ import { state } from "./state.js";
 import { bump, timed } from "./perf.js";
 import { hasActiveSelection } from "./dom.js";
 import {
+  captureListAnchor,
   renderApp,
+  restoreListAnchor,
   resyncChatScroll,
   tryPatchChat,
   tryRestoreScrollAnchor,
@@ -317,6 +319,7 @@ function actuallyRender(): void {
   const oldScrollTop = oldBody ? oldBody.scrollTop : null;
   const oldList = root.querySelector<HTMLElement>(".list");
   const oldListScrollTop = oldList ? oldList.scrollTop : null;
+  const listAnchor = oldList ? captureListAnchor(oldList) : null;
   const oldFilesBody = root.querySelector<HTMLElement>(".files .body");
   const oldFilesBodyScrollTop = oldFilesBody ? oldFilesBody.scrollTop : null;
   const oldFilesPreview = root.querySelector<HTMLElement>(".files .preview");
@@ -358,8 +361,12 @@ function actuallyRender(): void {
     }
   }
   const newList = root.querySelector<HTMLElement>(".list");
-  if (newList && oldListScrollTop !== null) {
-    newList.scrollTop = oldListScrollTop;
+  if (newList) {
+    if (listAnchor) {
+      restoreListAnchor(newList, listAnchor);
+    } else if (oldListScrollTop !== null) {
+      newList.scrollTop = oldListScrollTop;
+    }
   }
   const newFilesBody = root.querySelector<HTMLElement>(".files .body");
   if (newFilesBody && oldFilesBodyScrollTop !== null) {

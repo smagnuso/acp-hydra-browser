@@ -335,6 +335,7 @@ function refreshRailInPlace(rail: HTMLElement): void {
   if (!isRailDirty()) return;
   const oldList = rail.querySelector<HTMLElement>(".list");
   const oldScrollTop = oldList ? oldList.scrollTop : null;
+  const anchor = oldList ? captureListAnchor(oldList) : null;
   // replaceChildren destroys the focused node, and unlike a full #app
   // teardown nothing else restores it on this path — so typing in the
   // session filter (which marks the rail dirty on every keystroke, since
@@ -363,9 +364,13 @@ function refreshRailInPlace(rail: HTMLElement): void {
       }
     }
   }
-  if (oldScrollTop !== null) {
-    const newList = rail.querySelector<HTMLElement>(".list");
-    if (newList) newList.scrollTop = oldScrollTop;
+  const newList = rail.querySelector<HTMLElement>(".list");
+  if (newList) {
+    if (anchor) {
+      restoreListAnchor(newList, anchor);
+    } else if (oldScrollTop !== null) {
+      newList.scrollTop = oldScrollTop;
+    }
   }
 }
 
@@ -1185,6 +1190,40 @@ function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): Ses
   return out;
 }
 
+// "recent" grouping re-sorts the whole list by activity on every poll
+// (compareSessions), so a session below the fold changing tier (idle ->
+// busy, say) reshuffles rows above and below the user's current scroll
+// position. Restoring a raw scrollTop pixel value after that leaves the
+// scrollbar in the same place but shows different cards underneath it —
+// reads as "losing my scroll" even though nothing actually reset it.
+// Anchoring to the session card nearest the top of the viewport (and its
+// exact sub-pixel offset) instead survives reordering elsewhere in the
+// list, since that card's rank changing doesn't move IT.
+export interface ListScrollAnchor {
+  sessionId: string;
+  offset: number;
+}
+
+export function captureListAnchor(list: HTMLElement): ListScrollAnchor | null {
+  const top = list.scrollTop;
+  for (const card of list.querySelectorAll<HTMLElement>(".card")) {
+    if (card.offsetTop + card.offsetHeight <= top) continue;
+    const sessionId = card.dataset.sessionId;
+    if (!sessionId) return null;
+    return { sessionId, offset: top - card.offsetTop };
+  }
+  return null;
+}
+
+export function restoreListAnchor(list: HTMLElement, anchor: ListScrollAnchor | null): void {
+  if (!anchor) return;
+  const card = list.querySelector<HTMLElement>(
+    `.card[data-session-id="${CSS.escape(anchor.sessionId)}"]`,
+  );
+  if (!card) return;
+  list.scrollTop = card.offsetTop + anchor.offset;
+}
+
 function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
   const title = s.title || fallbackTitle(s.sessionId);
   const subtitle = [
@@ -1201,6 +1240,7 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
     "div",
     {
       class: s.sessionId === state.listHighlightedSessionId ? "card highlighted" : "card",
+      "data-session-id": s.sessionId,
       ...tapHandler((e) => {
         const target = e.target as HTMLElement;
         if (target.closest("button")) return;
