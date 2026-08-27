@@ -594,23 +594,25 @@ html[data-theme="light"] .hljs{color:#24292e}html[data-theme="light"] .hljs-doct
   transition: opacity 0.1s linear;
 }
 
-/* Swipe-nav drag-reveal (list<->chat, see swipe-nav.ts). The departing
-   view (the real, live DOM nodes — untouched otherwise) gets an inline
-   transform + z-index during the drag; this layer sits behind it,
-   absolutely positioned within #app, holding a static preview of
-   whatever's being revealed — sometimes literally the real, just-closed
-   chat's own DOM node (peekChatViewRoot), which expects a flex-column
-   parent the same way #app itself provides one normally, hence .content
-   being flex here too. .scrim is a separate sibling (not baked into
-   .content's opacity) so dimming doesn't fade the preview's own contents
-   along with it. pointer-events: none on the whole layer — it's a
-   read-only preview even on the rare path where its content is a real,
-   otherwise-interactive chat view. */
+/* Swipe-nav drag-reveal (list<->chat, see swipe-nav.ts). One side is
+   #app's real, live DOM nodes (untouched otherwise but for an inline
+   transform + z-index during the drag); the other is this layer,
+   absolutely positioned alongside them within #app, holding a static
+   preview — sometimes literally the real, just-closed chat's own DOM
+   node (peekChatViewRoot), which expects a flex-column parent the same
+   way #app itself provides one normally, hence .content being flex
+   here too. .scrim is a plain sibling of .swipe-reveal-layer, NOT
+   nested inside it: on a forward swipe the thing needing dimming is the
+   live list DOM (#app's own children), outside this layer's subtree
+   entirely, so the scrim has to be free-standing to reach it. Chat is
+   always the z-index-topmost of the three regardless of which one it
+   physically is (see swipe-nav.ts's armDrag); pointer-events: none on
+   both this layer and the scrim — read-only, even on the path where
+   the content is a real, otherwise-interactive chat view. */
 .swipe-reveal-layer {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  z-index: 0;
   pointer-events: none;
 }
 .swipe-reveal-content {

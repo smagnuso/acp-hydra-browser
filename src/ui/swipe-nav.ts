@@ -13,12 +13,16 @@
 //     selection drag in the composer isn't hijacked. Everything else
 //     in the chat (bubbles, header, armed-tasks block, …) arms it.
 //
-// The departing view's own DOM nodes (#app's direct children — one for
-// chat, three for list: topbar/search/list) are dragged directly via an
-// inline transform, with a static preview of the OTHER view revealed
-// behind them through a parallax slide + fading scrim, mirroring iOS's
-// edge-swipe transition. Committing past THRESHOLD_PX finishes that
-// slide, then hands off to the real navigation. Swiping back into the
+// The chat is always the topmost, frontmost layer — whether it's
+// departing (a back swipe) or arriving (a forward swipe) — mirroring
+// how a native push/pop transition always keeps the pushed view
+// frontmost regardless of direction; the list, as the "root" underneath
+// it, always gets a parallax recede + darkening scrim instead. Whichever
+// side is real, live DOM (#app's direct children — one for chat, three
+// for list: topbar/search/list) is dragged directly via an inline
+// transform; the OTHER side is a static preview inserted for the
+// gesture. Committing past THRESHOLD_PX finishes that motion, then
+// hands off to the real navigation. Swiping back into the
 // exact session you just left is special-cased end to end: the reveal
 // pane reuses that session's real, still-intact chat DOM (still cached
 // by identity in views.ts's chatViews WeakMap even though closeChat()
@@ -55,10 +59,8 @@ import type { ChatState } from "./types.js";
 
 const THRESHOLD_PX = 80;
 const DIRECTION_LOCK_PX = 12;
-// How far off-center the revealed pane starts, as a fraction of its own
-// width — the parallax offset that closes to 0 as the drag completes.
-const PARALLAX_FRACTION = 0.25;
-// Peak scrim darkness at progress 0 (not yet revealed at all).
+// Peak scrim darkness — the list's only motion cue. It never moves
+// itself, whether it's being revealed or covered; only chat does.
 const SCRIM_MAX_OPACITY = 0.25;
 const SETTLE_MS = 220;
 
@@ -165,22 +167,32 @@ function armDrag(m: Mode): boolean {
   if (!pane) return false;
   frontNodes = Array.from(app.children) as HTMLElement[];
   if (frontNodes.length === 0) return false;
-  revealScrim = document.createElement("div");
-  revealScrim.className = "swipe-reveal-scrim";
   revealContent = document.createElement("div");
   revealContent.className = "swipe-reveal-content";
   revealContent.appendChild(pane);
   revealLayer = document.createElement("div");
   revealLayer.className = "swipe-reveal-layer";
-  revealLayer.style.zIndex = "0";
   revealLayer.appendChild(revealContent);
-  revealLayer.appendChild(revealScrim);
+  // A plain sibling of revealLayer, not nested inside it — for a
+  // forward swipe the thing needing dimming (the list) is frontNodes,
+  // entirely outside revealLayer's subtree, so the scrim can't live in
+  // there and still reach it. Positioned identically (inset: 0) either
+  // way; z-index alone decides which side it's actually dimming.
+  revealScrim = document.createElement("div");
+  revealScrim.className = "swipe-reveal-scrim";
+  // Chat is frontNodes (departing) on a back swipe, or revealLayer
+  // (arriving) on a forward one — either way it stays on top, the list
+  // stays behind the scrim. See the module comment for why.
+  const chatIsFrontNodes = m === "toList";
+  for (const node of frontNodes) {
+    node.style.zIndex = chatIsFrontNodes ? "2" : "0";
+  }
+  revealLayer.style.zIndex = chatIsFrontNodes ? "0" : "2";
+  revealScrim.style.zIndex = "1";
+  app.insertBefore(revealScrim, app.firstChild);
   app.insertBefore(revealLayer, app.firstChild);
   if (revealScrollFixup) {
     revealScrollFixup.body.scrollTop = revealScrollFixup.top;
-  }
-  for (const node of frontNodes) {
-    node.style.zIndex = "1";
   }
   // A render landing mid-drag is already held off by renderer.ts's
   // ordinary pointerDown gate — but that gate's pointerup handler
@@ -195,20 +207,30 @@ function armDrag(m: Mode): boolean {
   return true;
 }
 
-// progress: 0 (not dragged at all) .. 1 (fully revealed, at/past
-// threshold). sign: +1 dragging rightward (toList), -1 leftward
-// (toChat) — the revealed pane parallaxes in from the opposite side of
-// wherever the departing content is headed.
+// Whichever side is chat always tracks the finger directly (dx, 1:1) —
+// on a back swipe it's already fully on screen and just moves by dx; on
+// a forward swipe it starts translated a full viewport width off-screen
+// and dx (negative) counts down from there, so it arrives at the same
+// literal pixel rate the finger moves at instead of racing ahead of it.
+// Only THRESHOLD_PX worth of that (80px) plays out during the drag
+// itself — same as the back swipe only reveals an 80px sliver of what's
+// underneath before release — commit() below finishes sliding the rest
+// of the way on its own. The list — the "root" underneath, whichever
+// direction — never moves at all; the scrim (fading in as chat covers
+// it, fading out as chat reveals it) is its only motion cue, driven by
+// progress (0 at rest, 1 at/past the threshold).
 function paint(dx: number, m: Mode): void {
   if (!revealContent || !revealScrim) return;
-  const w = window.innerWidth;
   const progress = Math.min(Math.abs(dx) / THRESHOLD_PX, 1);
-  const sign = m === "toList" ? -1 : 1;
-  const parallaxStart = sign * PARALLAX_FRACTION * w;
-  revealContent.style.transform = `translateX(${parallaxStart * (1 - progress)}px)`;
-  revealScrim.style.opacity = String(SCRIM_MAX_OPACITY * (1 - progress));
-  for (const node of frontNodes) {
-    node.style.transform = `translateX(${dx}px)`;
+  if (m === "toList") {
+    for (const node of frontNodes) {
+      node.style.transform = `translateX(${dx}px)`;
+    }
+    revealScrim.style.opacity = String(SCRIM_MAX_OPACITY * (1 - progress));
+  } else {
+    const w = window.innerWidth;
+    revealContent.style.transform = `translateX(${w + dx}px)`;
+    revealScrim.style.opacity = String(SCRIM_MAX_OPACITY * progress);
   }
 }
 
@@ -220,6 +242,7 @@ function cleanup(): void {
   }
   frontNodes = [];
   revealLayer?.remove();
+  revealScrim?.remove();
   revealLayer = null;
   revealContent = null;
   revealScrim = null;
@@ -234,18 +257,29 @@ function cleanup(): void {
 // reads as an interrupted gesture, not a completed one.
 function commit(m: Mode): void {
   const w = window.innerWidth;
-  const finalX = m === "toList" ? w : -w;
-  for (const node of frontNodes) {
-    node.style.transition = `transform ${SETTLE_MS}ms ease-out`;
-    node.style.transform = `translateX(${finalX}px)`;
-  }
-  if (revealContent) {
-    revealContent.style.transition = `transform ${SETTLE_MS}ms ease-out`;
-    revealContent.style.transform = "translateX(0)";
-  }
-  if (revealScrim) {
-    revealScrim.style.transition = `opacity ${SETTLE_MS}ms ease-out`;
-    revealScrim.style.opacity = "0";
+  if (m === "toList") {
+    // Chat (frontNodes) finishes sliding off-screen; list never moved,
+    // nothing to settle beyond its scrim clearing.
+    for (const node of frontNodes) {
+      node.style.transition = `transform ${SETTLE_MS}ms ease-out`;
+      node.style.transform = `translateX(${w}px)`;
+    }
+    if (revealScrim) {
+      revealScrim.style.transition = `opacity ${SETTLE_MS}ms ease-out`;
+      revealScrim.style.opacity = "0";
+    }
+  } else {
+    // Chat (revealContent) finishes sweeping fully into place on top;
+    // list stays put underneath, now fully covered regardless (scrim at
+    // peak, matching).
+    if (revealContent) {
+      revealContent.style.transition = `transform ${SETTLE_MS}ms ease-out`;
+      revealContent.style.transform = "translateX(0)";
+    }
+    if (revealScrim) {
+      revealScrim.style.transition = `opacity ${SETTLE_MS}ms ease-out`;
+      revealScrim.style.opacity = String(SCRIM_MAX_OPACITY);
+    }
   }
   const chatState = revealChatState;
   setTimeout(() => {
