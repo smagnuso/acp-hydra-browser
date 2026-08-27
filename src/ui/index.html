@@ -151,18 +151,6 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
     border: 3px solid transparent;
     border-radius: 999px;
   }
-  /* .list's vertical scrollbar (when it overflows) eats into its content
-     width on top of its own padding, while .session-search-row above it
-     has no scrollbar to do the same — so the cards read narrower than
-     the search input above them by exactly the scrollbar's width.
-     scrollbar-gutter: stable reserves that width unconditionally (so
-     cards don't also change width depending on whether the list happens
-     to overflow), and .list's own right padding gives back the same
-     amount so the reservation doesn't ALSO shrink the cards on top of
-     the space it already claims — net effect, the cards get back up to
-     the search bar's width instead of the search bar shrinking to
-     theirs. */
-  .list { scrollbar-gutter: stable; padding-right: calc(1rem - var(--scrollbar-w)); }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: content-box; }
   ::-webkit-scrollbar-corner { background: transparent; }
 }
@@ -239,6 +227,22 @@ pre code { background: transparent; padding: 0; }
    row above already contributes its own bottom padding, and the full
    1rem on top of that left a visible gap before the first card. */
 .list { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 0.3rem 1rem 1rem; }
+/* Must come after the shorthand `padding` above — same specificity, so
+   an earlier rule here would just get overwritten by that shorthand's
+   own padding-right, silently undoing the compensation. .list's
+   vertical scrollbar (when it overflows) eats into its content width on
+   top of its own padding, while .session-search-row above it has no
+   scrollbar to do the same — so the cards read narrower than the
+   search input above them by exactly the scrollbar's width.
+   scrollbar-gutter: stable reserves that width unconditionally (so
+   cards don't also change width depending on whether the list happens
+   to overflow), and giving back the same amount of padding-right keeps
+   that reservation from ALSO shrinking the cards on top of the space it
+   already claims — net effect, the cards get back up to the search
+   bar's width instead of the search bar shrinking to theirs. */
+@media (hover: hover) and (pointer: fine) {
+  .list { scrollbar-gutter: stable; padding-right: calc(1rem - var(--scrollbar-w)); }
+}
 .list .group { margin-bottom: 1.25rem; }
 .list .group h2 { font-size: 0.85rem; color: var(--muted); margin: 0 0 0.5rem; }
 .card { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; flex-direction: column; gap: 0.3rem; cursor: pointer; }
