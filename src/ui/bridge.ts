@@ -223,6 +223,13 @@ export function handleFrame(frame: JsonRpcFrame): void {
     // prompt (spinnerOwner set) already has the right clock.
     if (hydraMeta?.busy === true) {
       markActive();
+      // Authoritative: the daemon itself says this turn is running, so
+      // any optimistic "sending" spinner left over from our own
+      // pre-reconnect dispatch is confirmed now, whether or not it
+      // still owns the clock below.
+      if (state.current.spinner) {
+        state.current.spinner.sending = false;
+      }
       const turnStartedAt = hydraMeta.turnStartedAt;
       if (typeof turnStartedAt === "number" && Number.isFinite(turnStartedAt)) {
         if (!state.current.spinner) {

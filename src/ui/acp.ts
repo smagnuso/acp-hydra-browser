@@ -423,6 +423,7 @@ export function ensureSpinner(startedAt?: number): void {
     toolCallIds: [],
     expanded: false,
     startedAt: startedAt ?? Date.now(),
+    sending: false,
   };
   c.spinnerOwner = undefined;
   insertAboveQueued({ kind: "spinner", spinner: c.spinner });
@@ -460,8 +461,11 @@ function freezeSpinner(endedAt?: number, stopReason?: string): void {
 // frame's daemon recordedAt when known (replay gets real durations),
 // else now. `owner` identifies the opening prompt so a later
 // prompt_queue/removed{started} for the same prompt doesn't double-open.
-// Mirrors cli's startToolsBlock.
-export function startTurnSpinner(startedAt?: number, owner?: string): void {
+// Mirrors cli's startToolsBlock. `sending` is true only for the
+// optimistic client-side open at dispatch time (queue.ts) — every other
+// caller here is reacting to a notification the daemon actually sent,
+// so the turn is already confirmed under way.
+export function startTurnSpinner(startedAt?: number, owner?: string, sending = false): void {
   if (!state.current) return;
   const c = state.current;
   freezeSpinner(startedAt);
@@ -469,6 +473,7 @@ export function startTurnSpinner(startedAt?: number, owner?: string): void {
     toolCallIds: [],
     expanded: false,
     startedAt: startedAt ?? Date.now(),
+    sending,
   };
   c.spinnerOwner = owner;
   insertAboveQueued({ kind: "spinner", spinner: c.spinner });
@@ -1296,6 +1301,13 @@ function onPromptQueueRemoved(params: AnyRecord): void {
       // Prefer the messageId form — the turn_complete stale-completion
       // guard compares owner against completing messageIds.
       state.current.spinnerOwner = messageId;
+      // This is prompt_queue/removed{started} — a universal signal that
+      // reaches the originator too (unlike prompt_received), so it's
+      // the authoritative confirmation that our own optimistically-
+      // opened spinner's turn is genuinely under way.
+      if (state.current.spinner) {
+        state.current.spinner.sending = false;
+      }
     }
     markActive();
   } else if (reason === "cancelled" || reason === "abandoned") {
@@ -1628,6 +1640,13 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
     case "plan":
       if (!isSyntheticChunk) {
         markActive();
+        // Any real update for this turn proves the daemon actually has
+        // it, whatever the connection looked like at send time — clear
+        // the optimistic "sending" flag so the spinner reads "thinking"
+        // (or "working", once tool calls start landing) instead.
+        if (state.current?.spinner) {
+          state.current.spinner.sending = false;
+        }
       }
       break;
     default:

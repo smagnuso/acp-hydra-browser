@@ -196,6 +196,14 @@ export interface SpinnerState {
   // Date.now() at creation is the right clock — replayed history never
   // instantiates one.
   startedAt: number;
+  // True from the moment a prompt is dispatched (or held offline) until
+  // the daemon actually confirms the turn is under way — a
+  // prompt_queue/removed{started}, or any real session/update for it.
+  // Distinguishes "we asked the daemon to do this" from "the daemon is
+  // doing this": without it, a spinner created optimistically at send
+  // time claims "thinking" even while the send is still in flight, or
+  // (worse) while genuinely offline and nothing has gone out at all.
+  sending: boolean;
 }
 
 export interface PermissionEntry {

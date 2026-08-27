@@ -3753,7 +3753,9 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
         el(
           "span",
           null,
-          spinner.toolCallIds.length === 0
+          spinner.sending
+            ? "sending…"
+            : spinner.toolCallIds.length === 0
             ? `thinking · ${elapsed}`
             : `working — ${spinner.toolCallIds.length} tool call${
                 spinner.toolCallIds.length === 1 ? "" : "s"
@@ -3792,7 +3794,7 @@ function renderSpinner(spinner: SpinnerState): HTMLElement {
       "div",
       { class: "head" },
       el("span", { class: "dot" }),
-      el("span", null, `working · ${elapsed}`),
+      el("span", null, spinner.sending ? "sending…" : `working · ${elapsed}`),
       cancelBtn,
     ),
     el("ul", null, items),

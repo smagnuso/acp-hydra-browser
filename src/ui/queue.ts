@@ -147,6 +147,13 @@ function dispatchPrompt(
   c.recentOwnPrompts = c.recentOwnPrompts.filter((p) => p.at >= cutoff).slice(-16);
   if (offline) {
     void saveOfflineEntry(c.sessionId, { id: entry.id, text, attachments: entry.attachments });
+    // Nothing has actually gone out yet — show that honestly rather
+    // than dropping the working block entirely (the previous
+    // behavior). Stays "sending…" until flushOfflineQueue actually
+    // fires this off and the daemon confirms it, same as an online
+    // send does below.
+    startTurnSpinner(undefined, entry.id, true);
+    markActive();
     jumpToBottom(c);
     if (opts.addToHistory ?? true) {
       pushHistory(c, text);
@@ -174,7 +181,10 @@ function dispatchPrompt(
   // spinner as a false start. A "queued" send changes nothing about
   // the running turn, so it just keeps whatever marker is live.
   if (entry.status === "pending") {
-    startTurnSpinner(undefined, entry.id);
+    // Optimistic — the daemon hasn't confirmed this turn is open yet.
+    // The switch in acp.ts's session/update handler (or
+    // prompt_queue/removed{started}) clears this once it does.
+    startTurnSpinner(undefined, entry.id, true);
   } else {
     ensureSpinner();
   }
@@ -238,9 +248,11 @@ export function flushOfflineQueue(c: ChatState): void {
   if (flushed) {
     // Same open/keep split as dispatchPrompt: a pending head opens its
     // turn's thinking block under its bubble; queued-behind flushes
-    // leave the running turn's marker alone.
+    // leave the running turn's marker alone. Still optimistic — the
+    // send just went out for real, but isn't confirmed until the
+    // daemon says so (same as dispatchPrompt's online path).
     if (opener) {
-      startTurnSpinner(undefined, opener.id);
+      startTurnSpinner(undefined, opener.id, true);
     } else {
       ensureSpinner();
     }
