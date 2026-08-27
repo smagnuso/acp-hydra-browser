@@ -22,6 +22,9 @@ export interface HydraSessionInfo {
   status: "warm" | "cold";
   busy: boolean;
   awaitingInput: boolean;
+  // User-set sort weight, toggled with `*` in the TUI picker. Absent/0
+  // = normal, any positive integer = high priority.
+  priority?: number;
   // Present only for a session running in an isolated workspace. Named
   // `workspace` on the wire (GET/POST /v1/sessions), not `workspaceInfo`
   // — that name is only used in the separate ACP `_meta["hydra-acp"]`
@@ -123,6 +126,17 @@ export class HydraRestClient {
     await this.json(
       "POST",
       `/v1/sessions/${encodeURIComponent(sessionId)}/kill`,
+    );
+  }
+
+  // null clears back to normal priority — mirrors the daemon's own
+  // PATCH contract (also used for rename), which treats null and 0
+  // interchangeably as "clear".
+  async setPriority(sessionId: string, priority: number | null): Promise<void> {
+    await this.json(
+      "PATCH",
+      `/v1/sessions/${encodeURIComponent(sessionId)}`,
+      { priority },
     );
   }
 

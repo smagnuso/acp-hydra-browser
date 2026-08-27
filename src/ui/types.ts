@@ -65,6 +65,11 @@ export interface SessionInfo {
   // Any attention flag raised — a permission request or transformer flag
   // waiting on the user. Can be true on cold sessions too.
   awaitingInput?: boolean;
+  // User-set sort weight, toggled with `*` in the TUI picker. Absent/0 =
+  // normal; any positive integer floats the session up compareSessions'
+  // ranking (still below anything actually busy/awaiting input). Persisted
+  // on the daemon, so it survives restarts and applies to cold sessions.
+  priority?: number;
   // Hostname of the machine that exported the bundle this session was
   // imported from. Undefined for sessions created on this host.
   importedFromMachine?: string;

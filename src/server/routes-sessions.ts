@@ -94,6 +94,31 @@ export function registerSessionRoutes(
     }
   });
 
+  app.patch("/api/sessions/:id/priority", async (request, reply) => {
+    const id = (request.params as { id: string }).id;
+    const body = (request.body ?? {}) as { priority?: unknown };
+    let priority: number | null;
+    if (body.priority === null || body.priority === undefined) {
+      priority = null;
+    } else if (
+      typeof body.priority === "number" &&
+      Number.isInteger(body.priority) &&
+      body.priority > 0
+    ) {
+      priority = body.priority;
+    } else {
+      reply.code(400).send({ error: "priority must be a positive integer, or null to clear" });
+      return;
+    }
+    try {
+      await clientFor(ctx, request).setPriority(id, priority);
+      reply.code(204).send();
+    } catch (err) {
+      const status = err instanceof HydraRestError ? err.status : 502;
+      reply.code(status).send({ error: (err as Error).message });
+    }
+  });
+
   app.post("/api/kill", async (request, reply) => {
     const body = (request.body ?? {}) as KillBody;
     if (!body.sessionId) {

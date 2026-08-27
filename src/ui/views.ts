@@ -860,26 +860,36 @@ interface SessionGroup {
   sessions: SessionInfo[];
 }
 
-// Same tiering as the TUI picker's sortSessions (picker.ts), minus the
-// priority-pin tiers the browser has no equivalent for: a mid-turn agent
-// blocked on a question (busy + awaiting-input) is the most urgent row
-// there is, plain busy comes next, then a stale awaiting-input flag on a
-// turn that's already over (often just an uncleared flag rather than an
-// agent actually standing by), then idle-warm, then cold. Tiebreak is
-// updatedAt at minute precision so per-chunk mtime churn doesn't
-// reshuffle the list between polls.
+// Same tiering as the TUI picker's sortSessions (picker.ts): a mid-turn
+// agent blocked on a question (busy + awaiting-input) is the most urgent
+// row there is, plain busy comes next, then a stale awaiting-input flag
+// on a turn that's already over (often just an uncleared flag rather
+// than an agent actually standing by), then priority-pinned idle-warm,
+// then plain idle-warm, then priority-pinned cold, then plain cold —
+// priority only breaks ties within "both idle-warm" or "both cold", never
+// outranking actual activity. Tiebreak within a tier is the priority
+// integer itself, then updatedAt at minute precision so per-chunk mtime
+// churn doesn't reshuffle the list between polls.
 function compareSessions(a: SessionInfo, b: SessionInfo): number {
+  const priorityOf = (s: SessionInfo): number => (s.priority && s.priority > 0 ? s.priority : 0);
   const tier = (s: SessionInfo): number => {
     const isWarm = s.status === "warm";
-    if (isWarm && s.busy && s.awaitingInput) return 4;
-    if (isWarm && s.busy) return 3;
-    if (isWarm && s.awaitingInput) return 2;
-    if (isWarm) return 1;
+    const isPriority = priorityOf(s) > 0;
+    if (isWarm && s.busy && s.awaitingInput) return 6;
+    if (isWarm && s.busy) return 5;
+    if (isWarm && s.awaitingInput) return 4;
+    if (isWarm && isPriority) return 3;
+    if (isWarm) return 2;
+    if (isPriority) return 1;
     return 0;
   };
   const dt = tier(b) - tier(a);
   if (dt !== 0) {
     return dt;
+  }
+  const dp = priorityOf(b) - priorityOf(a);
+  if (dp !== 0) {
+    return dp;
   }
   return String(b.updatedAt || "").slice(0, 16).localeCompare(String(a.updatedAt || "").slice(0, 16));
 }
@@ -897,6 +907,43 @@ function detailRow(label: string, value: string): HTMLElement {
     el("span", { class: "k" }, label),
     el("code", null, value),
   );
+}
+
+// High-priority sort weight, toggled with `*` in the TUI picker (see
+// compareSessions). Undocumented in PROTOCOL.md — an internal hydra
+// extension field (SessionListEntry.priority), not part of the ACP
+// spec proper. Same on/off distinction as the TUI's own picker — the
+// underlying field takes any positive integer for a future
+// finer-grained tier, but neither UI exposes that yet.
+function priorityRow(sessionId: string, priority: number | undefined): HTMLElement {
+  const checkbox = el("input", {
+    type: "checkbox",
+    title: "Float this session to the top of the list",
+    onchange: (e: Event) => {
+      void setSessionPriority(sessionId, (e.target as HTMLInputElement).checked ? 1 : null);
+    },
+  }) as HTMLInputElement;
+  checkbox.checked = (priority ?? 0) > 0;
+  return el(
+    "div",
+    { class: "detail" },
+    el("span", { class: "k" }, "high priority"),
+    checkbox,
+  );
+}
+
+async function setSessionPriority(sessionId: string, priority: number | null): Promise<void> {
+  try {
+    await api(`/api/sessions/${encodeURIComponent(sessionId)}/priority`, {
+      method: "PATCH",
+      body: JSON.stringify({ priority }),
+    });
+    void pollSessions();
+  } catch (err) {
+    setState({
+      banner: { kind: "bad", text: "priority update failed: " + (err as Error).message },
+    });
+  }
 }
 
 // Workspace action row for the expanded chat-details panel. Buttons send
@@ -2803,6 +2850,7 @@ function renderChat(c: ChatState): HTMLElement {
         detailRow("title", title),
         detailRow("session", shortSessionId(c.sessionId)),
         detailRow("directory", cwd || "?"),
+        priorityRow(c.sessionId, live?.priority),
         workspaceRow(live?.workspace),
         ...c.configOptions.map(configOptionRow),
       )
