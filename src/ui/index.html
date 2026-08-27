@@ -162,7 +162,18 @@ pre code { background: transparent; padding: 0; }
 
 /* --app-height is set from window.visualViewport by viewport.ts — see
    its comment for why the plain 100% chain isn't enough on iOS. */
-#app { height: var(--app-height, 100%); display: flex; flex-direction: column; overflow: hidden; }
+/* position:relative so swipe-nav.ts's absolutely-positioned drag-reveal
+   layer is contained here, not by body (position:fixed, per the scroll
+   note below) — same visual size either way today, but that's
+   incidental, not something to depend on. */
+/* background matches body's own — belt-and-suspenders so swipe-nav.ts's
+   drag-reveal (an absolutely-positioned layer inside #app, parallaxing
+   its content on transform) always has an opaque backdrop directly
+   behind it, not several DOM layers away at body. Without it the strip
+   uncovered by the parallax offset read as a transparent gap — the
+   chat/list pane looked like a bubble floating over nothing instead of
+   a solid surface. */
+#app { height: var(--app-height, 100%); display: flex; flex-direction: column; overflow: hidden; position: relative; background: var(--bg); }
 
 /* Split (wide-layout) view — session-list rail alongside the active
    chat instead of either taking the whole screen. Breakpoint mirrors
@@ -226,7 +237,7 @@ pre code { background: transparent; padding: 0; }
 /* Top padding is deliberately smaller than the other sides: the filter
    row above already contributes its own bottom padding, and the full
    1rem on top of that left a visible gap before the first card. */
-.list { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 0.3rem 1rem 1rem; }
+.list { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 0.3rem 1rem 1rem; background: var(--bg); }
 /* Must come after the shorthand `padding` above — same specificity, so
    an earlier rule here would just get overwritten by that shorthand's
    own padding-right, silently undoing the compensation. .list's
@@ -273,7 +284,7 @@ pre code { background: transparent; padding: 0; }
 .empty { color: var(--muted); padding: 2rem; text-align: center; }
 
 /* Chat */
-.chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.chat { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative; background: var(--bg); }
 /* Persistent chrome slots around the reconciled .chat-body (views.ts
    ensureChatView). display:contents keeps their children participating
    in .chat's column flex directly, so the wrappers are layout-invisible. */
@@ -344,7 +355,7 @@ pre code { background: transparent; padding: 0; }
    bottom border and reads as part of the topbar rather than as the head
    of the list. Horizontal padding matches .list's so the box lines up
    with the cards underneath it. */
-.session-search-row { position: relative; display: flex; align-items: center; padding: 0.7rem 1rem 0.4rem; flex: 0 0 auto; }
+.session-search-row { position: relative; display: flex; align-items: center; padding: 0.7rem 1rem 0.4rem; flex: 0 0 auto; background: var(--bg); }
 .session-search { flex: 1; min-width: 0; padding: 0.45rem 2rem 0.45rem 0.7rem; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--fg); font-size: 0.9rem; font-family: inherit; }
 .session-search:focus { outline: none; border-color: var(--accent, #4a9eff); }
 .session-search::placeholder { color: var(--muted); }
@@ -583,38 +594,46 @@ html[data-theme="light"] .hljs{color:#24292e}html[data-theme="light"] .hljs-doct
   transition: opacity 0.1s linear;
 }
 
-/* Swipe-nav hint (list<->chat, see swipe-nav.ts). Base styling anchors
-   it to the right edge (list -> last chat); .left mirrors it to the
-   left edge (chat -> list). */
-.swipe-back-hint {
-  position: fixed;
-  top: 50%;
-  right: 0;
-  transform: translate(0, -50%);
-  z-index: 60;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: 999px 0 0 999px;
-  padding: 0.4rem 1rem 0.4rem 0.9rem;
-  font-size: 0.82rem;
-  color: var(--fg);
-  opacity: 0;
-  pointer-events: none;
-  white-space: nowrap;
-  max-width: 70vw;
+/* Swipe-nav drag-reveal (list<->chat, see swipe-nav.ts). The departing
+   view (the real, live DOM nodes — untouched otherwise) gets an inline
+   transform + z-index during the drag; this layer sits behind it,
+   absolutely positioned within #app, holding a static preview of
+   whatever's being revealed — sometimes literally the real, just-closed
+   chat's own DOM node (peekChatViewRoot), which expects a flex-column
+   parent the same way #app itself provides one normally, hence .content
+   being flex here too. .scrim is a separate sibling (not baked into
+   .content's opacity) so dimming doesn't fade the preview's own contents
+   along with it. pointer-events: none on the whole layer — it's a
+   read-only preview even on the rare path where its content is a real,
+   otherwise-interactive chat view. */
+.swipe-reveal-layer {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  transition: opacity 0.15s linear;
+  z-index: 0;
+  pointer-events: none;
 }
-.swipe-back-hint.left {
-  right: auto;
-  left: 0;
-  border-right: 1px solid var(--border);
-  border-left: none;
-  border-radius: 0 999px 999px 0;
-  padding: 0.4rem 0.9rem 0.4rem 1rem;
+.swipe-reveal-content {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
 }
+.swipe-reveal-scrim {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  pointer-events: none;
+}
+.swipe-preview-list, .swipe-preview-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg);
+}
+.swipe-preview-chat-body { flex: 1; display: flex; align-items: center; justify-content: center; }
+.swipe-preview-loading { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.85rem; }
+.swipe-preview-loading .dot { width: 0.55em; height: 0.55em; flex: 0 0 auto; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite ease-in-out; }
 </style>
 </head>
 <body>

@@ -11,6 +11,7 @@ import { state } from "./state.js";
 const THRESHOLD_PX = 70;
 const MAX_PULL_PX = 110;
 
+let startX: number | null = null;
 let startY: number | null = null;
 let active = false;
 let armed = false;
@@ -52,16 +53,32 @@ function onTouchStart(e: TouchEvent): void {
   if (!list || !touch || list.scrollTop > 0 || !list.contains(touch.target as Node)) {
     return;
   }
+  startX = touch.clientX;
   startY = touch.clientY;
   active = true;
 }
 
 function onTouchMove(e: TouchEvent): void {
-  if (!active || startY === null) return;
+  if (!active || startX === null || startY === null) return;
   const list = listElement();
   const touch = e.touches[0];
   if (!list || !touch) return;
   const dy = touch.clientY - startY;
+  const dx = touch.clientX - startX;
+  // Same touch, same view (.list) as swipe-nav.ts's list→chat gesture —
+  // a diagonal drag could otherwise arm both at once, popping up a
+  // refresh indicator in the middle of a forward swipe. Once a drag
+  // reads as more horizontal than vertical, it's swipe-nav's to handle;
+  // bail permanently for this touch rather than re-arming if it drifts
+  // back vertical, matching swipe-nav's own one-shot direction lock. A
+  // real pull-down stays predominantly vertical from the first pixel,
+  // so this never fires for one.
+  if (Math.abs(dx) > Math.abs(dy)) {
+    hideIndicator();
+    active = false;
+    armed = false;
+    return;
+  }
   if (dy <= 0 || list.scrollTop > 0) {
     hideIndicator();
     armed = false;
@@ -83,6 +100,7 @@ function onTouchEnd(): void {
   }
   active = false;
   armed = false;
+  startX = null;
   startY = null;
 }
 

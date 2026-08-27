@@ -314,6 +314,61 @@ function buildRailContents(): Node[] {
   return [renderTopbar(), renderSessionSearch(), renderList()];
 }
 
+// Static snapshot of the session-list pane for swipe-nav.ts's chat→list
+// drag-reveal. Real content built from already-loaded state (no
+// network/async involved), but a throwaway one: it doesn't react to
+// further polling while the gesture is in flight, since it's discarded
+// either way — cancelled, or replaced wholesale by the real list once
+// closeChat()'s render lands.
+export function buildListPreviewPane(): HTMLElement {
+  return el("div", { class: "swipe-preview-list" }, ...buildRailContents());
+}
+
+// Lightweight identity card for swipe-nav.ts's list→chat drag-reveal —
+// deliberately NOT a full chat preview, NOT a sign the session's actual
+// history is gone. Opening a session is async (WS connect, history-cache
+// load), so no real transcript is available synchronously at drag time;
+// this sells the reveal with the header a real chat would show and an
+// explicit "opening…" in the body so the gap between the two reads as
+// "loading", not "empty" — the real renderChat() (with the real,
+// untouched transcript) takes over once the drag commits and openChat()
+// actually runs.
+export function buildChatPreviewPane(session: SessionInfo): HTMLElement {
+  const title = session.title || fallbackTitle(session.sessionId);
+  const subtitle = [
+    shortSessionId(session.sessionId),
+    agentWithModel(session.agentId, session.currentModel),
+  ].join(" · ");
+  return el(
+    "div",
+    { class: "swipe-preview-chat" },
+    el(
+      "div",
+      { class: "chat-header" },
+      el(
+        "div",
+        { class: "chat-title-row" },
+        el("div", { class: "chat-title" }, title),
+      ),
+      el(
+        "div",
+        { class: "chat-header-row" },
+        el("div", { class: "info" }, el("div", { class: "row2" }, subtitle)),
+      ),
+    ),
+    el(
+      "div",
+      { class: "chat-body swipe-preview-chat-body" },
+      el(
+        "div",
+        { class: "swipe-preview-loading" },
+        el("span", { class: "dot" }),
+        "opening…",
+      ),
+    ),
+  );
+}
+
 // The rail element itself — not its children — is what carries
 // keyboard focus (see focusListRail below). replaceChildren() never
 // disturbs the element holding it, so unlike a full #app teardown this
@@ -1999,6 +2054,31 @@ function pinIfDue(view: ChatView): void {
 }
 
 const chatViews = new WeakMap<ChatState, ChatView>();
+
+// For swipe-nav.ts's list→chat drag-reveal: if the caller still holds a
+// reference to a ChatState (routing.ts's lastClosedChat stashes the one
+// just closed), its view — the real, already-rendered `.chat` DOM node,
+// full transcript and scroll position intact — is still sitting right
+// here in the WeakMap, just detached from #app since closeChat()'s
+// teardown removed it. Reusing it beats building a fresh preview from
+// scratch when swiping right back into the session you just left.
+export function peekChatViewRoot(c: ChatState): HTMLElement | null {
+  return chatViews.get(c)?.root ?? null;
+}
+
+// Companion to peekChatViewRoot — routing.ts's closeChat() calls this
+// synchronously, before its own teardown runs, to capture the scroll
+// position while the node is still attached and correctly laid out.
+// Re-reading .chat-body.scrollTop later (once the node has been
+// detached and possibly reattached elsewhere for the drag preview) is
+// NOT equivalent: some browsers reset a scrolled element's scrollTop
+// to 0 across a detach/reattach cycle, and every reinsertion is exactly
+// that. Capturing once at the authoritative moment and threading the
+// number through sidesteps the question of how many times the node
+// gets moved before (or whether) it's ever shown again.
+export function peekChatScrollTop(c: ChatState): number {
+  return chatViews.get(c)?.body.scrollTop ?? 0;
+}
 
 function ensureChatView(c: ChatState): ChatView {
   let view = chatViews.get(c);

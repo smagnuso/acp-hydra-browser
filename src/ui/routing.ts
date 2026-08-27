@@ -12,6 +12,7 @@ import { handleNotification, resetChatHistoryState } from "./acp.js";
 import { loadCachedSession } from "./history-cache.js";
 import { loadDraft } from "./composer-draft.js";
 import { loadOfflineEntries } from "./offline-queue.js";
+import { peekChatScrollTop } from "./views.js";
 import type { ChatState, QueueEntry, SessionInfo } from "./types.js";
 
 // Exponential backoff for WS reconnect: 1s, 2s, 4s, 8s, 16s, 30s cap.
@@ -482,10 +483,71 @@ export function maybeRestoreLastSession(): void {
   attempt(0);
 }
 
+// Stashed by closeChat() below. Two consumers, both in swipe-nav.ts's
+// list→chat drag-reveal: getLastClosedChat() lets the preview reuse the
+// just-closed session's real, still-intact chat DOM (views.ts's
+// peekChatViewRoot) instead of a blank/loading placeholder, and
+// reopenClosedChat() below lets a committed swipe back into that same
+// session resume the SAME ChatState in place — rather than openChat()'s
+// usual fresh-from-scratch rebuild, which starts the log empty and
+// re-snaps scroll to the bottom while cache/replay refills it. That
+// reset is invisible on an ordinary tap (nothing was on screen a moment
+// before), but right after the drag-reveal showed the real, already-
+// scrolled transcript, it read as the whole view flickering back to
+// blank-then-top on release.
+let lastClosedChat: ChatState | null = null;
+export function getLastClosedChat(): ChatState | null {
+  return lastClosedChat;
+}
+
+// Captured alongside lastClosedChat, synchronously in closeChat() before
+// its own teardown runs — i.e. while .chat-body is still attached and
+// correctly laid out. swipe-nav.ts's drag-reveal needs this rather than
+// re-reading the live DOM's scrollTop once it reuses the cached node:
+// reinserting a detached scrollable element resets its scrollTop to 0
+// on at least some browsers (the same class of bug the chat log's own
+// syncChildren hit reordering nodes mid-stream), and the reveal's own
+// reinsertion is exactly that operation. Capturing once here and
+// threading the number through sidesteps it regardless of how many
+// times the node gets detached/reattached before it's shown again.
+let lastClosedScrollTop = 0;
+export function getLastClosedScrollTop(): number {
+  return lastClosedScrollTop;
+}
+
+// Resumes the given ChatState in place instead of rebuilding one from
+// scratch — same mechanism scheduleReconnect already uses for an
+// ordinary dropped-socket reconnect (resetConnectionStateForReconnect +
+// connectChatSocket), which is exactly what "swiped away and back"
+// looks like from the daemon's side: the socket closed, lastSeenMessageId
+// still points at the right spot, and afterMessageId picks up a delta
+// instead of a full replay. log/scroll/toolCalls/queue are untouched.
+// Returns false (does nothing) if `chat` isn't actually the most
+// recently closed one — stale by the time the caller's animation
+// finished (a different session opened and closed meanwhile) — so the
+// caller can fall back to a normal openChat().
+export function reopenClosedChat(chat: ChatState): boolean {
+  if (lastClosedChat !== chat) return false;
+  lastClosedChat = null;
+  setLocationHash(buildSessionHash(chat.sessionId, false));
+  resetConnectionStateForReconnect(chat);
+  chat.reconnectAttempt = 0;
+  state.current = chat;
+  setState({
+    view: "chat",
+    listHighlightedSessionId: chat.sessionId,
+    lastSessionId: chat.sessionId,
+  });
+  connectChatSocket(chat);
+  return true;
+}
+
 export function closeChat(): void {
   setLocationHash("");
   closeChatSocket();
   const returningFrom = state.current?.sessionId ?? state.lastSessionId;
+  lastClosedChat = state.current;
+  lastClosedScrollTop = state.current ? peekChatScrollTop(state.current) : 0;
   setState({
     view: "list",
     current: null,

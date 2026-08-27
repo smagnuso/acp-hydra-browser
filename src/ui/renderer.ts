@@ -65,6 +65,28 @@ let pointerDown = false;
 // attaching native UI to the tapped element (a <select>'s picker, a text
 // input's keyboard) and kills it before it's visible.
 let renderHeldByPress = false;
+// Escape hatch for a gesture that owns its own release handling instead
+// of just wanting the render deferred until pointerup — swipe-nav.ts's
+// drag-reveal is the case that motivated this: its own touchend handler
+// runs an animated commit/cancel, but the pointerup handler right below
+// fires first (same release, but pointerup precedes touchend) and would
+// otherwise flush any render queued during the drag immediately — a
+// full #app teardown wiping out the drag's inline transforms and
+// preview layer before swipe-nav's own handler ever got a chance to run.
+// Held for the gesture's whole animated lifetime, not just
+// pointerdown-to-pointerup; endExternalRenderHold() flushes whatever
+// was queued once that's actually done.
+let externalRenderHold = false;
+export function beginExternalRenderHold(): void {
+  externalRenderHold = true;
+}
+export function endExternalRenderHold(): void {
+  externalRenderHold = false;
+  if (renderHeldByPress) {
+    renderHeldByPress = false;
+    render();
+  }
+}
 document.addEventListener(
   "pointerdown",
   () => {
@@ -82,6 +104,10 @@ document.addEventListener(
       stuckPointerTimer = undefined;
     }
     if (!renderHeldByPress) return;
+    if (externalRenderHold) {
+      // Whoever holds this owns the flush — see beginExternalRenderHold.
+      return;
+    }
     renderHeldByPress = false;
     // A click-and-drag text selection resolves exactly on this same
     // pointerup — flushing the held render right here tears down (or,
@@ -130,7 +156,7 @@ document.addEventListener(
     pointerDown = false;
     // The browser took the gesture (native scroll, system sheet). Flush
     // any held render; the patch path no longer disturbs the scroller.
-    if (renderHeldByPress) {
+    if (renderHeldByPress && !externalRenderHold) {
       renderHeldByPress = false;
       render();
     }
@@ -194,9 +220,10 @@ export function render(): void {
   const delay = Math.max(0, MIN_RENDER_INTERVAL_MS - sinceLast);
   const fire = (): void => {
     scheduled = false;
-    if (pointerDown) {
-      // Park it; pointerup/pointercancel flushes. No rAF respin — that
-      // was a busy-loop for the whole duration of every press.
+    if (pointerDown || externalRenderHold) {
+      // Park it; pointerup/pointercancel/endExternalRenderHold flushes.
+      // No rAF respin — that was a busy-loop for the whole duration of
+      // every press.
       renderHeldByPress = true;
       // ...but don't trust that a release is coming. A pointerdown whose
       // pointerup never arrives — a browser Back gesture, a press that
@@ -205,17 +232,21 @@ export function render(): void {
       // user happens to touch the screen again. Observed as a view
       // transition sitting unpainted for seconds. A real press is over
       // in well under a second, so a release after this long means the
-      // event isn't coming.
-      if (stuckPointerTimer !== undefined) clearTimeout(stuckPointerTimer);
-      stuckPointerTimer = setTimeout(() => {
-        stuckPointerTimer = undefined;
-        if (!pointerDown) return;
-        pointerDown = false;
-        if (renderHeldByPress) {
-          renderHeldByPress = false;
-          render();
-        }
-      }, STUCK_POINTER_MS);
+      // event isn't coming. Only pointerDown itself self-heals this way —
+      // externalRenderHold is a deliberate, bounded hold the caller is
+      // responsible for ending.
+      if (pointerDown) {
+        if (stuckPointerTimer !== undefined) clearTimeout(stuckPointerTimer);
+        stuckPointerTimer = setTimeout(() => {
+          stuckPointerTimer = undefined;
+          if (!pointerDown) return;
+          pointerDown = false;
+          if (renderHeldByPress && !externalRenderHold) {
+            renderHeldByPress = false;
+            render();
+          }
+        }, STUCK_POINTER_MS);
+      }
       return;
     }
     if (isActivelyTyping()) {
