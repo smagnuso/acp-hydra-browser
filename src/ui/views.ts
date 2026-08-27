@@ -782,6 +782,12 @@ export function handleListKeydown(e: KeyboardEvent): void {
   setState({ listHighlightedSessionId: ids[nextIdx]! });
 }
 
+// Tracks the last highlight renderList() actually scrolled to, so a
+// render triggered by something else entirely (a poll tick) doesn't
+// re-trigger the scroll-into-view just because the highlight is still
+// set from an earlier, unrelated navigation.
+let lastScrolledHighlightId: string | null = null;
+
 function renderList(): HTMLElement {
   const visible = visibleFilteredSessions();
   // Count cold-filtered sessions separately so the empty-state message
@@ -794,11 +800,23 @@ function renderList(): HTMLElement {
   // Keyboard-highlighted card may be scrolled out of view (a long list,
   // or the highlight just moved past the fold) — bring it on screen.
   // Deferred a tick: `list` isn't attached to the document until
-  // renderApp's caller appends this function's return value.
-  if (state.listHighlightedSessionId) {
+  // renderApp's caller appends this function's return value. Gated on
+  // the highlight actually CHANGING since the last render, not merely
+  // being set — listHighlightedSessionId stays pinned to the open
+  // session for as long as it's open, and re-queuing this on every poll
+  // tick (every render, not just a keyboard-nav one) would yank anyone
+  // who'd scrolled the list away from the open session right back to
+  // it a couple seconds later.
+  if (
+    state.listHighlightedSessionId &&
+    state.listHighlightedSessionId !== lastScrolledHighlightId
+  ) {
+    lastScrolledHighlightId = state.listHighlightedSessionId;
     queueMicrotask(() => {
       document.querySelector(".card.highlighted")?.scrollIntoView({ block: "nearest" });
     });
+  } else if (!state.listHighlightedSessionId) {
+    lastScrolledHighlightId = null;
   }
   if (visible.length === 0) {
     let msg: string;
