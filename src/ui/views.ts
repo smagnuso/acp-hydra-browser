@@ -1199,18 +1199,26 @@ function groupSessions(sessions: SessionInfo[], mode: "project" | "recent"): Ses
 // Anchoring to the session card nearest the top of the viewport (and its
 // exact sub-pixel offset) instead survives reordering elsewhere in the
 // list, since that card's rank changing doesn't move IT.
+//
+// Uses getBoundingClientRect(), not offsetTop, deliberately: .list has
+// no `position`, so it's never a card's offsetParent (that lands on
+// whatever positioned ancestor — or <body> — the walk-up finds), which
+// made offsetTop and list.scrollTop two different coordinate spaces.
+// getBoundingClientRect is always viewport-relative on both sides, so
+// diffing two rects is safe regardless of who ends up as offsetParent.
 export interface ListScrollAnchor {
   sessionId: string;
   offset: number;
 }
 
 export function captureListAnchor(list: HTMLElement): ListScrollAnchor | null {
-  const top = list.scrollTop;
+  const listTop = list.getBoundingClientRect().top;
   for (const card of list.querySelectorAll<HTMLElement>(".card")) {
-    if (card.offsetTop + card.offsetHeight <= top) continue;
+    const cardRect = card.getBoundingClientRect();
+    if (cardRect.bottom <= listTop) continue;
     const sessionId = card.dataset.sessionId;
     if (!sessionId) return null;
-    return { sessionId, offset: top - card.offsetTop };
+    return { sessionId, offset: cardRect.top - listTop };
   }
   return null;
 }
@@ -1221,7 +1229,8 @@ export function restoreListAnchor(list: HTMLElement, anchor: ListScrollAnchor | 
     `.card[data-session-id="${CSS.escape(anchor.sessionId)}"]`,
   );
   if (!card) return;
-  list.scrollTop = card.offsetTop + anchor.offset;
+  const delta = card.getBoundingClientRect().top - list.getBoundingClientRect().top - anchor.offset;
+  list.scrollTop += delta;
 }
 
 function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
