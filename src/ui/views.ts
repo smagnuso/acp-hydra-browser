@@ -388,7 +388,16 @@ function clampRailWidth(px: number): number {
 // since only one element's width is changing. State is committed once,
 // on release.
 function renderSplitter(): HTMLElement {
-  const sp = el("div", { class: "splitter", title: "Drag to resize" });
+  const sp = el("div", { class: "splitter", title: "Drag to resize (double-click to reset)" });
+  sp.addEventListener("dblclick", () => {
+    const rail = sp.previousElementSibling as HTMLElement | null;
+    // Clears the persisted drag width so the rail falls back to the
+    // CSS default (.rail's flex-basis) instead of an inline style that
+    // would keep overriding it forever, including any future default
+    // width change, until the user happened to drag again.
+    if (rail) rail.style.flex = "";
+    setState({ railWidth: null });
+  });
   sp.addEventListener("pointerdown", (e: PointerEvent) => {
     const rail = sp.previousElementSibling as HTMLElement | null;
     if (!rail) return;
