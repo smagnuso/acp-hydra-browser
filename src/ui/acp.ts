@@ -601,12 +601,31 @@ function applyEditDiffUpdate(update: AnyRecord): boolean {
   return true;
 }
 
+// Claude Code's `parentToolUseId` (raw `_meta.claudeCode`), set on a tool
+// call issued by a subagent spawned via the `Task` tool rather than the
+// foreground turn. Such calls are background noise multiplexed into this
+// same session's update stream — closing the open agent-message bubble for
+// one would freeze it mid-word the instant the subagent's next chunk
+// lands, and split the foreground reply into two bubbles at whatever
+// arbitrary point the subagent's tool call happened to interleave.
+function getParentToolUseId(update: AnyRecord): string | undefined {
+  const meta = update._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const claudeCode = (meta as AnyRecord).claudeCode;
+  if (!claudeCode || typeof claudeCode !== "object") return undefined;
+  const id = (claudeCode as AnyRecord).parentToolUseId;
+  return typeof id === "string" ? id : undefined;
+}
+
 function onToolCall(update: AnyRecord): void {
   if (!state.current) return;
   // Close any streaming agent message before this tool so the next
   // agent chunk after the tool starts a fresh bubble — same pattern
-  // hydra-acp-slack uses with closeAgentMessage.
-  closeOpenStream();
+  // hydra-acp-slack uses with closeAgentMessage. Skipped for a background
+  // subagent's own tool call (see getParentToolUseId).
+  if (getParentToolUseId(update) === undefined) {
+    closeOpenStream();
+  }
   if (applyExitPlanModeUpdate(update)) {
     maybeResolvePermissionByToolCall(
       String(update.toolCallId),
