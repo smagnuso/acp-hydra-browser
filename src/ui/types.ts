@@ -545,6 +545,8 @@ export interface AppState {
   railWidth: number | null;
   // Filled in when the options modal opens — see describeCachedSession.
   cacheInfo?: string;
+  // Filled in when the options modal opens — see openOptionsModal.
+  daemonVersion?: string;
   // Hide agent_thought_chunk bubbles across every chat. Persisted
   // globally (not per-session) since it's a display preference, not
   // session state — thought chunks are still received and kept in

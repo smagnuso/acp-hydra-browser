@@ -8,6 +8,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const htmlIn = join(root, "src", "ui", "index.html");
 const htmlOut = join(root, "dist", "ui", "index.html");
 const entry = join(root, "src", "ui", "main.ts");
+const appVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
 // Deliberately NOT bundled with main.ts — a service worker must be
 // servable at its own URL to register, so it's copied through as-is
 // rather than inlined into index.html like the rest of the app.
@@ -21,7 +22,10 @@ const swOut = join(root, "dist", "ui", "sw.js");
 const buildId = new Date().toISOString().replace("T", " ").slice(0, 16) + "Z";
 
 const result = await esbuild.build({
-  define: { __BUILD_ID__: JSON.stringify(buildId) },
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId),
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   entryPoints: [entry],
   bundle: true,
   format: "iife",

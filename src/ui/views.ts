@@ -1113,6 +1113,16 @@ function openOptionsModal(): void {
       render();
     });
   }
+  state.daemonVersion = "…";
+  void api<{ status: string; upstream?: { version?: string } }>("/api/health")
+    .then((res) => {
+      state.daemonVersion = res.upstream?.version ?? "unknown";
+      render();
+    })
+    .catch(() => {
+      state.daemonVersion = "unreachable";
+      render();
+    });
   setState({ modal: { kind: "options" } });
 }
 
@@ -1209,6 +1219,15 @@ function buildRow(): HTMLElement {
   return copyableDiagnostic("build", id);
 }
 
+function versionRow(): HTMLElement {
+  const version = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
+  return copyableDiagnostic("browser", version);
+}
+
+function daemonVersionRow(): HTMLElement {
+  return copyableDiagnostic("daemon", state.daemonVersion ?? "…");
+}
+
 function themeRow(): HTMLElement {
   const select = el(
     "select",
@@ -1258,6 +1277,8 @@ function renderOptionsModal(): HTMLElement {
       el(
         "div",
         { class: "diagnostics" },
+        versionRow(),
+        daemonVersionRow(),
         buildRow(),
         cacheRow(),
         copyableDiagnostic("slow", describeSlow()),
