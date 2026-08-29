@@ -61,7 +61,15 @@ const DB_NAME = "hydra-acp-history-cache";
 // text between them, and no amount of reloading repairs them -- the rest
 // of each message was never stored. Load full history recovers a session
 // immediately; this makes the repair automatic.
-const DB_VERSION = 3;
+// Bumped to 4 to discard caches written while the replay cursor could name
+// a message still streaming (see ChatState.pendingCursorMessageId). Those
+// entries have holes: the daemon resumed past the end of a half-received
+// message, so its remaining chunks were never delivered, never cached, and
+// are unreachable — the stored cursor sits beyond them, so every later
+// delta asks only for what came after. Observed as a turn rendering its
+// prompt and its turn-stamp with the whole reply missing. Nothing repairs
+// such an entry in place; one full replay per session does.
+const DB_VERSION = 4;
 const STORE = "sessions";
 // 6MB holds several screenshot-bearing turns plus a long text
 // transcript; 10 sessions caps the whole store around 60MB, well inside
@@ -222,15 +230,21 @@ let flushTimer: ReturnType<typeof setTimeout> | undefined;
 // keystroke handling, and was measurably competing with typing
 // responsiveness during a fast-streaming reply. Sizing is deferred to
 // mergeAndTrim, which only runs once per debounce window.
+// `messageId` is the replay cursor to store alongside the frames, and is
+// optional: a caller that only wants content cached (acp.ts's two
+// synthesisers for frames the daemon withholds from the originator)
+// passes nothing and the record keeps whatever cursor it already had.
 export function queueFrameForCache(
   sessionId: string,
   frame: JsonRpcFrame,
-  messageId: string,
+  messageId?: string,
 ): void {
   const list = pendingFrames.get(sessionId) ?? [];
   list.push(frame);
   pendingFrames.set(sessionId, list);
-  pendingLastSeen.set(sessionId, messageId);
+  if (messageId !== undefined) {
+    pendingLastSeen.set(sessionId, messageId);
+  }
   if (flushTimer === undefined) {
     flushTimer = setTimeout(() => {
       flushTimer = undefined;
@@ -286,7 +300,10 @@ async function flushPending(): Promise<void> {
     const lastSeenMessageId = pendingLastSeen.get(sessionId);
     pendingFrames.delete(sessionId);
     pendingLastSeen.delete(sessionId);
-    if (!newFrames || !lastSeenMessageId) continue;
+    // No cursor in this batch is normal now (see queueFrameForCache), and
+    // must not cost the batch its frames — mergeAndTrim keeps the stored
+    // cursor when none is supplied.
+    if (!newFrames) continue;
     await mergeAndTrim(db, sessionId, newFrames, lastSeenMessageId);
   }
   await enforceSessionLru(db);
@@ -296,7 +313,7 @@ function mergeAndTrim(
   db: IDBDatabase,
   sessionId: string,
   newFrames: JsonRpcFrame[],
-  lastSeenMessageId: string,
+  lastSeenMessageId: string | undefined,
 ): Promise<void> {
   return new Promise((resolve) => {
     let tx: IDBTransaction;
@@ -338,7 +355,7 @@ function mergeAndTrim(
       }
       const rec: CachedSession = {
         sessionId,
-        lastSeenMessageId,
+        lastSeenMessageId: lastSeenMessageId ?? existing?.lastSeenMessageId,
         frames,
         totalBytes,
         lastAccessed: Date.now(),

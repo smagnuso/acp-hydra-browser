@@ -78,6 +78,8 @@ export function resetChatHistoryState(c: ChatState): void {
   c.ownClientId = undefined;
   c.currentHeadMessageId = undefined;
   c.lastSeenMessageId = undefined;
+  c.pendingCursorMessageId = undefined;
+  c.lastSeenSeq = undefined;
   c.spinnerOwner = undefined;
 }
 
@@ -87,6 +89,19 @@ export function resetChatHistoryState(c: ChatState): void {
 // Date.now(). This is what lets a replayed turn's stamp show its real
 // duration instead of measuring the replay. Mirrors cli's
 // extractRecordedAt.
+// Read side of the daemon's per-frame replay cursor
+// (PROTOCOL.md, params._meta["hydra-acp"].seq). Absent on state kinds and
+// on daemons predating the field.
+function extractFrameSeq(params: unknown): number | undefined {
+  if (!params || typeof params !== "object") return undefined;
+  const meta = (params as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const inner = (meta as Record<string, unknown>)["hydra-acp"];
+  if (!inner || typeof inner !== "object") return undefined;
+  const seq = (inner as { seq?: unknown }).seq;
+  return typeof seq === "number" && Number.isFinite(seq) ? seq : undefined;
+}
+
 function extractRecordedAt(params: unknown): number | undefined {
   if (!params || typeof params !== "object") return undefined;
   const meta = (params as { _meta?: unknown })._meta;
@@ -161,15 +176,27 @@ function stampBubbleMessageId(entry: QueueEntry): void {
 // excluded.
 //
 // Synthesising the frame the daemon didn't send us closes the hole. It
-// carries the real messageId, so if a later full replay delivers the
-// daemon's own copy, mergeAndTrim's messageId dedup collapses the two
-// rather than double-rendering the prompt.
+// carries the real messageId, so a later full replay of the daemon's own
+// copy renders once: onPromptReceived's messageId guard skips the second.
+// (mergeAndTrim used to collapse them in the cache too; that dedup is
+// gone, so the cache holds both copies — wasteful, not wrong.)
+//
+// Neither synthesiser advances the cache's replay cursor. This one can't:
+// `${owner}:turn_complete` is an id we made up, absent from daemon
+// history, so a cold load resuming from it misses and falls back to a
+// full replay — defeating the cache at the end of every own turn, which
+// is precisely when a cold load is most likely. The prompt frame's id is
+// real but can arrive out of order (hydrateQueueFromSnapshot binds
+// already-queued prompts at reattach), and a cursor that moves backwards
+// mid-stream replays content we already have. The cursor belongs to the
+// live frame path in handleNotification; these two only add content.
+//
 // Synthesises the turn_complete the daemon withheld from us (see
 // finalizeTurn's `own` note). Keyed off the owning prompt's messageId so
 // the id is deterministic: replaying this frame twice is harmless —
 // freezeSpinner is a no-op once the spinner is already frozen — but a
 // random id per call would accumulate a fresh copy in the cache on every
-// merge, which the messageId dedup could never collapse.
+// merge.
 function cacheOwnTurnCompleteFrame(stopReason?: string, endedAt?: number): void {
   const owner = state.current?.spinnerOwner;
   if (!state.current || owner === undefined) return;
@@ -187,7 +214,6 @@ function cacheOwnTurnCompleteFrame(stopReason?: string, endedAt?: number): void 
         _meta: { "hydra-acp": { recordedAt: endedAt ?? Date.now() } },
       },
     },
-    `${owner}:turn_complete`,
   );
 }
 
@@ -202,12 +228,22 @@ function cacheOwnPromptFrame(entry: QueueEntry): void {
         update: {
           sessionUpdate: "prompt_received",
           messageId: entry.messageId,
-          prompt: [{ type: "text", text: entry.text }],
+          // Image blocks too, not just the text: extractImageAttachments
+          // reads them back off this frame on the next hydrate, so a
+          // text-only synthesis dropped every pasted screenshot from your
+          // own prompts while their text survived the reload.
+          prompt: [
+            { type: "text", text: entry.text },
+            ...(entry.attachments ?? []).map((a) => ({
+              type: "image",
+              mimeType: a.mimeType,
+              data: a.data,
+            })),
+          ],
         },
         _meta: { "hydra-acp": { recordedAt: Date.now() } },
       },
     },
-    entry.messageId,
   );
 }
 
@@ -301,7 +337,16 @@ export function pushChunk(
     last.kind === "stream" &&
     last.role === role &&
     !last.closed &&
-    !!last.synthetic === synthetic
+    !!last.synthetic === synthetic &&
+    // Never merge across a messageId boundary. Two agent messages can run
+    // back to back with no tool call between them to close the first, and
+    // folding them into one bubble makes that bubble span two groups —
+    // which dropPendingCursorGroup then can't purge precisely, since only
+    // the trailing group's text is about to be replayed back. Keeping one
+    // bubble to one group is the invariant that makes the purge exact.
+    (last.messageId === undefined ||
+      messageId === undefined ||
+      last.messageId === messageId)
   ) {
     last.text += text;
     // Each chunk is its own recordable frame with its own messageId
@@ -356,6 +401,34 @@ export function closeOpenStream(): void {
       return;
     }
   }
+}
+
+// Called when a reattach came back as an after_message delta (bridge.ts).
+// The cursor we sent names the last message group we saw the END of, so
+// the delta necessarily restarts at the first frame of the group that was
+// still streaming when the socket died — the daemon re-sends every chunk
+// of it, including the ones we already rendered. Most replayed kinds
+// absorb that idempotently (tool cards merge by toolCallId,
+// prompt_received dedupes by messageId), but pushChunk deliberately does
+// not dedupe: it appends verbatim, because agents reuse one id across a
+// whole reply and treating a repeat as redundant used to discard every
+// continuation. So the partial bubbles are dropped here and the replay
+// rebuilds them whole.
+//
+// User bubbles are exempt. They're already messageId-deduped on the way
+// in, and our OWN prompts are never re-delivered at all (hydra excludes
+// the originator from prompt_received fan-out) — dropping one on the
+// expectation that the replay restores it would delete it for good.
+export function dropPendingCursorGroup(): void {
+  if (!state.current) return;
+  const c = state.current;
+  const pending = c.pendingCursorMessageId;
+  if (pending === undefined || pending === c.lastSeenMessageId) return;
+  c.log = c.log.filter(
+    (e) =>
+      !(e.kind === "stream" && e.role !== "user" && e.messageId === pending),
+  );
+  c.pendingCursorMessageId = c.lastSeenMessageId;
 }
 
 // Returns true if `content` matches (and consumes) a recently-sent own
@@ -1599,19 +1672,36 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
   const update = (frame.params?.update ?? null) as AnyRecord | null;
   if (!update || typeof update !== "object") return;
   const kind = String(update.sessionUpdate ?? "");
-  // Track the last recordable messageId so a future reconnect can ask
-  // the daemon for a delta replay (afterMessageId) instead of a full
-  // one. State-kind updates are skipped — they aren't persisted, so the
-  // daemon can't use one as a replay cutoff. Mirror the same frame to
-  // the local history cache (history-cache.ts) so a cold page load gets
-  // the same benefit, not just a live socket drop within one tab session.
+  // Advance the delta-replay cursor so a future reconnect can ask the
+  // daemon for a delta (afterMessageId) instead of a full replay.
+  // State-kind updates are skipped — they aren't persisted, so the daemon
+  // can't use one as a replay cutoff. Mirror the same frame to the local
+  // history cache (history-cache.ts) so a cold page load gets the same
+  // benefit, not just a live socket drop within one tab session.
+  //
+  // Two-stage, because messageId names a message and not a frame: the id
+  // on the frame in hand is only ever *pending*, and is promoted to the
+  // real cursor when a frame with a different id proves its group closed.
+  // See ChatState.pendingCursorMessageId for what naming an open group
+  // costs.
   if (
     state.current &&
     kind &&
     !STATE_UPDATE_KINDS.has(kind) &&
     typeof update.messageId === "string"
   ) {
-    state.current.lastSeenMessageId = update.messageId;
+    if (update.messageId !== state.current.pendingCursorMessageId) {
+      if (state.current.pendingCursorMessageId !== undefined) {
+        state.current.lastSeenMessageId = state.current.pendingCursorMessageId;
+      }
+      state.current.pendingCursorMessageId = update.messageId;
+    }
+    // The daemon's own per-frame cursor, when it stamps one. No promotion
+    // step: it names this frame and nothing else.
+    const seq = extractFrameSeq(frame.params);
+    if (seq !== undefined) {
+      state.current.lastSeenSeq = seq;
+    }
     // Frames replayed out of the cache must not be written back into it.
     // hydrateFromCacheThenConnect feeds every cached frame through here,
     // so without this each session open re-queued that session's whole
@@ -1620,8 +1710,15 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
     // open. The byte-cap trim then cut into the front of that doubled
     // array, leaving a partial first copy followed by a full second one:
     // a cache that replays out of order and with duplicates.
+    // The cached cursor is the promoted one, not the frame's own id, for
+    // the same reason: a cold load resuming from a half-received message
+    // loses its tail exactly like a live reconnect does.
     if (!fromCache) {
-      queueFrameForCache(state.current.sessionId, frame, update.messageId);
+      queueFrameForCache(
+        state.current.sessionId,
+        frame,
+        state.current.lastSeenMessageId,
+      );
     }
   }
   // Sibling-resolved permission tear-down. Doesn't flip inTurn or

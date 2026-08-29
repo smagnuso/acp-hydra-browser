@@ -332,9 +332,22 @@ function connectChatSocket(chat: ChatState): void {
   // Only set once we've actually seen a recordable update, which also
   // means a session's very first connect never sends this (nothing to
   // anchor on yet) and correctly gets a full replay.
+  // Both cursors go out when we have them (PROTOCOL.md recommends it, and
+  // the TUI does the same): the daemon prefers afterSeq, which names one
+  // frame, and falls back to afterMessageId, which can only name a whole
+  // message. A seq can only have come from a daemon that stamps them —
+  // and any such daemon understands afterSeq — so the fallback is really
+  // just for daemons predating the field.
   if (chat.lastSeenMessageId !== undefined) {
     url.searchParams.set("afterMessageId", chat.lastSeenMessageId);
   }
+  if (chat.lastSeenSeq !== undefined) {
+    url.searchParams.set("afterSeq", String(chat.lastSeenSeq));
+  }
+  // Which cursor the daemon will actually resolve, and so whether the
+  // delta overlaps what we already rendered. See dropPendingCursorGroup.
+  chat.resumedByMessageId =
+    chat.lastSeenSeq === undefined && chat.lastSeenMessageId !== undefined;
   const ws = new WebSocket(url.toString());
   chat.ws = ws;
 

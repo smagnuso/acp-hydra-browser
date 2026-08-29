@@ -13,6 +13,7 @@ import {
   hydrateQueueFromSnapshot,
   markActive,
   pushLog,
+  dropPendingCursorGroup,
   resetChatHistoryState,
 } from "./acp.js";
 import { cancelAllQueued, flushOfflineQueue } from "./queue.js";
@@ -165,6 +166,15 @@ export function handleFrame(frame: JsonRpcFrame): void {
     const policy = (frame.params as Record<string, unknown> | undefined)?.policy;
     if (policy !== "after_message") {
       resetChatHistoryState(state.current);
+    } else if (state.current.resumedByMessageId) {
+      // Resumed by messageId, so the delta restarts at the first frame of
+      // whichever message was still streaming when the socket died — see
+      // dropPendingCursorGroup, which clears the partial bubbles so the
+      // frames about to arrive rebuild them instead of doubling them.
+      // Never on the afterSeq path: that resumes on the exact frame we
+      // stopped at, nothing is re-sent, and purging would delete a bubble
+      // no replay is coming to restore.
+      dropPendingCursorGroup();
     }
     return;
   }

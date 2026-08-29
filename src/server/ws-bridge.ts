@@ -113,13 +113,32 @@ export function attachWsBridge(
     // doHandshake below) so a quiet reconnect doesn't blow away the
     // browser's scroll position.
     const afterMessageId = url.searchParams.get("afterMessageId") ?? undefined;
+    // The exact form of that cursor (PROTOCOL.md, _meta["hydra-acp"].seq).
+    // Unique per recorded frame, where a messageId covers every chunk of a
+    // reply — so a reconnect landing mid-reply resumes on the frame the
+    // browser actually stopped at. The SPA sends one or the other, never
+    // both: a daemon too old to know afterSeq ignores it, sees
+    // after_message with no cursor it understands, and correctly falls
+    // back to a full replay.
+    const rawAfterSeq = url.searchParams.get("afterSeq");
+    const parsedSeq = rawAfterSeq === null ? Number.NaN : Number(rawAfterSeq);
+    const afterSeq = Number.isFinite(parsedSeq) ? parsedSeq : undefined;
     if (!sessionId) {
       socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
       socket.destroy();
       return;
     }
     wss.handleUpgrade(request, socket, head, (browserWs) => {
-      handleConnection(browserWs, request, ctx, sessionId, sessionToken, load, afterMessageId);
+      handleConnection(
+        browserWs,
+        request,
+        ctx,
+        sessionId,
+        sessionToken,
+        load,
+        afterMessageId,
+        afterSeq,
+      );
     });
   });
 
@@ -134,6 +153,7 @@ function handleConnection(
   sessionToken: string,
   load: boolean,
   afterMessageId: string | undefined,
+  afterSeq: number | undefined,
 ): void {
   log.info(`bridge open session=${sessionId} load=${load}`);
 
@@ -524,11 +544,13 @@ function handleConnection(
         );
       }
     }
-    const wantsAfterMessage = afterMessageId !== undefined;
+    const wantsAfterMessage =
+      afterMessageId !== undefined || afterSeq !== undefined;
     const attachResp = (await upstream.request("session/attach", {
       sessionId,
       historyPolicy: wantsAfterMessage ? "after_message" : "full",
-      ...(wantsAfterMessage ? { afterMessageId } : {}),
+      ...(afterMessageId !== undefined ? { afterMessageId } : {}),
+      ...(afterSeq !== undefined ? { afterSeq } : {}),
       clientInfo: {
         name: upstream.clientName,
         version: upstream.clientVersion,

@@ -479,12 +479,40 @@ export interface ChatState {
   // in acp.ts. Empty until the first snapshot arrives.
   configOptions: ConfigOption[];
   // messageId of the last recordable (non state-kind) session/update we
-  // processed. Sent back as afterMessageId on the next reconnect so the
-  // bridge can ask the daemon for a delta replay instead of a full one —
-  // see routing.ts's connectChatSocket and bridge.ts's handling of
-  // bridge/replay_policy. Undefined until the first recordable update
-  // arrives, which also means the very first attach always gets "full".
+  // processed AND know the end of. Sent back as afterMessageId on the next
+  // reconnect so the bridge can ask the daemon for a delta replay instead
+  // of a full one — see routing.ts's connectChatSocket and bridge.ts's
+  // handling of bridge/replay_policy. Undefined until a second distinct
+  // messageId arrives, which also means the very first attach always gets
+  // "full".
   lastSeenMessageId?: string;
+  // messageId of the group still arriving — not yet safe to use as a
+  // replay cursor. messageId is NOT unique per frame: Claude stamps one
+  // id on every chunk of a reply, thought chunks included (measured on a
+  // real session: 1761 distinct ids across 2990 frames, the largest
+  // spanning 105 of them). The daemon resolves afterMessageId to the LAST
+  // frame carrying it (cli's findMessageIdIndex scans backward), so
+  // naming a group we're only part-way through tells it we've seen
+  // through the group's end and it replays from beyond there — silently
+  // and permanently dropping every chunk we hadn't received, since the
+  // cursor then sits past them and no later reconnect asks again.
+  // Observed live: a 27s turn that rendered its prompt and its turn-stamp
+  // with the entire reply missing. Promoted to lastSeenMessageId only
+  // once a frame with a different id proves this one is complete; see
+  // handleNotification and dropPendingCursorGroup in acp.ts.
+  pendingCursorMessageId?: string;
+  // `_meta["hydra-acp"].seq` of the newest recordable frame processed —
+  // the daemon's exact cursor (PROTOCOL.md). Unique per frame, so unlike
+  // the messageId pair above it needs no pending/promoted dance: a
+  // reconnect resumes on the very frame we stopped at, with no rewind and
+  // nothing to purge. Undefined against a daemon that doesn't stamp seq,
+  // which is the only reason the messageId cursor still exists.
+  lastSeenSeq?: number;
+  // True when the live socket asked to resume by messageId rather than
+  // seq. Only then does an after_message delta overlap what we already
+  // rendered, and only then may dropPendingCursorGroup purge — on the seq
+  // path the partial bubble is NOT re-sent, so purging would delete it.
+  resumedByMessageId?: boolean;
   // True when log[] was seeded from the local history-cache.ts cache
   // rather than a full session/attach replay — meaning there may be
   // older history on the daemon that we don't have, since the cache is
