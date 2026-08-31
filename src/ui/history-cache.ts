@@ -353,6 +353,25 @@ function mergeAndTrim(
         const dropped = frames.shift();
         if (dropped) totalBytes -= dropped.bytes;
       }
+      // Then keep dropping until the cache opens on a turn boundary. A
+      // byte cut lands mid-turn nearly every time, and a hydrate that
+      // starts there paints agent output whose prompt_received was
+      // trimmed away: a turn with no prompt above it, which reads as a
+      // prompt having gone missing. Same cut the daemon's replay makes
+      // (cli's snapToTurnBoundary) and the same one views.ts already
+      // snaps for its render window. Bounded by the byte cap that just
+      // ran, and abandoned if no opener is found rather than emptying
+      // the cache over it.
+      const openerAt = frames.findIndex(
+        (f) =>
+          (f.frame.params as { update?: { sessionUpdate?: unknown } } | undefined)
+            ?.update?.sessionUpdate === "prompt_received",
+      );
+      if (openerAt > 0) {
+        for (const dropped of frames.splice(0, openerAt)) {
+          totalBytes -= dropped.bytes;
+        }
+      }
       const rec: CachedSession = {
         sessionId,
         lastSeenMessageId: lastSeenMessageId ?? existing?.lastSeenMessageId,

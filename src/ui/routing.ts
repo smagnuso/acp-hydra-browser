@@ -310,6 +310,7 @@ export function requestFullHistory(chat: ChatState): void {
   resetConnectionStateForReconnect(chat);
   resetChatHistoryState(chat);
   chat.historyIsPartial = false;
+  chat.wantFullHistory = true;
   render();
   connectChatSocket(chat);
 }
@@ -338,6 +339,13 @@ function connectChatSocket(chat: ChatState): void {
   // message. A seq can only have come from a daemon that stamps them —
   // and any such daemon understands afterSeq — so the fallback is really
   // just for daemons predating the field.
+  // Set by requestFullHistory, and only by it: tells the bridge to lift
+  // the daemon's replay cap for this one attach. Cleared once used so an
+  // ordinary reconnect doesn't keep re-pulling the whole session.
+  if (chat.wantFullHistory) {
+    url.searchParams.set("fullHistory", "true");
+    chat.wantFullHistory = false;
+  }
   if (chat.lastSeenMessageId !== undefined) {
     url.searchParams.set("afterMessageId", chat.lastSeenMessageId);
   }

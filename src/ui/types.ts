@@ -513,6 +513,12 @@ export interface ChatState {
   // rendered, and only then may dropPendingCursorGroup purge — on the seq
   // path the partial bubble is NOT re-sent, so purging would delete it.
   resumedByMessageId?: boolean;
+  // One-shot: the next attach should ask the bridge to lift the daemon's
+  // replay cap (PROTOCOL.md's historyLimit). Set by requestFullHistory,
+  // consumed by connectChatSocket. Without it "Load full history" still
+  // came back capped, so on a session longer than the cap the button
+  // could not do what it says.
+  wantFullHistory?: boolean;
   // True when log[] was seeded from the local history-cache.ts cache
   // rather than a full session/attach replay — meaning there may be
   // older history on the daemon that we don't have, since the cache is

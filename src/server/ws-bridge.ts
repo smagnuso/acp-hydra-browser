@@ -120,6 +120,11 @@ export function attachWsBridge(
     // both: a daemon too old to know afterSeq ignores it, sees
     // after_message with no cursor it understands, and correctly falls
     // back to a full replay.
+    // Set by the SPA's "Load full history" tap. The daemon otherwise
+    // caps a replay at its own entry limit, which makes that button a
+    // lie on any session longer than the cap; this is the explicit
+    // opt-out, sent only on a deliberate user action.
+    const fullHistory = url.searchParams.get("fullHistory") === "true";
     const rawAfterSeq = url.searchParams.get("afterSeq");
     const parsedSeq = rawAfterSeq === null ? Number.NaN : Number(rawAfterSeq);
     const afterSeq = Number.isFinite(parsedSeq) ? parsedSeq : undefined;
@@ -138,6 +143,7 @@ export function attachWsBridge(
         load,
         afterMessageId,
         afterSeq,
+        fullHistory,
       );
     });
   });
@@ -154,6 +160,7 @@ function handleConnection(
   load: boolean,
   afterMessageId: string | undefined,
   afterSeq: number | undefined,
+  fullHistory: boolean,
 ): void {
   log.info(`bridge open session=${sessionId} load=${load}`);
 
@@ -551,6 +558,11 @@ function handleConnection(
       historyPolicy: wantsAfterMessage ? "after_message" : "full",
       ...(afterMessageId !== undefined ? { afterMessageId } : {}),
       ...(afterSeq !== undefined ? { afterSeq } : {}),
+      // 0 = no cap. Hydra-specific attach options ride under _meta;
+      // session/attach keeps only RFD #533's own fields at the top level.
+      ...(fullHistory
+        ? { _meta: { "hydra-acp": { historyLimit: 0 } } }
+        : {}),
       clientInfo: {
         name: upstream.clientName,
         version: upstream.clientVersion,
