@@ -4,7 +4,11 @@
 // frame router that fans out to acp.ts and queue.ts.
 
 import { state } from "./state.js";
-import { render } from "./renderer.js";
+import {
+  beginReplayPaintHold,
+  endReplayPaintHold,
+  render,
+} from "./renderer.js";
 import {
   ensureSpinner,
   finalizeTurn,
@@ -165,6 +169,16 @@ export function handleFrame(frame: JsonRpcFrame): void {
   if (frame.method === "bridge/replay_policy") {
     const policy = (frame.params as Record<string, unknown> | undefined)?.policy;
     if (policy !== "after_message") {
+      // Keep whatever is already on screen (the cache paint, on a cold
+      // open) visible while the authoritative replay rebuilds the log
+      // underneath it, then swap once at bridge/ready. Without this the
+      // user watches the transcript blank out and scroll back in, since
+      // the state snapshot heading the replay renders before any
+      // historical frame has landed. Only worth holding when there is
+      // actually a paint to keep.
+      if (state.current.log.length > 0) {
+        beginReplayPaintHold();
+      }
       resetChatHistoryState(state.current);
     } else if (state.current.resumedByMessageId) {
       // Resumed by messageId, so the delta restarts at the first frame of
@@ -305,6 +319,10 @@ export function handleFrame(frame: JsonRpcFrame): void {
     // live reconnect (already in c.promptQueue) and a fresh app launch
     // (routing.ts rehydrated persisted entries before this connect).
     flushOfflineQueue(state.current);
+    // The replay is complete and the log is authoritative again, so this
+    // is the moment to swap. Releases the hold begun at replay_policy and
+    // paints once; a no-op when no hold was taken.
+    endReplayPaintHold();
     render();
     return;
   }

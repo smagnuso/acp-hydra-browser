@@ -77,6 +77,39 @@ let renderHeldByPress = false;
 // pointerdown-to-pointerup; endExternalRenderHold() flushes whatever
 // was queued once that's actually done.
 let externalRenderHold = false;
+// Held across a full-replay swap. A cold open paints the cached
+// transcript, then the daemon's authoritative replay lands and
+// resetChatHistoryState empties the log to rebuild it — and the state
+// snapshot at the head of that replay calls render() before a single
+// historical frame has arrived, so the user watched their transcript
+// blank out and scroll back in. Nothing about that repaint is
+// informative: the content is about to be the same. Hold the last good
+// paint on screen and swap once, when the replay is complete.
+//
+// Self-releasing, because the thing that ends it is a frame from the
+// daemon (bridge/ready) and that frame can simply never arrive — a
+// failed attach, a socket that dies mid-replay. A stuck hold would
+// freeze the UI on a stale transcript, which is worse than the flicker
+// it exists to prevent. Deliberately separate from externalRenderHold
+// rather than sharing it: swipe-nav owns that one for the length of a
+// gesture, and whichever of the two ended first would release the other.
+let replayPaintHold = false;
+let replayPaintHoldTimer: ReturnType<typeof setTimeout> | undefined;
+export function beginReplayPaintHold(): void {
+  if (replayPaintHoldTimer !== undefined) clearTimeout(replayPaintHoldTimer);
+  replayPaintHold = true;
+  replayPaintHoldTimer = setTimeout(() => endReplayPaintHold(), 4000);
+}
+export function endReplayPaintHold(): void {
+  if (replayPaintHoldTimer !== undefined) {
+    clearTimeout(replayPaintHoldTimer);
+    replayPaintHoldTimer = undefined;
+  }
+  if (!replayPaintHold) return;
+  replayPaintHold = false;
+  renderHeldByPress = false;
+  renderNow();
+}
 export function beginExternalRenderHold(): void {
   externalRenderHold = true;
 }
@@ -220,7 +253,7 @@ export function render(): void {
   const delay = Math.max(0, MIN_RENDER_INTERVAL_MS - sinceLast);
   const fire = (): void => {
     scheduled = false;
-    if (pointerDown || externalRenderHold) {
+    if (pointerDown || externalRenderHold || replayPaintHold) {
       // Park it; pointerup/pointercancel/endExternalRenderHold flushes.
       // No rAF respin — that was a busy-loop for the whole duration of
       // every press.
