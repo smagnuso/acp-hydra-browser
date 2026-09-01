@@ -2090,6 +2090,13 @@ function pinAfterSwap(view: ChatView): void {
   setTimeout(() => {
     pinToBottomNow(view);
     view.reflowUntil = 0;
+    // Nothing re-evaluates the pill until the next scroll event, which
+    // may never come if the swap left us settled at the bottom — so set
+    // it from where we actually ended up.
+    const body = view.body;
+    const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
+    view.jump.classList.toggle("visible", !atBottom);
+    updateTurnToast(body, view.turnToast);
   }, 450);
 }
 
@@ -2220,6 +2227,14 @@ function ensureChatView(c: ChatState): ChatView {
       if (jumpVisibilityRaf) cancelAnimationFrame(jumpVisibilityRaf);
       jumpVisibilityRaf = requestAnimationFrame(() => {
         jumpVisibilityRaf = 0;
+        // Same reflow rule as stickToBottom above. A swap's mid-rebuild
+        // scroll events read as "not at bottom", which flashed the
+        // turn-navigator pill on for a frame or two before the pin put
+        // it away again. pinAfterSwap sets the honest value once the
+        // rebuild has settled.
+        if (performance.now() < view!.reflowUntil) {
+          return;
+        }
         jump.classList.toggle("visible", !atBottom);
         updateTurnToast(body, turnToast);
       });
