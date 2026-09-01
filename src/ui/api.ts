@@ -5,6 +5,7 @@
 import { setState, state, sameValue, markRailDirty } from "./state.js";
 import { render, isActivelyTyping } from "./renderer.js";
 import { isWideLayout } from "./dom.js";
+import { forceReconnect } from "./routing.js";
 import type { SessionInfo } from "./types.js";
 
 function hasActiveSelection(): boolean {
@@ -102,6 +103,26 @@ export async function pollSessions(): Promise<void> {
   await pollAllSessions();
 }
 
+// A chat marked cold (bridge.ts's hydra-acp/session/closed handling)
+// leaves its WS open but idle — nothing ever closes it, so the existing
+// close -> scheduleReconnect -> connectChatSocket chain (routing.ts)
+// never fires on its own. If the daemon now reports this same session
+// warm again, something else (the TUI, another tab) already resurrected
+// it — forcing the stale socket closed just lets that chain pick up the
+// live session instead of leaving the pill stuck on "cold" until the
+// user backs out to the list and back in. This never resurrects a
+// session itself; it only reacts to warmth the daemon already reports.
+function reattachIfWarmedElsewhere(live: SessionInfo): void {
+  if (
+    live.status === "warm" &&
+    state.current &&
+    state.current.sessionId === live.sessionId &&
+    state.current.cold
+  ) {
+    forceReconnect();
+  }
+}
+
 // Merges the refreshed entry into state.sessions in place (by
 // sessionId) rather than replacing the array, so every other
 // state.sessions.find(...) call site elsewhere in the app still sees
@@ -125,6 +146,7 @@ async function pollCurrentSessionOnly(sessionId: string): Promise<void> {
     if (!state.current || state.current.sessionId !== sessionId) {
       return;
     }
+    reattachIfWarmedElsewhere(live);
     // This is what makes deep-link reloads eventually pick up the real
     // session title.
     const fp = `${live.title}|${live.cwd}|${live.agentId}|${live.currentModel}|${live.workspace?.label}|${live.workspace?.vcs?.branch}|${live.workspace?.clean}`;
@@ -156,6 +178,17 @@ async function pollAllSessions(): Promise<void> {
     const sessionsChanged = !sameValue(state.sessions, newSessions);
     state.sessions = newSessions;
     state.banner = null;
+    // Wide layout keeps the rail (and this full-list poll) active even
+    // while a chat is open — see reattachIfWarmedElsewhere for why a
+    // cold chat needs this nudge.
+    if (state.current) {
+      const live = (newSessions as SessionInfo[]).find(
+        (s) => s.sessionId === state.current!.sessionId,
+      );
+      if (live) {
+        reattachIfWarmedElsewhere(live);
+      }
+    }
     // Bypasses setState (the assignment above), so its rail-dirty
     // tracking needs the same signal explicitly — see state.ts.
     if (sessionsChanged) {
