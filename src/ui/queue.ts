@@ -743,13 +743,25 @@ export function cancelAllQueued(c: ChatState): void {
 // actually transmitted and lost, these were never sent at all, which is
 // exactly the case they exist to survive; flushOfflineQueue re-dispatches
 // them once the reconnect succeeds instead.
+//
+// "processing" is excluded for the same reason a bound entry is, which
+// the messageId test alone gets wrong. A steer answered `injected` is
+// running inside the current turn and the daemon has confirmed it, but
+// nothing was enqueued server-side, so no prompt_queue_added ever binds
+// it a messageId — it stays unbound for its whole life. It would then be
+// struck through as cancelled on the next WS drop, mid-turn, while the
+// agent was visibly still acting on it. On a phone that drops its socket
+// constantly, that is most amends. finalizeTurn resolves these to
+// done/cancelled when the turn actually ends, so nothing is left hanging
+// by leaving them alone here.
 export function cancelUnboundQueued(c: ChatState): void {
   for (const entry of c.promptQueue) {
     if (
       entry.messageId === undefined &&
       entry.status !== "done" &&
       entry.status !== "cancelled" &&
-      entry.status !== "offline"
+      entry.status !== "offline" &&
+      entry.status !== "processing"
     ) {
       entry.status = "cancelled";
     }
