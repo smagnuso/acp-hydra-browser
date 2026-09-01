@@ -179,6 +179,9 @@ export function handleFrame(frame: JsonRpcFrame): void {
       if (state.current.log.length > 0) {
         beginReplayPaintHold();
       }
+      // The swap replaces every node in the scroller, which is exactly
+      // the situation pinIfDue's guards misread — see pinAfterSwap.
+      state.current.pinAfterReplaySwap = true;
       resetChatHistoryState(state.current);
     } else if (state.current.resumedByMessageId) {
       // Resumed by messageId, so the delta restarts at the first frame of

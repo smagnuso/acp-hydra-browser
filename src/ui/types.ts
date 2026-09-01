@@ -519,6 +519,13 @@ export interface ChatState {
   // came back capped, so on a session longer than the cap the button
   // could not do what it says.
   wantFullHistory?: boolean;
+  // One-shot: the next reconcile is a full-replay swap, so pin to the
+  // bottom unconditionally rather than through pinIfDue's settle
+  // heuristics. Those guards exist to keep a pin from colliding with a
+  // live iOS rubber-band; a swap is app-driven with no gesture in play,
+  // and the scroll events it generates defeat the guards anyway. See
+  // pinAfterSwap in views.ts.
+  pinAfterReplaySwap?: boolean;
   // True when log[] was seeded from the local history-cache.ts cache
   // rather than a full session/attach replay — meaning there may be
   // older history on the daemon that we don't have, since the cache is

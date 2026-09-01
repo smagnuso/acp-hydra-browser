@@ -2037,6 +2037,18 @@ interface ChatView {
   // pins also emit scroll events, so this doubles as a self-debounce on
   // pin frequency.
   lastScrollAt: number;
+  // Until this stamp, scroll events are treated as reflow, not as the
+  // user scrolling. A full-replay swap replaces every node in the
+  // scroller: scrollHeight collapses as they're removed and grows as
+  // they're re-added, and the browser emits scroll events throughout.
+  // The handler below reads those as "scrolled away from the bottom"
+  // and clears stickToBottom, so the pin that should have followed the
+  // swap never fires and the transcript settles near the bottom but not
+  // at it. The pins are also self-debounced on lastScrollAt, which a
+  // swap can never satisfy — it is emitting scroll events at the exact
+  // moment the pin wants to run. Neither is a user gesture, so during
+  // the swap both inferences are simply wrong.
+  reflowUntil: number;
   // "Turn N of M" readout, live-updated as the current scroll position
   // crosses turn boundaries (see updateTurnToast) — not just after a
   // scrollToTurn jump. Visibility rides on the same .jump-to-latest
@@ -2056,6 +2068,31 @@ const SCROLL_QUIET_MS = 250;
 // has been quiet long enough to be truly settled, and the position would
 // actually change — a same-position assignment still disturbs iOS
 // gesture state.
+// Pin now, ignoring the settle heuristics. Only for app-driven rebuilds
+// where there is no gesture to collide with — pinIfDue's guards exist to
+// avoid writing scrollTop into a live iOS rubber-band, and a replay swap
+// is not that. Re-asserted across a few frames because markdown and
+// syntax highlighting change bubble heights after the first layout, and
+// a single pin lands short of the real bottom.
+function pinToBottomNow(view: ChatView): void {
+  const body = view.body;
+  if (Math.abs(body.scrollTop - (body.scrollHeight - body.clientHeight)) > 1) {
+    body.scrollTop = body.scrollHeight;
+  }
+}
+
+function pinAfterSwap(view: ChatView): void {
+  view.stickToBottom = true;
+  view.reflowUntil = performance.now() + 700;
+  pinToBottomNow(view);
+  requestAnimationFrame(() => pinToBottomNow(view));
+  setTimeout(() => pinToBottomNow(view), 120);
+  setTimeout(() => {
+    pinToBottomNow(view);
+    view.reflowUntil = 0;
+  }, 450);
+}
+
 function pinIfDue(view: ChatView): void {
   if (!view.stickToBottom || view.touchActive) {
     return;
@@ -2166,8 +2203,12 @@ function ensureChatView(c: ChatState): ChatView {
       const atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
       // Programmatic pins only ever scroll TO the bottom, so any event
       // away from it is the user scrolling — stop following until they
-      // come back down.
-      view!.stickToBottom = atBottom;
+      // come back down. Except while the scroller is being rebuilt under
+      // us, when the events are the rebuild's own and mean nothing about
+      // where the user wants to be (see reflowUntil).
+      if (performance.now() >= view!.reflowUntil) {
+        view!.stickToBottom = atBottom;
+      }
       // jump toggles `display` (index.html), which is layout-affecting.
       // Flipping it synchronously from inside this handler lands the
       // mutation on the exact frame a touch-driven scroll settles at
@@ -2367,6 +2408,7 @@ function ensureChatView(c: ChatState): ChatView {
     touchActive: false,
     lastTouchEndAt: 0,
     lastScrollAt: 0,
+    reflowUntil: 0,
     turnToast,
   };
   chatViews.set(c, view);
@@ -2570,6 +2612,11 @@ function reconcileChatBody(c: ChatState, view: ChatView): void {
   }
   desired.push(view.jump);
   syncChildren(body, desired);
+  if (c.pinAfterReplaySwap) {
+    c.pinAfterReplaySwap = false;
+    pinAfterSwap(view);
+    return;
+  }
   pinIfDue(view);
 }
 
