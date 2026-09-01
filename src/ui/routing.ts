@@ -239,7 +239,11 @@ async function hydrateFromCacheThenConnect(chat: ChatState): Promise<void> {
       }
     }
     });
-    chat.lastSeenMessageId = chat.lastSeenMessageId ?? cached.lastSeenMessageId;
+    // Deliberately NOT seeding the replay cursor from the cache. See the
+    // fromCache note in acp.ts's handleNotification: a cold open paints
+    // from cache for speed, then takes a full replay that replaces it, so
+    // a cache with holes can no longer suppress the frames that would
+    // fill them.
     // The cache is byte-capped (history-cache.ts), so a hit doesn't
     // guarantee we have this session's whole history — just render()
     // returns you the "load full history" button once you scroll to the

@@ -1684,8 +1684,24 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
   // real cursor when a frame with a different id proves its group closed.
   // See ChatState.pendingCursorMessageId for what naming an open group
   // costs.
+  //
+  // Cached frames deliberately do NOT move it. The cursor decides what the
+  // daemon is asked to send, so deriving it from the cache makes the cache
+  // authoritative over content it does not actually own: any frame the
+  // cache is missing — trimmed by the byte cap, lost to a failed flush,
+  // never written because the tab was killed — is then never requested
+  // either, and the gap is permanent. That is the whole bug class this
+  // module kept producing (three DB_VERSION bumps, a mid-turn trim, and a
+  // persisted cursor observed regressing 55 minutes past a position the
+  // client demonstrably held). A cold open now paints from cache for
+  // speed and asks the daemon for a FULL replay, which replaces that
+  // paint wholesale; the cache can be arbitrarily wrong without the
+  // transcript inheriting it. Live sockets still advance the cursor
+  // normally, so an in-tab reconnect keeps its cheap delta — that path
+  // never involved the cache, and never had these bugs.
   if (
     state.current &&
+    !fromCache &&
     kind &&
     !STATE_UPDATE_KINDS.has(kind) &&
     typeof update.messageId === "string"
@@ -1710,16 +1726,11 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
     // open. The byte-cap trim then cut into the front of that doubled
     // array, leaving a partial first copy followed by a full second one:
     // a cache that replays out of order and with duplicates.
-    // The cached cursor is the promoted one, not the frame's own id, for
-    // the same reason: a cold load resuming from a half-received message
-    // loses its tail exactly like a live reconnect does.
-    if (!fromCache) {
-      queueFrameForCache(
-        state.current.sessionId,
-        frame,
-        state.current.lastSeenMessageId,
-      );
-    }
+    // Frames replayed out of the cache never reach here (the fromCache
+    // guard above), so this can't write a session's own cache back into
+    // itself — which is what used to append a second copy of the
+    // transcript on every open.
+    queueFrameForCache(state.current.sessionId, frame);
   }
   // Sibling-resolved permission tear-down. Doesn't flip inTurn or
   // route through the per-case switch — it's a transient correlation

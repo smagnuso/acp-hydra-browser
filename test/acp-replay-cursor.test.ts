@@ -218,3 +218,32 @@ test("frames without seq leave the seq cursor undefined", () => {
   handleNotification(agentChunk("a", "msg_a"));
   assert.equal(state.current!.lastSeenSeq, undefined);
 });
+
+// The invariant that ends the whole missing-prompt bug class. The cursor
+// decides what the daemon is asked to send, so if cached frames advanced
+// it, anything the cache was missing would never be requested either and
+// the gap would be permanent. A cold open must paint from cache and still
+// ask for a FULL replay.
+test("frames replayed out of the cache never advance the replay cursor", () => {
+  state.current = makeChatState();
+  handleNotification(frame({ sessionUpdate: "prompt_received", messageId: "m_a", prompt: [{ type: "text", text: "hi" }] }), true);
+  handleNotification(seqChunk("cached reply", "msg_a", 5001), true);
+  handleNotification(frame({ sessionUpdate: "turn_complete", messageId: "m_b", stopReason: "end_turn" }), true);
+
+  // Painted, so the user sees something immediately...
+  assert.equal(streams().length, 2);
+  // ...but nothing that would suppress frames on the next attach.
+  assert.equal(state.current!.lastSeenMessageId, undefined);
+  assert.equal(state.current!.pendingCursorMessageId, undefined);
+  assert.equal(state.current!.lastSeenSeq, undefined);
+});
+
+// Live frames still advance it, so an in-tab reconnect keeps its cheap
+// delta. That path never involved the cache and never had these bugs.
+test("live frames still advance the cursor", () => {
+  state.current = makeChatState();
+  handleNotification(seqChunk("live", "msg_a", 6001), false);
+  handleNotification(seqChunk("live2", "msg_b", 6002), false);
+  assert.equal(state.current!.lastSeenSeq, 6002);
+  assert.equal(state.current!.lastSeenMessageId, "msg_a");
+});

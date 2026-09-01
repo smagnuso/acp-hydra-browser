@@ -1,79 +1,52 @@
 // Local persistence for chat history, so a cold page load (app relaunch,
 // hard refresh, iOS killing a backgrounded PWA) can paint a session's
-// recent transcript immediately from cache and ask the daemon for only
-// the delta (afterMessageId) instead of a full replay. Complements the
-// in-memory lastSeenMessageId tracking in acp.ts/routing.ts, which only
-// survives a live socket drop within the same tab session.
+// recent transcript immediately instead of showing an empty pane while
+// the daemon replays.
+//
+// THAT IS ALL IT DOES. It is a picture, not a source of truth. A cold
+// open paints from here and then asks the daemon for a FULL replay,
+// which replaces the painted log wholesale (routing.ts's
+// hydrateFromCacheThenConnect, acp.ts's fromCache handling). Nothing
+// downstream trusts this data, and the cache being stale, short, holed
+// or entirely absent costs nothing but a slower first paint.
+//
+// It was not always so, and the difference is the entire bug history of
+// this file. The cache used to also supply the delta-replay cursor: the
+// newest frame it held was sent as afterMessageId, so the daemon skipped
+// everything up to it. That made the cache authoritative over content it
+// did not own — any frame missing from it (trimmed by the byte cap, lost
+// to a failed flush, never written because the tab was killed) was never
+// requested either, and the gap became permanent, surviving every reload.
+// It produced three DB_VERSION bumps' worth of unrepairable transcripts,
+// a byte trim that cut mid-turn and orphaned prompts from their replies,
+// and finally a persisted cursor observed regressing 55 minutes past a
+// position the client demonstrably held. Every one of those was a
+// missing-prompt report from a real user. The TUI, which keeps no such
+// cache and simply replays from the daemon, had none of them.
+//
+// So: do not reintroduce a cursor here, and do not let any caller treat
+// a cache hit as "I already have this history".
 //
 // IndexedDB, not localStorage — a single chatty session's cache can run
 // into the hundreds of KB, and localStorage's ~5-10MB per-origin quota is
 // shared with every other session plus the rest of the app.
 //
-// Two caps keep this bounded regardless of how long a session runs or
-// how many sessions get opened over time:
-//   - MAX_BYTES_PER_SESSION: oldest cached frames are dropped once a
-//     session's own cache exceeds this (sized in bytes, not frame count,
-//     since a single tool-output frame can dwarf a thousand chat chunks).
-//   - MAX_CACHED_SESSIONS: an LRU across sessions themselves, evicting
-//     the least-recently-opened session's entire cache once the count
-//     is exceeded.
-//
-// Trimming is NOT free the way a plain LRU usually is, which is what
-// makes MAX_BYTES_PER_SESSION's value load-bearing rather than a taste
-// call. Evicted frames aren't re-fetched later: the delta-replay cursor
-// (lastSeenMessageId) is the NEWEST frame cached, so on the next open
-// the daemon is only asked for what came after that — everything the
-// trim dropped is simply gone from this client's view until the user
-// hits "Load full history". A cap tight enough to evict real
-// conversation therefore permanently mangles the transcript, and does
-// it worst exactly where the frames are biggest.
-//
-// That's not hypothetical: a pasted screenshot rides inline as base64
-// on its prompt_received frame, measured at 470KB-1MB apiece in real
-// sessions. Against the original 1MB cap, ONE screenshot could evict
-// nearly the entire cached transcript, and did — observed live as
-// prompts vanishing while their replies and orphaned turn-stamps
-// stayed behind, surviving every reload. Size this to hold a working
-// window of image-bearing turns, not just text.
-//
-// A cache miss (nothing stored, or IndexedDB unavailable/blocked, e.g.
-// private browsing) is always safe — callers fall back to the existing
-// full-replay attach path, same as before this module existed.
+// Two caps keep it bounded: MAX_BYTES_PER_SESSION per session (sized in
+// bytes, not frames, since one tool-output frame can dwarf a thousand
+// chat chunks) and MAX_CACHED_SESSIONS as an LRU across sessions. Both
+// are now free to evict whatever they like — the daemon refills it.
 
 import type { JsonRpcFrame } from "./acp.js";
 import { timed } from "./perf.js";
 
 const DB_NAME = "hydra-acp-history-cache";
-// Bumped to 2 to discard every cache written before the replay fixes
-// landed. Those entries can hold a transcript that's missing most of
-// its agent messages while keeping the prompts — measured on a real
-// session as 73 agent bubbles against 70 prompts, where a fresh full
-// replay of the same session yields 215 against 90. Nothing can repair
-// such an entry in place (the missing frames were trimmed away and are
-// not re-fetched: the delta cursor is the newest frame cached, so the
-// daemon is only ever asked for what came after it), and every reload
-// rehydrates the damage. Dropping the store is the only honest repair.
-// Cost is one full replay per session on first load after upgrading.
-// Bumped to 3 to discard caches written while the messageId dedup was
-// live (between its introduction and removal earlier the same day). That
-// dedup kept only the first chunk of every multi-chunk agent message, so
-// affected entries hydrate as a wall of turn-stamps with little or no
-// text between them, and no amount of reloading repairs them -- the rest
-// of each message was never stored. Load full history recovers a session
-// immediately; this makes the repair automatic.
-// Bumped to 4 to discard caches written while the replay cursor could name
-// a message still streaming (see ChatState.pendingCursorMessageId). Those
-// entries have holes: the daemon resumed past the end of a half-received
-// message, so its remaining chunks were never delivered, never cached, and
-// are unreachable — the stored cursor sits beyond them, so every later
-// delta asks only for what came after. Observed as a turn rendering its
-// prompt and its turn-stamp with the whole reply missing. Nothing repairs
-// such an entry in place; one full replay per session does.
+// Frozen at 4. Earlier bumps existed to discard caches holding transcripts
+// that could never repair themselves, which was only possible while the
+// cache drove the replay cursor. It no longer does, so a bad entry is
+// self-healing on the next open and there is nothing left for a bump to
+// fix.
 const DB_VERSION = 4;
 const STORE = "sessions";
-// 6MB holds several screenshot-bearing turns plus a long text
-// transcript; 10 sessions caps the whole store around 60MB, well inside
-// a normal IndexedDB origin quota.
 // 6MB holds several screenshot-bearing turns plus a long text
 // transcript; 10 sessions caps the whole store around 60MB, well inside
 // a normal IndexedDB origin quota.
@@ -93,7 +66,6 @@ interface CachedFrame {
 
 interface CachedSession {
   sessionId: string;
-  lastSeenMessageId?: string;
   frames: CachedFrame[];
   totalBytes: number;
   lastAccessed: number;
@@ -143,7 +115,7 @@ function byteSize(frame: JsonRpcFrame): number {
 // same as "nothing cached".
 export async function loadCachedSession(
   sessionId: string,
-): Promise<{ lastSeenMessageId?: string; frames: JsonRpcFrame[] } | null> {
+): Promise<{ frames: JsonRpcFrame[] } | null> {
   const db = await openDb();
   if (!db) return null;
   return new Promise((resolve) => {
@@ -165,7 +137,6 @@ export async function loadCachedSession(
       rec.lastAccessed = Date.now();
       store.put(rec);
       resolve({
-        lastSeenMessageId: rec.lastSeenMessageId,
         frames: timed("cache-read-map", () => rec.frames.map((f) => f.frame)),
       });
     };
@@ -215,36 +186,23 @@ export async function describeCachedSession(sessionId: string): Promise<string> 
 // chunks during an active turn costs one debounced write instead of one
 // IndexedDB round trip per frame.
 const pendingFrames = new Map<string, JsonRpcFrame[]>();
-const pendingLastSeen = new Map<string, string>();
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Called from acp.ts's handleNotification for every recordable
-// session/update — the same gate that already drives ChatState's own
-// lastSeenMessageId, so the cache and the live delta-reconnect cursor
-// never disagree about what's been "seen". That gate fires on every
-// streamed agent_message_chunk during an active turn (the daemon stamps
-// a messageId on every recordable update, not just turn boundaries —
-// see cli's recordAndBroadcast), so this has to stay cheap: two Map
-// writes, nothing else. An earlier version computed byteSize(frame)
+// session/update arriving from the daemon (never for one replayed out of
+// this cache). It fires on every streamed agent_message_chunk during an
+// active turn, so it has to stay cheap: one Map write, nothing else. An earlier version computed byteSize(frame)
 // (JSON.stringify + TextEncoder) right here, on the same main thread as
 // keystroke handling, and was measurably competing with typing
 // responsiveness during a fast-streaming reply. Sizing is deferred to
 // mergeAndTrim, which only runs once per debounce window.
-// `messageId` is the replay cursor to store alongside the frames, and is
-// optional: a caller that only wants content cached (acp.ts's two
-// synthesisers for frames the daemon withholds from the originator)
-// passes nothing and the record keeps whatever cursor it already had.
 export function queueFrameForCache(
   sessionId: string,
   frame: JsonRpcFrame,
-  messageId?: string,
 ): void {
   const list = pendingFrames.get(sessionId) ?? [];
   list.push(frame);
   pendingFrames.set(sessionId, list);
-  if (messageId !== undefined) {
-    pendingLastSeen.set(sessionId, messageId);
-  }
   if (flushTimer === undefined) {
     flushTimer = setTimeout(() => {
       flushTimer = undefined;
@@ -259,15 +217,15 @@ export function queueFrameForCache(
 // flushHistoryCacheNow below (pagehide / visibilitychange). Two in
 // flight at once both read the same record, both merge onto that same
 // snapshot, and the second put overwrites the first — silently dropping
-// a whole batch of frames. It's unrecoverable, too: flushPending clears
-// the batch out of pendingFrames before awaiting the write, and the
-// surviving put still advances lastSeenMessageId, so the daemon is
-// never asked to resend what was lost.
+// a whole batch of frames — flushPending clears the batch out of
+// pendingFrames before awaiting the write, so it is not retried.
 //
 // Measured on a real session: a cache-hydrated transcript held 56
 // prompts / 79 agent bubbles where a full replay of the same session
 // gave 91 / 215, with the newest prompt missing entirely — losses the
-// oldest-first byte trim cannot explain. Chaining serialises every
+// oldest-first byte trim cannot explain. That is merely a stale picture
+// now rather than a corrupt transcript, since the full replay behind it
+// corrects whatever was lost, but chaining serialises every
 // flush so each one merges onto the previous one's committed result.
 let flushChain: Promise<void> = Promise.resolve();
 
@@ -292,19 +250,13 @@ async function flushPending(): Promise<void> {
   const db = await openDb();
   if (!db) {
     pendingFrames.clear();
-    pendingLastSeen.clear();
     return;
   }
   for (const sessionId of sessionIds) {
     const newFrames = pendingFrames.get(sessionId);
-    const lastSeenMessageId = pendingLastSeen.get(sessionId);
     pendingFrames.delete(sessionId);
-    pendingLastSeen.delete(sessionId);
-    // No cursor in this batch is normal now (see queueFrameForCache), and
-    // must not cost the batch its frames — mergeAndTrim keeps the stored
-    // cursor when none is supplied.
     if (!newFrames) continue;
-    await mergeAndTrim(db, sessionId, newFrames, lastSeenMessageId);
+    await mergeAndTrim(db, sessionId, newFrames);
   }
   await enforceSessionLru(db);
 }
@@ -313,7 +265,6 @@ function mergeAndTrim(
   db: IDBDatabase,
   sessionId: string,
   newFrames: JsonRpcFrame[],
-  lastSeenMessageId: string | undefined,
 ): Promise<void> {
   return new Promise((resolve) => {
     let tx: IDBTransaction;
@@ -374,7 +325,6 @@ function mergeAndTrim(
       }
       const rec: CachedSession = {
         sessionId,
-        lastSeenMessageId: lastSeenMessageId ?? existing?.lastSeenMessageId,
         frames,
         totalBytes,
         lastAccessed: Date.now(),
