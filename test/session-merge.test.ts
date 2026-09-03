@@ -74,3 +74,35 @@ test("a session cooling down (present as a changed cold row) replaces its stale 
     cold("s1", "2025-01-02T00:00:00Z"),
   ]);
 });
+
+test("picks up a field change on a row that stays warm (busy flipping mid-turn)", () => {
+  // The daemon returns the full warm set on every incremental page, and
+  // `busy` lives only in its memory (never in meta.json, so no mtime moves
+  // when it flips). If the merge failed to take the incoming warm copy, a
+  // mid-turn session would render as idle forever.
+  const current = [{ ...warm("s1"), busy: false }];
+  const page = {
+    sessions: [{ ...warm("s1"), busy: true }],
+    removed: [],
+    cursor: 6,
+  };
+  assert.equal(mergeSessionListPage(current, page, true)[0]?.busy, true);
+});
+
+test("purges a local row with an unknown status instead of stranding it as a live-looking ghost", () => {
+  // Regression: the purge used to key on `status === "warm"`, but
+  // SessionInfo.status is optional — a status-less row survived AND had
+  // nothing in page.sessions to overwrite it, so it rendered as a live
+  // card forever, and session-cache.ts persisted it to IndexedDB so it
+  // outlived reloads too.
+  const ghost: SessionInfo = { sessionId: "ghost", cwd: "/w" };
+  const merged = mergeSessionListPage(
+    [ghost, cold("keep")],
+    { sessions: [], removed: [], cursor: 7 },
+    true,
+  );
+  assert.deepEqual(
+    merged.map((s) => s.sessionId),
+    ["keep"],
+  );
+});

@@ -37,8 +37,16 @@ export function mergeSessionListPage(
     return page.sessions;
   }
   const merged = new Map(current.map((s) => [s.sessionId, s]));
+  // Purge anything NOT definitively cold, rather than only `=== "warm"`.
+  // The incoming page carries the complete truth for every non-cold row,
+  // so a local row that isn't cold must either come back in this response
+  // or not exist. `SessionInfo.status` is optional, so keying the purge on
+  // `=== "warm"` left a status-less row un-purged AND un-overwritten
+  // (nothing in page.sessions to replace it) — an immortal stale card that
+  // renders as live and never updates again, and that session-cache.ts
+  // would then persist to IndexedDB so it survived reloads too.
   for (const s of merged.values()) {
-    if (s.status === "warm") {
+    if (s.status !== "cold") {
       merged.delete(s.sessionId);
     }
   }
