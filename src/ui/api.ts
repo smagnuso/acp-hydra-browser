@@ -7,6 +7,7 @@ import { render, isActivelyTyping } from "./renderer.js";
 import { isWideLayout } from "./dom.js";
 import { forceReconnect } from "./routing.js";
 import { mergeSessionListPage } from "./session-merge.js";
+import { loadPersistedSessionCache, queueSessionCacheWrite } from "./session-cache.js";
 import type { SessionInfo } from "./types.js";
 
 function hasActiveSelection(): boolean {
@@ -62,10 +63,26 @@ export async function api<T = unknown>(
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
-// Cursor from the last pollAllSessions() response. undefined until the
-// first successful poll, so that one is a full listing same as before;
+// Cursor from the last pollAllSessions() response, or from the
+// IndexedDB-persisted cache once seedSessionCache() has run. undefined
+// means "no cursor yet" — that poll is a full listing same as before;
 // every poll after merges incrementally via mergeSessionListPage.
 let sessionCursor: number | undefined;
+
+// Seed state.sessions and sessionCursor from the persisted cache — see
+// session-cache.ts's doc comment for why this is safe even when stale.
+// Awaited by main.ts before the first render() so a cold load paints the
+// cached list immediately instead of an empty one; startPolling's own
+// network request still runs uncached-cursor-aware on top of it exactly
+// as if this seed hadn't happened; the daemon's response is what's
+// authoritative, this only affects what's on screen before it arrives.
+export async function seedSessionCache(): Promise<void> {
+  const cached = await loadPersistedSessionCache();
+  if (cached) {
+    state.sessions = cached.sessions;
+    sessionCursor = cached.cursor || undefined;
+  }
+}
 
 export async function pollSessions(): Promise<void> {
   // Skip this cycle while genuinely, recently typing (renderer.ts's
@@ -196,6 +213,14 @@ async function pollAllSessions(): Promise<void> {
     };
     const newSessions = mergeSessionListPage(state.sessions, page, incremental) as never;
     sessionCursor = page.cursor;
+    // Only worth persisting when a cold session actually changed — most
+    // polls carry nothing but warm-session churn (busy/timestamps), and
+    // the persisted cache doesn't even store warm rows. See
+    // session-cache.ts's doc comment for why queuing this on every tick
+    // regardless would defeat its own purpose.
+    if (page.removed.length > 0 || page.sessions.some((s) => s.status === "cold")) {
+      queueSessionCacheWrite(newSessions as SessionInfo[], sessionCursor);
+    }
     const hadBanner = state.banner !== null;
     const sessionsChanged = !sameValue(state.sessions, newSessions);
     state.sessions = newSessions;

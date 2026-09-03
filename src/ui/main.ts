@@ -1,6 +1,6 @@
 // Boot. Wires up DOM events that drive the rest of the SPA.
 
-import { startPolling, loadAgents, loadConfig } from "./api.js";
+import { startPolling, seedSessionCache, loadAgents, loadConfig } from "./api.js";
 import {
   applyHashRoute,
   applyProtocolLaunch,
@@ -35,7 +35,14 @@ initViewportHeight();
 // out the existing state, not the state itself.
 initWideLayoutWatcher(() => render());
 
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
+  // Awaited (IndexedDB, but normally a couple of ms — far faster than the
+  // network round trip startPolling's first request makes) so the
+  // render() below paints the cached session list instead of an empty
+  // one on a cold load. Everything after this line already ran
+  // fire-and-forget without waiting on the network poll, so this doesn't
+  // change that shape — it just adds one more fast, local await first.
+  await seedSessionCache();
   startPolling();
   void loadAgents();
   void loadConfig();
