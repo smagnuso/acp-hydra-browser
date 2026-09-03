@@ -67,12 +67,20 @@ export function registerSessionRoutes(
   );
 
   app.get("/api/sessions", async (request, reply) => {
-    const query = request.query as { cwd?: string; all?: string } | undefined;
+    const query = request.query as
+      | { cwd?: string; all?: string; since?: string }
+      | undefined;
     const all = query?.all === "true" || query?.all === "1";
+    // `since=<cursor>`: pass straight through to the daemon (see
+    // HydraRestClient.listSessions). Malformed values are forwarded as-is
+    // and let the daemon's own 400 surface, rather than duplicating its
+    // validation here.
+    const since = query?.since !== undefined ? Number(query.since) : undefined;
     try {
       const result = await clientFor(ctx, request).listSessions({
         cwd: query?.cwd,
         all,
+        since,
       });
       reply.send(result);
     } catch (err) {

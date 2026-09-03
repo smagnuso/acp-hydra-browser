@@ -6,6 +6,7 @@ import { setState, state, sameValue, markRailDirty } from "./state.js";
 import { render, isActivelyTyping } from "./renderer.js";
 import { isWideLayout } from "./dom.js";
 import { forceReconnect } from "./routing.js";
+import { mergeSessionListPage } from "./session-merge.js";
 import type { SessionInfo } from "./types.js";
 
 function hasActiveSelection(): boolean {
@@ -61,6 +62,10 @@ export async function api<T = unknown>(
 }
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+// Cursor from the last pollAllSessions() response. undefined until the
+// first successful poll, so that one is a full listing same as before;
+// every poll after merges incrementally via mergeSessionListPage.
+let sessionCursor: number | undefined;
 
 export async function pollSessions(): Promise<void> {
   // Skip this cycle while genuinely, recently typing (renderer.ts's
@@ -170,10 +175,27 @@ async function pollAllSessions(): Promise<void> {
     // `hydra cat` runs and editor-spawned empty sessions (anything not
     // effective-interactive). views.ts still filters cold cards
     // client-side when state.showCold is false.
-    const data = await api<{ sessions?: unknown[] }>("/api/sessions");
-    const rawSessions =
-      (data.sessions as Array<Record<string, unknown>>) ?? [];
-    const newSessions = rawSessions as never;
+    //
+    // `since=sessionCursor` (once we have one) asks the daemon for only
+    // what changed since the last poll instead of statting and
+    // serializing every cold session on disk — the full listing is what
+    // made this endpoint expensive enough to peg a core on a long-lived
+    // install. See PROTOCOL.md's GET /v1/sessions `since=`.
+    const incremental = sessionCursor !== undefined;
+    const path =
+      incremental ? `/api/sessions?since=${sessionCursor}` : "/api/sessions";
+    const data = await api<{
+      sessions?: unknown[];
+      removed?: string[];
+      cursor?: number;
+    }>(path);
+    const page = {
+      sessions: (data.sessions as SessionInfo[]) ?? [],
+      removed: data.removed ?? [],
+      cursor: data.cursor ?? 0,
+    };
+    const newSessions = mergeSessionListPage(state.sessions, page, incremental) as never;
+    sessionCursor = page.cursor;
     const hadBanner = state.banner !== null;
     const sessionsChanged = !sameValue(state.sessions, newSessions);
     state.sessions = newSessions;

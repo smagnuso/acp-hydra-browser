@@ -102,7 +102,12 @@ export class HydraRestClient {
   async listSessions(opts?: {
     cwd?: string;
     all?: boolean;
-  }): Promise<{ sessions: HydraSessionInfo[] }> {
+    // Cursor from a previous listSessions() response. When set, the
+    // daemon returns every warm session plus only the cold ones changed
+    // since, instead of statting and serializing every cold record on
+    // disk — see PROTOCOL.md's GET /v1/sessions `since=`.
+    since?: number;
+  }): Promise<{ sessions: HydraSessionInfo[]; removed: string[]; cursor: number }> {
     const qs = new URLSearchParams();
     if (opts?.cwd) {
       qs.set("cwd", opts.cwd);
@@ -110,8 +115,20 @@ export class HydraRestClient {
     if (opts?.all) {
       qs.set("all", "true");
     }
+    if (opts?.since !== undefined) {
+      qs.set("since", String(opts.since));
+    }
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    return this.json("GET", `/v1/sessions${suffix}`);
+    const result = await this.json<{
+      sessions?: HydraSessionInfo[];
+      removed?: string[];
+      cursor?: number;
+    }>("GET", `/v1/sessions${suffix}`);
+    return {
+      sessions: result.sessions ?? [],
+      removed: result.removed ?? [],
+      cursor: result.cursor ?? 0,
+    };
   }
 
   // Single-session equivalent of listSessions — used to keep one
