@@ -1693,18 +1693,39 @@ async function importBundleFromFile(file: File): Promise<void> {
 // ---- New-session modal -------------------------------------------
 
 const LAST_CWD_KEY = "hydra-acp-browser:lastCwd";
+const CWD_HISTORY_KEY = "hydra-acp-browser:cwdHistory";
+const CWD_HISTORY_LIMIT = 20;
+
+// Most-recent-first, deduplicated. Seeded from the older single-value
+// lastCwd key on first read so upgrading doesn't lose the one cwd
+// someone already had remembered.
+function loadCwdHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(CWD_HISTORY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.filter((v) => typeof v === "string");
+    }
+    const legacy = localStorage.getItem(LAST_CWD_KEY);
+    return legacy ? [legacy] : [];
+  } catch {
+    return [];
+  }
+}
 
 function loadLastCwd(): string | null {
-  try {
-    return localStorage.getItem(LAST_CWD_KEY);
-  } catch {
-    return null;
-  }
+  return loadCwdHistory()[0] ?? null;
 }
 
 function saveLastCwd(cwd: string): void {
   try {
-    localStorage.setItem(LAST_CWD_KEY, cwd);
+    const history = loadCwdHistory().filter((v) => v !== cwd);
+    history.unshift(cwd);
+    localStorage.setItem(
+      CWD_HISTORY_KEY,
+      JSON.stringify(history.slice(0, CWD_HISTORY_LIMIT)),
+    );
+    localStorage.removeItem(LAST_CWD_KEY);
   } catch {
     // Private browsing / quota — the field just won't persist.
   }
@@ -1749,10 +1770,17 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
           "data-focus-key": "session-modal-cwd",
           value: m.cwd,
           placeholder: "/home/you/dev/project",
+          list: "f-cwd-history",
+          autocomplete: "off",
           oninput: (e: Event) => {
             m.cwd = (e.target as HTMLInputElement).value;
           },
         }),
+        el(
+          "datalist",
+          { id: "f-cwd-history" },
+          ...loadCwdHistory().map((cwd) => el("option", { value: cwd })),
+        ),
       ),
       el(
         "div",
@@ -1923,6 +1951,11 @@ function renderListModal(
           ),
           it.id === selectedId ? el("span", { class: "badge warm" }, "current") : null,
         ),
+      ),
+      el(
+        "div",
+        { class: "actions" },
+        el("button", { ...tapHandler(closeModal) }, "Cancel"),
       ),
     ),
   );
