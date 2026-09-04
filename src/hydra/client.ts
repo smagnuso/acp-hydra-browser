@@ -35,6 +35,20 @@ export interface HydraSessionInfo {
   workspaceError?: string;
 }
 
+// See cli's PROTOCOL.md "Remotes" section — a federated peer daemon
+// registered via `hydra remote add`. `status` reflects the daemon's
+// own periodic liveness poll, not a check made by this call.
+export interface HydraRemoteInfo {
+  name: string;
+  host: string;
+  port: number;
+  label?: string;
+  expiresAt: string;
+  addedAt: string;
+  status?: "ok" | "unauthorized" | "unreachable" | "unknown";
+  lastCheckedAt?: string;
+}
+
 export interface HydraAgentInfo {
   id: string;
   name?: string;
@@ -159,6 +173,25 @@ export class HydraRestClient {
 
   async listAgents(): Promise<{ agents: HydraAgentInfo[] }> {
     return this.json("GET", "/v1/agents");
+  }
+
+  async listRemotes(): Promise<{ remotes: HydraRemoteInfo[] }> {
+    return this.json("GET", "/v1/remotes");
+  }
+
+  // REST session creation — used only for `remote`-targeted creates
+  // (see routes-sessions.ts's createSessionOnRemote). Local creates
+  // still go through the WS session/new path so an initial prompt can
+  // ride the same connection; a remote create sends its initial
+  // prompt as a separate attach+prompt afterward instead, since the
+  // WS forwarding path (cli's acp-forward.ts) already handles a
+  // foreign sessionId transparently once one exists.
+  async createSession(body: {
+    cwd?: string;
+    agentId?: string;
+    remote?: string;
+  }): Promise<{ sessionId: string; agentId?: string; cwd: string }> {
+    return this.json("POST", "/v1/sessions", body);
   }
 
   // Register a one-shot HTTP callback for a specific prompt's turn

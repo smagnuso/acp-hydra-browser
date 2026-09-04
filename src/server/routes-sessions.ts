@@ -27,6 +27,9 @@ interface CreateSessionBody {
   agentId?: string;
   name?: string;
   prompt?: string;
+  // Create directly on the federated peer registered under this name
+  // instead of locally — see createSessionOnRemote.
+  remote?: string;
 }
 
 interface KillBody {
@@ -144,16 +147,35 @@ export function registerSessionRoutes(
 
   app.post("/api/sessions", async (request, reply) => {
     const body = (request.body ?? {}) as CreateSessionBody;
-    if (!body.cwd || typeof body.cwd !== "string") {
+    // A remote create's cwd (if any) resolves against the *peer's*
+    // filesystem, which this box can't validate or default — cwd is
+    // only required for a local create.
+    if (!body.remote && (!body.cwd || typeof body.cwd !== "string")) {
       reply.code(400).send({ error: "cwd required" });
       return;
     }
     try {
-      const result = await createSession(ctx, request, body);
+      const result = body.remote
+        ? await createSessionOnRemote(ctx, request, body)
+        : await createSession(ctx, request, body);
       reply.code(201).send(result);
     } catch (err) {
       log.warn(`session creation failed: ${(err as Error).message}`);
-      reply.code(502).send({ error: (err as Error).message });
+      const status = err instanceof HydraRestError ? err.status : 502;
+      reply.code(status).send({ error: (err as Error).message });
+    }
+  });
+
+  // Live-fetched, not cached: remotes change rarely, so this is called
+  // once when the "new session" modal opens rather than polled like
+  // the session list.
+  app.get("/api/remotes", async (request, reply) => {
+    try {
+      const result = await clientFor(ctx, request).listRemotes();
+      reply.send(result);
+    } catch (err) {
+      const status = err instanceof HydraRestError ? err.status : 502;
+      reply.code(status).send({ error: (err as Error).message });
     }
   });
 
@@ -279,4 +301,60 @@ async function createSession(
   } finally {
     conn.stop();
   }
+}
+
+// Creates directly on the federated peer named `body.remote` instead
+// of locally. Unlike createSession, this goes over REST
+// (HydraRestClient.createSession → daemon's POST /v1/sessions with
+// `remote` set — see cli's session-forward.ts createOnRemote) rather
+// than a transient WS session/new: there's no live agent process on
+// *this* daemon to attach to, the session exists entirely on the peer.
+// An optional initial prompt can't ride the same call the way it does
+// for a local create, so it's sent as a separate session/attach +
+// session/prompt afterward instead — the daemon's WS forwarding (see
+// cli's acp-forward.ts) already handles a foreign ("name:localId")
+// sessionId transparently, so this needs no daemon-side awareness that
+// the target is remote at all.
+async function createSessionOnRemote(
+  ctx: ServerContext,
+  request: FastifyRequest,
+  body: CreateSessionBody,
+): Promise<CreateSessionResult> {
+  const created = await clientFor(ctx, request).createSession({
+    cwd: body.cwd ? expandHome(body.cwd) : undefined,
+    agentId: body.agentId,
+    remote: body.remote,
+  });
+
+  if (body.prompt && body.prompt.trim().length > 0) {
+    const token = request.sessionToken ?? ctx.config.hydraToken;
+    const conn = new UpstreamConnection({
+      daemonWsUrl: ctx.config.hydraWsUrl,
+      token,
+      clientName: "hydra-acp-browser-session",
+    });
+    const opened = new Promise<void>((resolveOpen, rejectOpen) => {
+      conn.once("open", () => resolveOpen());
+      conn.once("error", (err) => rejectOpen(err));
+      conn.once("close", () => rejectOpen(new Error("upstream closed")));
+    });
+    conn.start();
+    try {
+      await opened;
+      await runInitialize(conn);
+      await conn.request("session/attach", { sessionId: created.sessionId });
+      await conn.request("session/prompt", {
+        sessionId: created.sessionId,
+        prompt: [{ type: "text", text: body.prompt }],
+      });
+    } finally {
+      conn.stop();
+    }
+  }
+
+  return {
+    sessionId: created.sessionId,
+    agentId: body.agentId,
+    cwd: created.cwd,
+  };
 }

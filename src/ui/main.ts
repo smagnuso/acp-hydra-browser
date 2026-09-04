@@ -1,6 +1,6 @@
 // Boot. Wires up DOM events that drive the rest of the SPA.
 
-import { startPolling, seedSessionCache, loadAgents, loadConfig } from "./api.js";
+import { startPolling, seedSessionCache, loadAgents, loadConfig, loadRemotes } from "./api.js";
 import {
   applyHashRoute,
   applyProtocolLaunch,
@@ -46,6 +46,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   startPolling();
   void loadAgents();
   void loadConfig();
+  void loadRemotes();
   void ensureServiceWorker();
   // Re-arm the push subscription on reload — the checkbox preference
   // persists in localStorage but PushManager subscriptions don't

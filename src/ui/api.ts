@@ -285,6 +285,19 @@ export async function loadAgents(): Promise<void> {
   }
 }
 
+// Failures are silent (no banner): an older daemon predating
+// federation, or one with no remotes configured, both just leave the
+// "create on" dropdown showing only "local" — not worth alarming
+// anyone over.
+export async function loadRemotes(): Promise<void> {
+  try {
+    const data = await api<{ remotes?: unknown[] }>("/api/remotes");
+    setState({ remotes: (data.remotes as never) ?? [] });
+  } catch {
+    setState({ remotes: [] });
+  }
+}
+
 export async function loadConfig(): Promise<void> {
   try {
     const data = await api<{ defaultCwd?: string }>("/api/config");

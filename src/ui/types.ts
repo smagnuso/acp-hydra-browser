@@ -119,6 +119,17 @@ export interface AgentInfo {
   description?: string;
 }
 
+// See cli's PROTOCOL.md "Remotes" section — a federated peer daemon
+// registered via `hydra remote add`. `status` reflects the daemon's
+// own periodic liveness poll, not a check made when this list loads.
+export interface RemoteInfo {
+  name: string;
+  host: string;
+  port: number;
+  label?: string;
+  status?: "ok" | "unauthorized" | "unreachable" | "unknown";
+}
+
 export type QueueStatus =
   | "queued"
   | "pending"
@@ -564,6 +575,10 @@ export interface SessionModalData {
   prompt: string;
   err: string | null;
   busy: boolean;
+  // "" = create locally (the default). Otherwise the name of a
+  // federated remote to create directly on instead — see
+  // createSessionOnRemote in the server's routes-sessions.ts.
+  remote: string;
 }
 
 export type ModalState =
@@ -579,6 +594,10 @@ export interface AppState {
   view: "list" | "chat";
   sessions: SessionInfo[];
   agents: AgentInfo[];
+  // Loaded once at startup (see main.ts's loadRemotes), not polled —
+  // remotes change rarely enough that a stale list for the session
+  // lifetime is an acceptable tradeoff against refetching constantly.
+  remotes: RemoteInfo[];
   defaultCwd: string | null;
   groupBy: "project" | "recent";
   showCold: boolean;

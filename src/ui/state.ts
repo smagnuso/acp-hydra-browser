@@ -46,6 +46,7 @@ export const state: AppState = {
   view: "list",
   sessions: [],
   agents: [],
+  remotes: [],
   defaultCwd: null,
   groupBy: "recent",
   // Show cold (disk-only) sessions by default. The "show cold"

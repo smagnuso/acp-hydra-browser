@@ -630,33 +630,57 @@ function renderTopbar(): HTMLElement {
   );
 }
 
+// Namespace prefixes for the host-filter value — see describeHostFilter
+// and cli's picker.ts (same fix, same reason): a `hydra remote add`
+// name is very commonly just the machine's own hostname (e.g. `hydra
+// remote add mrclean mrclean.local`), which is the exact same string
+// importedFromMachine already uses for old bundle imports from that
+// box. Without a prefix, "mrclean" as a bare filter value can't tell a
+// live federated remote from an unrelated years-old import mirror
+// apart, and silently merges two unrelated session sets into one
+// bucket — an actual bug, not a hypothetical.
+const REMOTE_FILTER_PREFIX = "remote:";
+const HOST_FILTER_PREFIX = "host:";
+
+function describeHostFilter(value: string): string {
+  if (value.startsWith(REMOTE_FILTER_PREFIX)) {
+    return `remote "${value.slice(REMOTE_FILTER_PREFIX.length)}"`;
+  }
+  if (value.startsWith(HOST_FILTER_PREFIX)) {
+    return `host "${value.slice(HOST_FILTER_PREFIX.length)}"`;
+  }
+  return `host "${value}"`; // pre-namespacing persisted value
+}
+
 // Build the host-filter dropdown. Options are computed live from the
 // current session list so newly-imported peer hosts (or newly
-// federated remotes) appear without page reload. Sentinels:
-//   "__local" — sessions created here OR imported and bound to a local
-//               agent. Federated (remote-set) sessions never land here.
-//   "__all"   — every session.
-//   <host>    — passive mirrors imported from <host> that haven't been
-//               attached locally yet, OR live sessions federated under
-//               the `hydra remote` named <host> — see s.remote in
-//               types.ts.
+// federated remotes) appear without page reload. Sentinels/namespaced
+// values:
+//   "__local"    — sessions created here OR imported and bound to a
+//                  local agent. Federated (remote-set) sessions never
+//                  land here.
+//   "__all"      — every session.
+//   "host:<m>"   — passive mirrors imported from machine <m> that
+//                  haven't been attached locally yet.
+//   "remote:<n>" — live sessions federated under the `hydra remote`
+//                  named <n> — see s.remote in types.ts.
 // A peer host with no passive mirrors (all its sessions have been
 // attached locally) drops out of the option list — its filter would
 // render empty. A federated remote never drops out this way: it has no
 // local-attach equivalent, so it stays live in its own bucket for as
 // long as it's federated.
 function renderHostFilter(): HTMLElement {
-  const hostsSeen = new Set<string>();
+  const remotes = new Set<string>();
+  const hosts = new Set<string>();
   for (const s of state.sessions) {
     if (s.remote) {
-      hostsSeen.add(s.remote);
+      remotes.add(s.remote);
       continue;
     }
     if (s.importedFromMachine && !s.upstreamSessionId) {
-      hostsSeen.add(s.importedFromMachine);
+      hosts.add(s.importedFromMachine);
     }
   }
-  const hosts = [...hostsSeen].sort();
   const select = el("select", {
     class: "host-select",
     title: "Filter sessions by origin host",
@@ -675,18 +699,28 @@ function renderHostFilter(): HTMLElement {
     select.appendChild(opt);
   };
   addOption("__local", "local");
-  for (const h of hosts) {
-    addOption(h, h);
+  for (const name of [...remotes].sort()) {
+    addOption(`${REMOTE_FILTER_PREFIX}${name}`, name);
+  }
+  for (const machine of [...hosts].sort()) {
+    // Suffixed (unlike the bare remote label above) so the collision
+    // case — same name, both a live remote and an old import — reads
+    // as two distinct, identifiable options instead of a duplicate.
+    addOption(`${HOST_FILTER_PREFIX}${machine}`, `${machine} (imported)`);
   }
   addOption("__all", "all");
-  // If the current filter points at a host that no longer appears in
-  // any session, the select would render with nothing selected. Pin
-  // the rendered value to the state explicitly so this stays sane.
-  if (
-    state.hostFilter !== "__local" &&
-    state.hostFilter !== "__all" &&
-    !hosts.includes(state.hostFilter)
-  ) {
+  // If the current filter points at a host/remote that no longer
+  // appears in any session, the select would render with nothing
+  // selected. Pin the rendered value to the state explicitly so this
+  // stays sane.
+  const known = new Set<string>(["__local", "__all"]);
+  for (const name of remotes) {
+    known.add(`${REMOTE_FILTER_PREFIX}${name}`);
+  }
+  for (const machine of hosts) {
+    known.add(`${HOST_FILTER_PREFIX}${machine}`);
+  }
+  if (!known.has(state.hostFilter)) {
     select.value = state.hostFilter;
   }
   return select;
@@ -730,11 +764,15 @@ function visibleFilteredSessions(): SessionInfo[] {
       (s) =>
         !s.remote && (!s.importedFromMachine || !!s.upstreamSessionId),
     );
+  } else if (state.hostFilter.startsWith(REMOTE_FILTER_PREFIX)) {
+    const name = state.hostFilter.slice(REMOTE_FILTER_PREFIX.length);
+    visible = visible.filter((s) => s.remote === name);
   } else if (state.hostFilter !== "__all") {
+    const machine = state.hostFilter.startsWith(HOST_FILTER_PREFIX)
+      ? state.hostFilter.slice(HOST_FILTER_PREFIX.length)
+      : state.hostFilter; // pre-namespacing persisted value
     visible = visible.filter(
-      (s) =>
-        s.remote === state.hostFilter ||
-        (s.importedFromMachine === state.hostFilter && !s.upstreamSessionId),
+      (s) => s.importedFromMachine === machine && !s.upstreamSessionId,
     );
   }
   const term = state.sessionSearch.trim();
@@ -901,7 +939,7 @@ function renderList(): HTMLElement {
     } else if (state.hostFilter === "__local") {
       msg = "No local sessions. Switch the host filter to see imported sessions.";
     } else if (state.hostFilter !== "__all") {
-      msg = `No sessions from ${state.hostFilter}. Try a different host.`;
+      msg = `No sessions from ${describeHostFilter(state.hostFilter)}. Try a different host.`;
     } else {
       msg = `No warm sessions. ${hiddenCold} cold session${hiddenCold === 1 ? "" : "s"} hidden — click "warm" to switch to "all".`;
     }
@@ -1766,6 +1804,8 @@ function openSessionModal(): void {
       prompt: "",
       err: null,
       busy: false,
+      // "" = local, the default.
+      remote: "",
     },
   });
 }
@@ -1783,33 +1823,58 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
       "div",
       { class: "modal" },
       el("h2", null, "New session"),
+      ...(state.remotes.length > 0
+        ? [
+            el(
+              "div",
+              { class: "field" },
+              el("label", { for: "f-remote" }, "create on"),
+              renderRemoteSelect(m),
+            ),
+          ]
+        : []),
       el(
         "div",
         { class: "field" },
-        el("label", { for: "f-cwd" }, "cwd"),
+        el("label", { for: "f-cwd" }, m.remote ? "cwd (optional)" : "cwd"),
         el("input", {
           id: "f-cwd",
           "data-focus-key": "session-modal-cwd",
           value: m.cwd,
-          placeholder: "/home/you/dev/project",
-          list: "f-cwd-history",
+          // A remote create's cwd resolves against the peer's own
+          // filesystem — this box can't offer meaningful history/
+          // defaults for it, so the field is just a plain optional
+          // override in that case rather than the usual local-history
+          // autocomplete.
+          placeholder: m.remote
+            ? "leave blank to use the remote's default"
+            : "/home/you/dev/project",
+          ...(m.remote ? {} : { list: "f-cwd-history" }),
           autocomplete: "off",
           oninput: (e: Event) => {
             m.cwd = (e.target as HTMLInputElement).value;
           },
         }),
-        el(
-          "datalist",
-          { id: "f-cwd-history" },
-          ...loadCwdHistory().map((cwd) => el("option", { value: cwd })),
-        ),
+        m.remote
+          ? null
+          : el(
+              "datalist",
+              { id: "f-cwd-history" },
+              ...loadCwdHistory().map((cwd) => el("option", { value: cwd })),
+            ),
       ),
-      el(
-        "div",
-        { class: "field" },
-        el("label", { for: "f-agent" }, "agent"),
-        renderAgentSelect(m),
-      ),
+      // state.agents is *this* daemon's agent list — meaningless for a
+      // remote create, where the peer has its own registered agents
+      // and will apply its own default. Hide the field rather than
+      // offer a choice that may not even exist on the target.
+      m.remote
+        ? null
+        : el(
+            "div",
+            { class: "field" },
+            el("label", { for: "f-agent" }, "agent"),
+            renderAgentSelect(m),
+          ),
       el(
         "div",
         { class: "field" },
@@ -1860,6 +1925,47 @@ function renderSessionModal(m: SessionModalData): HTMLElement {
   );
 }
 
+function renderRemoteSelect(m: SessionModalData): HTMLElement {
+  const sel = el("select", {
+    id: "f-remote",
+    "data-focus-key": "session-modal-remote",
+    onchange: (e: Event) => {
+      const next = (e.target as HTMLSelectElement).value;
+      // The cwd field is pre-filled with *this* box's last-used local
+      // path (see openSessionModal) or left over from a prior local
+      // fill-in. That's meaningless — worse, actively wrong — on a
+      // different machine, so it must not silently ride along into a
+      // remote create: it either resolves to some unrelated directory
+      // there or 500s the peer's session spawn outright. Switching
+      // into remote mode clears it (peer applies its own default);
+      // switching back to local restores the usual pre-fill.
+      if (next && !m.remote) {
+        m.cwd = "";
+      } else if (!next && m.remote) {
+        m.cwd = loadLastCwd() ?? state.defaultCwd ?? "";
+      }
+      m.remote = next;
+      // Toggling this also changes the cwd field's label/placeholder
+      // and whether the agent field shows at all, so — unlike the
+      // other fields here — this needs an explicit re-render.
+      render();
+    },
+  });
+  const localOpt = el("option", { value: "" }, "local");
+  if (m.remote === "") localOpt.setAttribute("selected", "");
+  sel.appendChild(localOpt);
+  for (const r of state.remotes) {
+    const opt = el(
+      "option",
+      { value: r.name },
+      r.status && r.status !== "ok" ? `${r.name} (${r.status})` : r.name,
+    );
+    if (r.name === m.remote) opt.setAttribute("selected", "");
+    sel.appendChild(opt);
+  }
+  return sel;
+}
+
 function renderAgentSelect(m: SessionModalData): HTMLElement {
   const sel = el("select", {
     id: "f-agent",
@@ -1882,7 +1988,10 @@ function renderAgentSelect(m: SessionModalData): HTMLElement {
 async function createSession(): Promise<void> {
   const m = state.modal as SessionModalData | null;
   if (!m || m.kind !== "session") return;
-  if (!m.cwd) {
+  // cwd resolves against the peer's own filesystem for a remote
+  // create, and the peer applies its own default when it's omitted —
+  // same as a local create omitting cwd, just not this box's default.
+  if (!m.remote && !m.cwd) {
     m.err = "cwd is required";
     render();
     return;
@@ -1891,8 +2000,15 @@ async function createSession(): Promise<void> {
   m.err = null;
   render();
   try {
-    const body: Record<string, unknown> = { cwd: m.cwd };
-    if (m.agentId) body.agentId = m.agentId;
+    const body: Record<string, unknown> = {};
+    if (m.cwd) body.cwd = m.cwd;
+    if (m.remote) {
+      body.remote = m.remote;
+    } else if (m.agentId) {
+      // agentId is *this* daemon's agent id — meaningless to a peer,
+      // which has its own agents and applies its own default.
+      body.agentId = m.agentId;
+    }
     if (m.name) body.name = m.name;
     if (m.prompt) body.prompt = m.prompt;
     // Generous, because this spawns an agent — but bounded, so a stalled
@@ -1903,7 +2019,9 @@ async function createSession(): Promise<void> {
       body: JSON.stringify(body),
       timeoutMs: 60_000,
     });
-    saveLastCwd(m.cwd);
+    if (!m.remote && m.cwd) {
+      saveLastCwd(m.cwd);
+    }
     void pollSessions();
     // The dialog is dismissable while this is in flight, so it may
     // already be gone. If the user gave up on it, don't yank them into
