@@ -160,9 +160,14 @@ function fallbackTitle(_sessionId: string): string {
 }
 
 // Short, copy-pasteable form of the session id for inline display in
-// subtitle rows. Strips the redundant "hydra_session_" prefix.
+// subtitle rows. A federated id ("name:localId") has its peer-name
+// prefix stripped first — the remote is already shown via its own badge,
+// so repeating "name:" in every id is redundant — then the redundant
+// "hydra_session_" prefix is stripped from what's left.
 function shortSessionId(sessionId: string): string {
-  return sessionId.replace(/^hydra_session_/, "");
+  const colon = sessionId.indexOf(":");
+  const local = colon === -1 ? sessionId : sessionId.slice(colon + 1);
+  return local.replace(/^hydra_session_/, "");
 }
 
 // Drop the provider prefix on a model id ("openai/gpt-4o-mini" →
