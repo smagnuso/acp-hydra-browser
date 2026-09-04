@@ -642,6 +642,29 @@ function renderTopbar(): HTMLElement {
 const REMOTE_FILTER_PREFIX = "remote:";
 const HOST_FILTER_PREFIX = "host:";
 
+// True when a federated entry is, on the *peer's own* side, a dormant
+// import mirror it has never attached to — importedFromMachine rides
+// through the merge unchanged from the peer's own record (the daemon's
+// ForeignSessionCache deliberately doesn't filter these out — that's a
+// general-purpose data cache; this is a presentation decision made
+// here instead, mirroring cli's picker.ts). Not "what's happening on
+// the peer" in any useful sense, so it's excluded from that remote's
+// own bucket, the same way a local dormant mirror is excluded from
+// "local". Still visible under "all".
+function isDormantOnPeer(s: { importedFromMachine?: string; upstreamSessionId?: string }): boolean {
+  return !!s.importedFromMachine && !s.upstreamSessionId;
+}
+
+// True when the currently-selected host filter IS the given imported-from
+// machine — i.e. every card on screen already carries that provenance, so
+// a per-card "← machine" badge would be pure noise. Matches the bare
+// pre-namespacing value too, same fallback describeHostFilter uses.
+function isCurrentHostFilter(machine: string): boolean {
+  return (
+    state.hostFilter === `${HOST_FILTER_PREFIX}${machine}` || state.hostFilter === machine
+  );
+}
+
 function describeHostFilter(value: string): string {
   if (value.startsWith(REMOTE_FILTER_PREFIX)) {
     return `remote "${value.slice(REMOTE_FILTER_PREFIX.length)}"`;
@@ -663,18 +686,22 @@ function describeHostFilter(value: string): string {
 //   "host:<m>"   — passive mirrors imported from machine <m> that
 //                  haven't been attached locally yet.
 //   "remote:<n>" — live sessions federated under the `hydra remote`
-//                  named <n> — see s.remote in types.ts.
+//                  named <n> — see s.remote in types.ts — excluding any
+//                  that are themselves a dormant, never-attached import
+//                  mirror on that peer's own side (isDormantOnPeer);
+//                  those still show under "all".
 // A peer host with no passive mirrors (all its sessions have been
 // attached locally) drops out of the option list — its filter would
-// render empty. A federated remote never drops out this way: it has no
-// local-attach equivalent, so it stays live in its own bucket for as
-// long as it's federated.
+// render empty. A federated remote drops out the same way if every one
+// of its sessions is itself a dormant mirror on the peer's side.
 function renderHostFilter(): HTMLElement {
   const remotes = new Set<string>();
   const hosts = new Set<string>();
   for (const s of state.sessions) {
     if (s.remote) {
-      remotes.add(s.remote);
+      if (!isDormantOnPeer(s)) {
+        remotes.add(s.remote);
+      }
       continue;
     }
     if (s.importedFromMachine && !s.upstreamSessionId) {
@@ -766,7 +793,7 @@ function visibleFilteredSessions(): SessionInfo[] {
     );
   } else if (state.hostFilter.startsWith(REMOTE_FILTER_PREFIX)) {
     const name = state.hostFilter.slice(REMOTE_FILTER_PREFIX.length);
-    visible = visible.filter((s) => s.remote === name);
+    visible = visible.filter((s) => s.remote === name && !isDormantOnPeer(s));
   } else if (state.hostFilter !== "__all") {
     const machine = state.hostFilter.startsWith(HOST_FILTER_PREFIX)
       ? state.hostFilter.slice(HOST_FILTER_PREFIX.length)
@@ -1566,7 +1593,18 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
               "blocked",
             )
           : null,
-        ...(s.importedFromMachine && !s.upstreamSessionId
+        // `!s.remote` matters here: a live federated entry can carry
+        // its own importedFromMachine baggage (the peer's own record
+        // may itself have been imported from somewhere once) — remote
+        // wins, since this entry is live and stays live on the peer,
+        // never a "cold mirror, click to pull it in locally" candidate
+        // just because of history riding along from the peer's side.
+        // Also skipped when the current filter already IS that host —
+        // every card in view shares it, so the badge is pure noise there.
+        ...(s.importedFromMachine &&
+        !s.upstreamSessionId &&
+        !s.remote &&
+        !isCurrentHostFilter(s.importedFromMachine)
           ? [
               el(
                 "span",
@@ -1578,7 +1616,7 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
               ),
             ]
           : []),
-        ...(s.remote
+        ...(s.remote && state.hostFilter !== `${REMOTE_FILTER_PREFIX}${s.remote}`
           ? [
               el(
                 "span",
