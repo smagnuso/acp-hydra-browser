@@ -3395,7 +3395,7 @@ function renderLogItem(item: ChatState["log"][number]): Node {
       item.role === "user"
         ? "msg user"
         : isThought
-        ? "msg system"
+        ? "msg system thought"
         : "msg agent";
     const isCollapsed = isThought && collapsedThoughts.has(item);
     // Survives a full-history reload (new LogItem objects, same wire
