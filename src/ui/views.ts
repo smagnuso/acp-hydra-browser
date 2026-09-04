@@ -3231,6 +3231,7 @@ function renderChat(c: ChatState): HTMLElement {
   // history navigation, a restored draft) — which makes an unconditional
   // sync safe rather than something that would fight the user's typing.
   let textarea = view.composerTextarea;
+  const isNewTextarea = !textarea;
   if (!textarea) {
     textarea = buildTextarea();
     view.composerTextarea = textarea;
@@ -3244,8 +3245,18 @@ function renderChat(c: ChatState): HTMLElement {
     textarea.value = c.composerValue;
     const ta = textarea;
     queueMicrotask(() => autosize(ta));
-  }
-  if (c.composerValue && c.composerValue.length > 0) {
+  } else if (isNewTextarea && c.composerValue.length > 0) {
+    // First mount with a pre-filled value (a restored draft) — the node
+    // was just built at its resting height and needs sizing once. This
+    // used to run on every render whenever composerValue was non-empty,
+    // not just on mount. autosize() collapses the box to height:auto and
+    // back, which resets a scrolled textarea's internal scrollTop — so
+    // during a streaming turn (a render every ~100ms) it kept snapping a
+    // long composer's viewport back to the caret's line (usually the
+    // end) even though nothing about the text had changed, fighting
+    // anyone trying to scroll up and edit mid-prompt. Scoping this to
+    // the one render where the node is new avoids that while still
+    // sizing a restored draft correctly on open.
     const ta = textarea;
     queueMicrotask(() => autosize(ta));
   }
