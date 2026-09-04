@@ -631,19 +631,27 @@ function renderTopbar(): HTMLElement {
 }
 
 // Build the host-filter dropdown. Options are computed live from the
-// current session list so newly-imported peer hosts appear without
-// page reload. Sentinels:
+// current session list so newly-imported peer hosts (or newly
+// federated remotes) appear without page reload. Sentinels:
 //   "__local" — sessions created here OR imported and bound to a local
-//               agent.
+//               agent. Federated (remote-set) sessions never land here.
 //   "__all"   — every session.
 //   <host>    — passive mirrors imported from <host> that haven't been
-//               attached locally yet.
+//               attached locally yet, OR live sessions federated under
+//               the `hydra remote` named <host> — see s.remote in
+//               types.ts.
 // A peer host with no passive mirrors (all its sessions have been
 // attached locally) drops out of the option list — its filter would
-// render empty.
+// render empty. A federated remote never drops out this way: it has no
+// local-attach equivalent, so it stays live in its own bucket for as
+// long as it's federated.
 function renderHostFilter(): HTMLElement {
   const hostsSeen = new Set<string>();
   for (const s of state.sessions) {
+    if (s.remote) {
+      hostsSeen.add(s.remote);
+      continue;
+    }
     if (s.importedFromMachine && !s.upstreamSessionId) {
       hostsSeen.add(s.importedFromMachine);
     }
@@ -719,12 +727,14 @@ function visibleFilteredSessions(): SessionInfo[] {
     : state.sessions.filter((s) => s.status !== "cold");
   if (state.hostFilter === "__local") {
     visible = visible.filter(
-      (s) => !s.importedFromMachine || !!s.upstreamSessionId,
+      (s) =>
+        !s.remote && (!s.importedFromMachine || !!s.upstreamSessionId),
     );
   } else if (state.hostFilter !== "__all") {
     visible = visible.filter(
       (s) =>
-        s.importedFromMachine === state.hostFilter && !s.upstreamSessionId,
+        s.remote === state.hostFilter ||
+        (s.importedFromMachine === state.hostFilter && !s.upstreamSessionId),
     );
   }
   const term = state.sessionSearch.trim();
@@ -1527,6 +1537,18 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
                   title: `Passive mirror imported from ${s.importedFromMachine} — attach to start working on it here.`,
                 },
                 `← ${s.importedFromMachine}`,
+              ),
+            ]
+          : []),
+        ...(s.remote
+          ? [
+              el(
+                "span",
+                {
+                  class: "badge remote",
+                  title: `Live on remote "${s.remote}" — attaching forwards through, nothing is copied here.`,
+                },
+                `⇄ ${s.remote}`,
               ),
             ]
           : []),

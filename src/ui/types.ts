@@ -79,6 +79,16 @@ export interface SessionInfo {
   // populated and the session is treated as local-ish (showing up in
   // the "host: local" filter, getting a Slack thread, etc.).
   upstreamSessionId?: string;
+  // Set when this entry was merged in from a federated peer's own
+  // session list (hydra-acp's `hydra remote add`; see that repo's
+  // PROTOCOL.md "Federated session ids"), naming the remote it lives
+  // on. Deliberately distinct from importedFromMachine: that one marks
+  // a cold bundle-imported mirror with no live agent behind it yet;
+  // this one marks a session that's live right now and stays live on
+  // the peer — attaching forwards through rather than importing
+  // anything, and there's no local-graduation equivalent of
+  // upstreamSessionId for it.
+  remote?: string;
   // Count of background tasks (Monitor, backgrounded Bash) the agent
   // has armed and not yet been seen to resolve. Nonzero means the
   // session may restart itself with no prompt even while otherwise

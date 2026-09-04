@@ -60,6 +60,17 @@ test("trimForCache keeps only the fields the session-list card renders", () => {
   ]);
 });
 
+test("trimForCache drops federated (remote-set) sessions even when cold", () => {
+  const sessions: SessionInfo[] = [
+    { sessionId: "peerb:abc", cwd: "/w", status: "cold", remote: "peerb" },
+    { sessionId: "local-1", cwd: "/w", status: "cold" },
+  ];
+  assert.deepEqual(
+    trimForCache(sessions).map((s) => s.sessionId),
+    ["local-1"],
+  );
+});
+
 test("trimForCache tolerates an all-warm or empty list", () => {
   assert.deepEqual(trimForCache([]), []);
   assert.deepEqual(

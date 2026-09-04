@@ -70,6 +70,14 @@ export function trimForCache(sessions: SessionInfo[]): CachedSessionInfo[] {
     if (s.status === "warm") {
       continue;
     }
+    // Federated (remote-set) entries are never cached: they're a live
+    // merge from the peer's own list, not a durable local record, and
+    // there's no offline-fallback story for federation yet (unlike a
+    // real import, there's nothing meaningful to paint from a stale
+    // copy once the peer isn't the one answering anymore).
+    if (s.remote) {
+      continue;
+    }
     out.push({
       sessionId: s.sessionId,
       cwd: s.cwd,
