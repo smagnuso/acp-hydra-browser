@@ -137,7 +137,17 @@ export function initViewportHeight(): void {
   let lastH: number | null = null;
   let lastKeyboardOpen: boolean | null = null;
   let lastOffsetTop: number | null = null;
+  // A pointer down anywhere (e.g. reaching for the composer's Send
+  // button right after a keystroke) freezes --app-offset-top/--app-height
+  // writes until it lifts. Without this, a keyboard-open settle() tick
+  // landing between pointerdown and pointerup can shift the composer a
+  // few px right under the finger, so the tap's hit-test misses. Pending
+  // changes aren't lost — they're just deferred to the apply() this
+  // triggers on release, plus whatever tick settle()'s own rAF loop is
+  // already mid-way through.
+  let pointerActive = false;
   const apply = (): void => {
+    if (pointerActive) return;
     const vv = window.visualViewport;
     const h = (vv?.height ?? window.innerHeight) + topInsetPx();
     const rawOffsetTop = vv?.offsetTop ?? 0;
@@ -197,6 +207,20 @@ export function initViewportHeight(): void {
   window.addEventListener("pageshow", apply);
   window.addEventListener("focus", apply);
   document.addEventListener("visibilitychange", apply);
+  window.addEventListener(
+    "pointerdown",
+    () => {
+      pointerActive = true;
+    },
+    { capture: true }
+  );
+  const releasePointer = (): void => {
+    if (!pointerActive) return;
+    pointerActive = false;
+    apply();
+  };
+  window.addEventListener("pointerup", releasePointer, { capture: true });
+  window.addEventListener("pointercancel", releasePointer, { capture: true });
   // A fixed handful of setTimeout checkpoints (the previous approach)
   // guesses at how long the keyboard's show/hide animation takes; guess
   // too short and #app's height sits stuck at the old (small) value for

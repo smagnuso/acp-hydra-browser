@@ -160,6 +160,16 @@ export function tapHandler(fn: (e: Event) => void): Record<string, unknown> {
         firedViaPointer = false;
         return;
       }
+      // No matching pointerdown/pointerup ran on *this* element instance.
+      // That's the normal case for keyboard Enter/Space activation
+      // (MouseEvent.detail is 0 there) but it's also what a stray
+      // compatibility click looks like on iOS Chrome: preventDefault on
+      // pointerdown doesn't reliably suppress it, so it can arrive a
+      // frame late and land on whatever element render()'s teardown put
+      // in the old target's place (e.g. a just-opened modal backdrop),
+      // immediately closing it. Pointer-generated clicks have detail >= 1,
+      // so only detail === 0 is trusted here.
+      if ((e as MouseEvent).detail !== 0) return;
       if (hasActiveSelection()) return;
       fn(e);
     },
