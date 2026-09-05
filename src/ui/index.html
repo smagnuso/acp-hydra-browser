@@ -304,8 +304,17 @@ pre code { background: transparent; padding: 0; }
   .chat-back { display: block; }
 }
 .chat-header-row { display: flex; gap: 0.4rem; align-items: center; }
-.chat-header .info { flex: 1; min-width: 0; }
-.chat-header .info.clickable { cursor: pointer; }
+/* flex:1 + overflow-x:auto so this box's width comes purely from the
+   flex layout (container width minus the fixed actions group), never
+   from how many pills exist or how wide their content is — a pill's
+   text changing length (context tokens/cost populating async, a status
+   flip) used to reflow the whole row and shift the buttons after it.
+   Excess pill content scrolls inside this box instead. */
+.chat-header-pills { display: flex; flex: 1; min-width: 0; gap: 0.4rem; align-items: center; overflow-x: auto; white-space: nowrap; cursor: pointer; }
+/* Fixed-width sibling right after the pills box: with nothing after it
+   competing for space, it's pinned flush against the row's right edge
+   regardless of the pills box's content. */
+.chat-header-actions { display: flex; flex-shrink: 0; gap: 0.4rem; align-items: center; }
 .chat-details { background: var(--panel); border-bottom: 1px solid var(--border); padding: 0.6rem 0.9rem; }
 .chat-details .detail:last-child { margin-bottom: 0; }
 
@@ -317,7 +326,6 @@ pre code { background: transparent; padding: 0; }
 .armed-task .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .armed-task .elapsed { color: var(--muted); font-variant-numeric: tabular-nums; }
 .armed-tasks-more { color: var(--muted); font-size: 0.78rem; padding-left: 1.1rem; }
-.chat-header .info .row2 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* overscroll-behavior-y: contain — .chat-body's scroll ancestors (.chat,
    #app) are overflow:hidden and body is position:fixed, none of them
    scrollable. Without this, iOS Safari's rubber-band bounce at

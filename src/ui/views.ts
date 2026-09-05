@@ -3103,6 +3103,13 @@ function renderChat(c: ChatState): HTMLElement {
     el(
       "div",
       { class: "chat-header-row" },
+      el(
+        "div",
+        {
+          class: "chat-header-pills",
+          title: "Click for session details",
+          ...tapHandler(toggleDetails),
+        },
       !c.ready && c.cold
         ? el(
             "span",
@@ -3205,27 +3212,32 @@ function renderChat(c: ChatState): HTMLElement {
             fmtCost(c.cost) as string,
           )
         : null,
-      // The rail's own topbar carries a gear in split view, and two of
-      // them a few hundred pixels apart opening the same modal is just
-      // noise. Narrow mode never shows the topbar alongside a chat, so
-      // this is the only one there.
-      isWideLayout()
-        ? null
-        : el("button", { ...tapHandler(openOptionsModal), title: "Options" }, "⚙"),
-      el("button", { ...tapHandler(openFiles), title: "Files" }, "📁"),
-      el(
-        "button",
-        {
-          title: "Export this session as a *.hydra bundle",
-          ...tapHandler(() => triggerExportDownload(c.sessionId)),
-        },
-        "⬇",
       ),
-      el("div", {
-        class: "info clickable",
-        title: "Click for session details",
-        ...tapHandler(toggleDetails),
-      }),
+      // Its own fixed-width group, immediately after the pills' flexible
+      // (and independently scrollable) box, so these buttons sit at a
+      // stable position regardless of how many pills exist or how their
+      // content changes width as data streams in — a pill appearing or
+      // resizing used to shift these out from under a finger mid-tap.
+      el(
+        "div",
+        { class: "chat-header-actions" },
+        // The rail's own topbar carries a gear in split view, and two of
+        // them a few hundred pixels apart opening the same modal is just
+        // noise. Narrow mode never shows the topbar alongside a chat, so
+        // this is the only one there.
+        isWideLayout()
+          ? null
+          : el("button", { ...tapHandler(openOptionsModal), title: "Options" }, "⚙"),
+        el("button", { ...tapHandler(openFiles), title: "Files" }, "📁"),
+        el(
+          "button",
+          {
+            title: "Export this session as a *.hydra bundle",
+            ...tapHandler(() => triggerExportDownload(c.sessionId)),
+          },
+          "⬇",
+        ),
+      ),
     ),
   );
 
@@ -4330,17 +4342,63 @@ function renderPlan(plan: unknown): Node {
 // ---- File overlay -----------------------------------------------
 
 function openFiles(): void {
-  if (!state.current) return;
-  state.current.fileOverlay = {
+  const c = state.current;
+  if (!c) return;
+  const saved = c.savedFileView;
+  c.fileOverlay = {
     path: "",
     entries: [],
     preview: null,
     err: null,
-    maximized: false,
-    previewRaw: false,
+    maximized: saved?.maximized ?? false,
+    previewRaw: saved?.previewRaw ?? false,
   };
   render();
-  void listFiles("");
+  if (saved?.previewPath) {
+    // Fetch the directory listing and the remembered file's content
+    // together and settle into a single render, rather than listFiles
+    // then readFile in sequence — each renders on its own, and the
+    // listing's and a file preview's very different shapes (a row list
+    // vs. code/markdown) made that sequence visibly flicker/resize on
+    // reopen.
+    void restoreFileView(c, saved.dirPath, saved.previewPath, saved.previewRaw);
+  } else {
+    void listFiles(saved?.dirPath ?? "");
+  }
+}
+
+async function restoreFileView(
+  c: ChatState,
+  dirPath: string,
+  previewPath: string,
+  previewRaw: boolean,
+): Promise<void> {
+  const [listResult, readResult] = await Promise.allSettled([
+    api<{ path: string; entries?: FileEntry[] }>("/api/files/list", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: c.sessionId, path: dirPath }),
+    }),
+    api<{ content: string }>("/api/files/read", {
+      method: "POST",
+      body: JSON.stringify({ sessionId: c.sessionId, path: previewPath }),
+    }),
+  ]);
+  if (state.current !== c || !c.fileOverlay) return;
+  const maximized = c.fileOverlay.maximized;
+  const listErr = listResult.status === "rejected" ? (listResult.reason as Error).message : null;
+  const readErr = readResult.status === "rejected" ? (readResult.reason as Error).message : null;
+  c.fileOverlay = {
+    path: listResult.status === "fulfilled" ? listResult.value.path : dirPath,
+    entries: listResult.status === "fulfilled" ? listResult.value.entries ?? [] : [],
+    preview:
+      readResult.status === "fulfilled"
+        ? { path: previewPath, content: readResult.value.content }
+        : null,
+    err: readErr ?? listErr,
+    maximized,
+    previewRaw,
+  };
+  render();
 }
 
 function toggleMaximizeFiles(): void {
@@ -4424,8 +4482,18 @@ async function readFile(p: string): Promise<void> {
 }
 
 function closeFiles(): void {
-  if (!state.current) return;
-  state.current.fileOverlay = null;
+  const c = state.current;
+  if (!c) return;
+  const fo = c.fileOverlay;
+  if (fo) {
+    c.savedFileView = {
+      dirPath: fo.path,
+      previewPath: fo.preview?.path ?? null,
+      previewRaw: fo.previewRaw,
+      maximized: fo.maximized,
+    };
+  }
+  c.fileOverlay = null;
   render();
 }
 

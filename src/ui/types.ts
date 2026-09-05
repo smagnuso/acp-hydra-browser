@@ -374,6 +374,15 @@ export interface ChatState {
   contextSize: number | null;
   cost: unknown;
   fileOverlay: FileOverlayState | null;
+  // What the Files overlay was showing when last closed, so reopening it
+  // (within the same tab session — this is never persisted) picks up
+  // where the user left off instead of resetting to the directory root.
+  savedFileView: {
+    dirPath: string;
+    previewPath: string | null;
+    previewRaw: boolean;
+    maximized: boolean;
+  } | null;
   composerValue: string;
   // Images pasted into the composer, waiting to go out with the next send.
   // Cleared on submit; restored by rollbackAmend if an amend is rejected.

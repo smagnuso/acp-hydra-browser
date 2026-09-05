@@ -36,6 +36,7 @@ function makeChatState(): ChatState {
     contextSize: null,
     cost: null,
     fileOverlay: null,
+    savedFileView: null,
     composerValue: "",
     busy: false,
     recentOwnPrompts: [],
