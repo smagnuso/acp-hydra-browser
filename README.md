@@ -11,6 +11,113 @@ The hydra master token never leaves the machine; the browser authenticates
 you with a password (set via `hydra-acp auth password`) and issues its own
 session cookie.
 
+## Install
+
+```sh
+npm install -g @hydra-acp/cli @hydra-acp/browser
+```
+
+This drops the `hydra-acp` (and `hydra`) CLI plus an `hydra-acp-browser`
+binary on your PATH. The CLI dispatches `hydra-acp <name>` to any
+`hydra-acp-<name>` binary on PATH, so the browser is also reachable as
+`hydra-acp browser`.
+
+Register it as a hydra extension:
+
+```sh
+hydra-acp extensions add hydra-acp-browser --command hydra-acp-browser
+```
+
+`extensions add` is config-only — it doesn't spawn anything yet. Either
+bounce the daemon, or, if the daemon is already running, kick the
+extension into life:
+
+```sh
+hydra-acp extensions start hydra-acp-browser
+```
+
+Set the sign-in password once, on the machine running the daemon:
+
+```sh
+hydra-acp auth password
+```
+
+On startup, hydra-acp-browser writes the URL to open to
+`~/.hydra-acp/browser/link` (and logs it — see `hydra-acp extensions log
+hydra-acp-browser -f`). Open that URL and log in with the password you
+just set; a successful login sets an `hb_session` cookie and subsequent
+requests are authenticated by that cookie alone.
+
+That's the whole setup for local (loopback) use. Building from source
+instead, or want it reachable from your phone? Keep reading.
+
+## Access from your phone or over your LAN
+
+Loopback-only access needs nothing extra. Reaching it from another
+device means binding to a real interface, which requires HTTPS (the
+server refuses a non-loopback bind otherwise — same rule as the hydra
+daemon).
+
+If you're on Tailscale, this is one command:
+
+```sh
+hydra-acp-browser tailscale setup
+```
+
+It mints a real Let's Encrypt cert via `tailscale cert`, binds to your
+tailnet IP, and restarts the extension for you. See [HTTPS](#https)
+below for the self-signed alternative if you're not on Tailscale, plus
+cert-trust steps for iOS/macOS/Linux.
+
+## Building from source
+
+```sh
+git clone https://github.com/smagnuso/hydra-acp-browser.git ~/dev/hydra-acp-browser
+cd ~/dev/hydra-acp-browser
+npm install
+npm run build
+```
+
+Point the extension at the build instead of the npm binary:
+
+```sh
+hydra-acp extensions add hydra-acp-browser \
+  --command node \
+  --args ~/dev/hydra-acp-browser/dist/index.js
+```
+
+That writes the equivalent entry into `~/.hydra-acp/config.json`:
+
+```json
+{
+  "extensions": {
+    "hydra-acp-browser": {
+      "command": ["node"],
+      "args": ["/home/you/dev/hydra-acp-browser/dist/index.js"],
+      "enabled": true
+    }
+  }
+}
+```
+
+After a rebuild, `restart` (not `start`) is the right call:
+
+```sh
+hydra-acp extensions restart hydra-acp-browser
+```
+
+On startup, hydra spawns hydra-acp-browser with these env vars set:
+`HYDRA_ACP_DAEMON_URL`, `HYDRA_ACP_TOKEN`, `HYDRA_ACP_WS_URL`.
+Stdout/stderr land in `~/.hydra-acp/extensions/hydra-acp-browser.log`.
+
+**Running standalone**, without the hydra extension wrapper: set
+`HYDRA_TOKEN` in `~/.hydra-acp/browser.conf` (or export
+`HYDRA_ACP_TOKEN`), then:
+
+```sh
+npm start
+```
+
 ## How it works
 
 ```
@@ -36,88 +143,6 @@ The extension exposes:
   method-whitelisted (`session/prompt`, `session/cancel`, `session/set_mode`,
   `session/set_model`, plus permission responses) so a tab can't issue
   arbitrary admin calls.
-
-## Setup
-
-1. **Install or build.**
-
-   From npm (recommended once published):
-
-   ```sh
-   npm install -g @hydra-acp/cli @hydra-acp/browser
-   ```
-
-   This drops the `hydra-acp` (and `hydra`) CLI plus an `hydra-acp-browser` binary on your PATH. The CLI dispatches `hydra-acp <name>` to any `hydra-acp-<name>` binary on PATH, so the browser is also reachable as `hydra-acp browser`.
-
-   Or from source:
-
-   ```sh
-   git clone https://github.com/smagnuso/hydra-acp-browser.git ~/dev/hydra-acp-browser
-   cd ~/dev/hydra-acp-browser
-   npm install
-   npm run build
-   ```
-
-2. **Run as a hydra extension (recommended).** Register the extension
-   with hydra. If installed via npm:
-
-   ```sh
-   hydra-acp extensions add hydra-acp-browser --command hydra-acp-browser
-   ```
-
-   Or pointed at a local build:
-
-   ```sh
-   hydra-acp extensions add hydra-acp-browser \
-     --command node \
-     --args ~/dev/hydra-acp-browser/dist/index.js
-   ```
-
-   That writes the equivalent entry into `~/.hydra-acp/config.json`:
-
-   ```json
-   {
-     "extensions": {
-       "hydra-acp-browser": {
-         "command": ["node"],
-         "args": ["/home/you/dev/hydra-acp-browser/dist/index.js"],
-         "enabled": true
-       }
-     }
-   }
-   ```
-
-   `extensions add` is config-only — it doesn't spawn anything yet.
-   Either bounce the daemon, or, if the daemon is already running,
-   kick the extension into life:
-
-   ```sh
-   hydra-acp extensions start hydra-acp-browser
-   ```
-
-   On startup, hydra spawns hydra-acp-browser with these env vars set:
-   `HYDRA_ACP_DAEMON_URL`, `HYDRA_ACP_TOKEN`, `HYDRA_ACP_WS_URL`. It writes
-   the URL to open to `~/.hydra-acp/browser/link`. Set the sign-in password
-   once on the daemon host with `hydra-acp auth password`; the browser's
-   login page authenticates against that.
-   Stdout/stderr land in `~/.hydra-acp/extensions/hydra-acp-browser.log`.
-   Lifecycle is managed with
-   `hydra-acp extensions start|stop|restart hydra-acp-browser` —
-   `restart` is the right call after `npm run build`. Tail the log
-   with `hydra-acp extensions log hydra-acp-browser -f` (the open URL
-   shows up there on first launch).
-
-3. **Run standalone (alternative).** Set `HYDRA_TOKEN` in
-   `~/.hydra-acp/browser.conf` (or export `HYDRA_ACP_TOKEN`), then:
-
-   ```sh
-   npm start
-   ```
-
-4. **Open the browser** to the URL printed on stderr (also at
-   `~/.hydra-acp/browser/link`). Enter the password from step 2; a
-   successful login sets an `hb_session` cookie and subsequent requests
-   are authenticated by that cookie alone.
 
 ## HTTPS
 
