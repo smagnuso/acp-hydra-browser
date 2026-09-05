@@ -3194,7 +3194,7 @@ function renderChat(c: ChatState): HTMLElement {
             c.compactionPhase
               ? c.compactionPhase === "deferred"
                 ? "⏳ queued"
-                : "◐ compacting…"
+                : "◐ compacting"
               : `${fmtTokens(c.contextUsed)}/${fmtTokens(c.contextSize)}`,
           )
         : null,
@@ -4562,6 +4562,7 @@ function renderFileOverlay(c: ChatState): Node {
       el("span", { class: "crumb", ...tapHandler(() => closeFilePreview()) }, "← back to listing"),
     ];
     if (isMarkdown) {
+      actionChildren.push(el("span", { class: "crumb-sep" }, "·"));
       actionChildren.push(
         el(
           "span",
@@ -4658,7 +4659,7 @@ function renderFileOverlay(c: ChatState): Node {
         ),
         el("button", { ...tapHandler(closeFiles) }, "×"),
       ),
-      fileBreadcrumb(fo.path),
+      fo.preview ? null : fileBreadcrumb(fo.path),
       el(
         "div",
         {

@@ -558,8 +558,9 @@ html.keyboard-open .composer { padding-bottom: 0.6rem; }
 .files .crumbs { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-x: auto; white-space: nowrap; }
 .files .crumb { color: var(--accent); cursor: pointer; }
 .files .crumb:hover { text-decoration: underline; }
-.files .crumbs.preview-crumbs { display: flex; flex-direction: column; align-items: stretch; gap: 0.3rem; overflow: hidden; white-space: normal; }
-.files .crumbs-actions { display: flex; gap: 0.6em; white-space: nowrap; }
+.files .crumbs.preview-crumbs { display: flex; flex-direction: column; align-items: stretch; gap: 0.45rem; overflow: hidden; white-space: normal; }
+.files .crumbs-actions { display: flex; align-items: center; gap: 0.9em; white-space: nowrap; }
+.files .crumb-sep { color: var(--muted); }
 /* Front-truncated (not end-truncated) so the filename at the tail of
    the path — the part someone's actually looking for — stays visible;
    the direction:rtl + ellipsis combination elides the *start* instead
