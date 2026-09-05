@@ -1349,6 +1349,25 @@ export function reseatBubbleAtEnd(c: ChatState, entry: QueueEntry): void {
   }
 }
 
+// Move a prompt's bubble to just above any other still-queued bubbles.
+// Used when amendQueuedPrompt promotes a queued prompt into a steer of
+// the turn that's running right now — unlike reseatBubbleAtEnd, the
+// true end of the log is the wrong target here: a sibling prompt that's
+// still genuinely queued (hasn't started) belongs BELOW this one, since
+// this one's effect lands in the running turn immediately while the
+// sibling's turn hasn't opened yet. queuedBoundary() is the same
+// boundary insertAboveQueued uses for freshly-arriving turn content, so
+// the reseated bubble ends up exactly where that content would anchor.
+export function reseatBubbleAboveQueued(c: ChatState, entry: QueueEntry): void {
+  const idx = c.log.findIndex(
+    (it) => it.kind === "stream" && it.queueEntry === entry,
+  );
+  if (idx < 0) return;
+  const [item] = c.log.splice(idx, 1);
+  if (!item) return;
+  c.log.splice(queuedBoundary(), 0, item);
+}
+
 // Server says the entry left the queue. reason: started → it's now
 // running (chip transitions to processing then disappears once
 // turn_complete arrives); cancelled → mark cancelled, the bubble

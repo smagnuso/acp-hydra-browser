@@ -18,6 +18,7 @@ import { notify, send } from "./bridge.js";
 import {
   ensureSpinner,
   markActive,
+  reseatBubbleAboveQueued,
   reseatBubbleAtEnd,
   startTurnSpinner,
 } from "./acp.js";
@@ -341,7 +342,7 @@ export function amendQueuedPrompt(entry: QueueEntry): void {
   entry.status = "pending";
   entry.amendsMessageId = target;
   entry.aheadAtEnqueue = 0;
-  reseatBubbleAtEnd(c, entry);
+  reseatBubbleAboveQueued(c, entry);
   send("hydra-acp/prompt/cancel", {
     sessionId: c.sessionId,
     messageId: oldMessageId,
