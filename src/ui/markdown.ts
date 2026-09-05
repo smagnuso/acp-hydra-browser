@@ -162,6 +162,11 @@ export function renderMarkdown(src: unknown): string {
   let codeLang = "";
   let codeBuf: string[] = [];
   let listType: "ul" | "ol" | null = null;
+  // Buffered rather than emitted immediately: a hard-wrapped source line
+  // (an item's text continuing on the next line, indented under the
+  // marker) doesn't itself look like a new list item, so it needs to
+  // append to the item still being built rather than force it closed.
+  let listItemLines: string[] = [];
   let para: string[] = [];
 
   function flushPara(): void {
@@ -169,8 +174,14 @@ export function renderMarkdown(src: unknown): string {
     out += `<p>${inlineMd(para.join(" "))}</p>`;
     para = [];
   }
+  function flushListItem(): void {
+    if (listItemLines.length === 0) return;
+    out += `<li>${inlineMd(listItemLines.join(" "))}</li>`;
+    listItemLines = [];
+  }
   function closeList(): void {
     if (listType) {
+      flushListItem();
       out += `</${listType}>`;
       listType = null;
     }
@@ -254,8 +265,10 @@ export function renderMarkdown(src: unknown): string {
         closeList();
         out += "<ul>";
         listType = "ul";
+      } else {
+        flushListItem();
       }
-      out += `<li>${inlineMd(escapeHtml(m[1]!))}</li>`;
+      listItemLines.push(escapeHtml(m[1]!));
       i++;
       continue;
     }
@@ -265,8 +278,10 @@ export function renderMarkdown(src: unknown): string {
         closeList();
         out += "<ol>";
         listType = "ol";
+      } else {
+        flushListItem();
       }
-      out += `<li>${inlineMd(escapeHtml(m[1]!))}</li>`;
+      listItemLines.push(escapeHtml(m[1]!));
       i++;
       continue;
     }
@@ -277,7 +292,14 @@ export function renderMarkdown(src: unknown): string {
       i++;
       continue;
     }
-    closeList();
+    // A non-blank line that doesn't start any other block: inside a
+    // list this is a wrapped continuation of the item in progress
+    // (CommonMark's "lazy continuation"), not a new paragraph.
+    if (listType !== null) {
+      listItemLines.push(escapeHtml(raw.trim()));
+      i++;
+      continue;
+    }
     para.push(escapeHtml(raw));
     i++;
   }

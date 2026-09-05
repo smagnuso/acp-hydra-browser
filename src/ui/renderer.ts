@@ -93,6 +93,37 @@ let externalRenderHold = false;
 // it exists to prevent. Deliberately separate from externalRenderHold
 // rather than sharing it: swipe-nav owns that one for the length of a
 // gesture, and whichever of the two ended first would release the other.
+// A native <select>'s option popup stays open with no pointer held down
+// at all — the user clicks to open it, releases, then browses options.
+// The pointer/typing/selection gates above don't cover that window, so a
+// render() landing while it's open (the session-list poll ticking over
+// is the common case) tears out the select's DOM node mid-browse and the
+// browser dismisses the popup out from under the user. Hold renders for
+// as long as a <select> holds focus; flush once focus actually leaves
+// it, after the same settling beat the pointerup SELECT branch below
+// gives the native sequence room to finish.
+let selectFocused = false;
+let renderHeldBySelect = false;
+document.addEventListener(
+  "focusin",
+  (e) => {
+    if ((e.target as HTMLElement | null)?.tagName === "SELECT") {
+      selectFocused = true;
+    }
+  },
+  true,
+);
+document.addEventListener(
+  "focusout",
+  (e) => {
+    if ((e.target as HTMLElement | null)?.tagName !== "SELECT") return;
+    selectFocused = false;
+    if (!renderHeldBySelect) return;
+    renderHeldBySelect = false;
+    setTimeout(render, 300);
+  },
+  true,
+);
 let replayPaintHold = false;
 let replayPaintHoldTimer: ReturnType<typeof setTimeout> | undefined;
 export function beginReplayPaintHold(): void {
@@ -280,6 +311,10 @@ export function render(): void {
           }
         }, STUCK_POINTER_MS);
       }
+      return;
+    }
+    if (selectFocused) {
+      renderHeldBySelect = true;
       return;
     }
     if (isActivelyTyping()) {

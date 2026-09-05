@@ -721,26 +721,33 @@ function renderHostFilter(): HTMLElement {
       setState({ hostFilter: value });
     },
   }) as HTMLSelectElement;
-  const addOption = (value: string, label: string): void => {
+  const addOption = (parent: HTMLSelectElement | HTMLOptGroupElement, value: string, label: string): void => {
     const opt = document.createElement("option");
     opt.value = value;
     opt.textContent = label;
     if (state.hostFilter === value) {
       opt.selected = true;
     }
-    select.appendChild(opt);
+    parent.appendChild(opt);
   };
-  addOption("__local", "local");
+  addOption(select, "__local", "local");
   for (const name of [...remotes].sort()) {
-    addOption(`${REMOTE_FILTER_PREFIX}${name}`, name);
+    addOption(select, `${REMOTE_FILTER_PREFIX}${name}`, name);
   }
-  for (const machine of [...hosts].sort()) {
-    // Suffixed (unlike the bare remote label above) so the collision
-    // case — same name, both a live remote and an old import — reads
-    // as two distinct, identifiable options instead of a duplicate.
-    addOption(`${HOST_FILTER_PREFIX}${machine}`, `${machine} (imported)`);
+  if (hosts.size > 0) {
+    // Grouped under a labeled section rather than each carrying an
+    // "(imported)" suffix — the collision case (same name as a live
+    // remote) still reads as distinct because it's visually under a
+    // different heading, and the dropdown stops ballooning in width
+    // with every imported machine's name repeated twice.
+    const group = document.createElement("optgroup");
+    group.label = "imported";
+    for (const machine of [...hosts].sort()) {
+      addOption(group, `${HOST_FILTER_PREFIX}${machine}`, machine);
+    }
+    select.appendChild(group);
   }
-  addOption("__all", "all");
+  addOption(select, "__all", "all");
   // If the current filter points at a host/remote that no longer
   // appears in any session, the select would render with nothing
   // selected. Pin the rendered value to the state explicitly so this
@@ -4324,13 +4331,40 @@ function renderPlan(plan: unknown): Node {
 
 function openFiles(): void {
   if (!state.current) return;
-  state.current.fileOverlay = { path: "", entries: [], preview: null, err: null };
+  state.current.fileOverlay = {
+    path: "",
+    entries: [],
+    preview: null,
+    err: null,
+    maximized: false,
+    previewRaw: false,
+  };
   render();
   void listFiles("");
 }
 
+function toggleMaximizeFiles(): void {
+  const fo = state.current?.fileOverlay;
+  if (!fo) return;
+  fo.maximized = !fo.maximized;
+  render();
+}
+
+function isMarkdownPath(path: string): boolean {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return ext === "md" || ext === "markdown";
+}
+
+function togglePreviewRaw(): void {
+  const fo = state.current?.fileOverlay;
+  if (!fo) return;
+  fo.previewRaw = !fo.previewRaw;
+  render();
+}
+
 async function listFiles(p: string): Promise<void> {
   if (!state.current) return;
+  const maximized = state.current.fileOverlay?.maximized ?? false;
   try {
     const data = await api<{ path: string; entries?: FileEntry[] }>(
       "/api/files/list",
@@ -4344,6 +4378,8 @@ async function listFiles(p: string): Promise<void> {
       entries: data.entries ?? [],
       preview: null,
       err: null,
+      maximized,
+      previewRaw: false,
     };
     render();
   } catch (err) {
@@ -4352,6 +4388,8 @@ async function listFiles(p: string): Promise<void> {
       entries: [],
       preview: null,
       err: (err as Error).message,
+      maximized,
+      previewRaw: false,
     };
     render();
   }
@@ -4370,6 +4408,8 @@ async function readFile(p: string): Promise<void> {
       entries: fo.entries,
       preview: { path: p, content: data.content },
       err: null,
+      maximized: fo.maximized,
+      previewRaw: false,
     };
     render();
   } catch (err) {
@@ -4415,13 +4455,93 @@ function fileBreadcrumb(path: string): HTMLElement {
   return el("div", { class: "crumbs" }, crumbs);
 }
 
-function addLineRef(path: string, line: number): void {
+// Appends straight into the open session's composer — a guaranteed-to-
+// work last resort when both copy mechanisms below fail silently (known
+// to happen in an installed home-screen PWA on iOS, with no error to
+// catch and no visible sign anything went wrong).
+function appendToComposer(text: string): void {
   if (!state.current) return;
-  const ref = `${path}:${line}`;
   const cur = state.current.composerValue;
-  state.current.composerValue = cur ? `${cur} ${ref}` : ref;
+  state.current.composerValue = cur ? `${cur} ${text}` : text;
   queueDraftWrite(state.current.sessionId, state.current.composerValue);
   render();
+}
+
+// execCommand("copy") is deprecated but still works synchronously in
+// more places than the async Clipboard API does — e.g. over plain http,
+// or when Clipboard-API permission is denied.
+function execCommandCopy(text: string): boolean {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.top = "-1000px";
+  ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(ta);
+  return ok;
+}
+
+// Copies `text` to the clipboard, flashing `node`'s contents to "copied"
+// on success. Falls back to appending into the composer only if both
+// copy mechanisms fail, so the tap is never a dead end even in an
+// environment (an installed iOS PWA, notably) where clipboard access is
+// silently unavailable.
+function copyWithFeedback(text: string, node: HTMLElement, restore: () => void): void {
+  const showCopied = (): void => {
+    node.textContent = "copied";
+    setTimeout(restore, 900);
+  };
+  const legacyCopy = (): void => {
+    if (execCommandCopy(text)) {
+      showCopied();
+    } else {
+      appendToComposer(text);
+    }
+  };
+  if (navigator.clipboard?.writeText) {
+    void navigator.clipboard.writeText(text).then(showCopied, legacyCopy);
+  } else {
+    legacyCopy();
+  }
+}
+
+// Files are listed/read relative to the session's cwd, but a path meant
+// for pasting into a prompt is only unambiguous as an absolute path —
+// the agent reading it has no reason to assume it's relative to
+// whatever directory this browser tab happens to be looking at.
+function absoluteFilePath(cwd: string, relPath: string): string {
+  return cwd.endsWith("/") ? `${cwd}${relPath}` : `${cwd}/${relPath}`;
+}
+
+function copyLineRef(cwd: string, path: string, line: number, node: HTMLElement): void {
+  const label = String(line);
+  copyWithFeedback(`${absoluteFilePath(cwd, path)}:${line}`, node, () => {
+    node.textContent = label;
+  });
+}
+
+function copyablePathNode(cwd: string, path: string): HTMLElement {
+  const node: HTMLElement = el(
+    "div",
+    {
+      class: "crumb path-crumb",
+      title: "Copy path",
+      ...tapHandler(() => copyWithFeedback(absoluteFilePath(cwd, path), node, () => {
+        node.textContent = path;
+      })),
+    },
+    path,
+  );
+  return node;
 }
 
 function closeFilePreview(): void {
@@ -4436,13 +4556,41 @@ function renderFileOverlay(c: ChatState): Node {
   let body: HTMLElement;
   if (fo.preview) {
     const { path, content } = fo.preview;
-    const highlighted = highlightCode(content, path) ?? escapeHtml(content);
-    const lineCount = content.split("\n").length;
-    const gutter = el("div", { class: "code-gutter" });
-    for (let i = 1; i <= lineCount; i++) {
-      const ln = i;
-      gutter.appendChild(
-        el("div", { class: "ln", ...tapHandler(() => addLineRef(path, ln)) }, String(ln)),
+    const isMarkdown = isMarkdownPath(path);
+    const showRendered = isMarkdown && !fo.previewRaw;
+    const actionChildren: Node[] = [
+      el("span", { class: "crumb", ...tapHandler(() => closeFilePreview()) }, "← back to listing"),
+    ];
+    if (isMarkdown) {
+      actionChildren.push(
+        el(
+          "span",
+          { class: "crumb", ...tapHandler(() => togglePreviewRaw()) },
+          showRendered ? "view source" : "view rendered",
+        ),
+      );
+    }
+    let contentEl: HTMLElement;
+    if (showRendered) {
+      contentEl = el("div", { class: "md-view", html: renderMarkdown(content) });
+    } else {
+      const highlighted = highlightCode(content, path) ?? escapeHtml(content);
+      const lineCount = content.split("\n").length;
+      const gutter = el("div", { class: "code-gutter" });
+      for (let i = 1; i <= lineCount; i++) {
+        const ln = i;
+        const lnEl: HTMLElement = el(
+          "div",
+          { class: "ln", title: "Copy path:line", ...tapHandler(() => copyLineRef(c.cwd, path, ln, lnEl)) },
+          String(ln),
+        );
+        gutter.appendChild(lnEl);
+      }
+      contentEl = el(
+        "div",
+        { class: "code-view" },
+        gutter,
+        el("pre", {}, el("code", { class: "hljs", html: highlighted })),
       );
     }
     body = el(
@@ -4450,16 +4598,11 @@ function renderFileOverlay(c: ChatState): Node {
       { class: "preview" },
       el(
         "div",
-        { class: "crumbs" },
-        el("span", { class: "crumb", ...tapHandler(() => closeFilePreview()) }, "← back to listing"),
-        document.createTextNode(`  ${path}`),
+        { class: "crumbs preview-crumbs" },
+        el("div", { class: "crumbs-actions" }, actionChildren),
+        copyablePathNode(c.cwd, path),
       ),
-      el(
-        "div",
-        { class: "code-view" },
-        gutter,
-        el("pre", {}, el("code", { class: "hljs", html: highlighted })),
-      ),
+      contentEl,
     );
   } else {
     body = el(
@@ -4500,7 +4643,7 @@ function renderFileOverlay(c: ChatState): Node {
     el(
       "div",
       {
-        class: "modal file-modal",
+        class: fo.maximized ? "modal file-modal maximized" : "modal file-modal",
       },
       el(
         "div",
@@ -4508,6 +4651,11 @@ function renderFileOverlay(c: ChatState): Node {
         el("span", { class: "title" }, "Files"),
         el("span", { class: "pill" }, c.cwd),
         el("span", { class: "spacer" }),
+        el(
+          "button",
+          { ...tapHandler(toggleMaximizeFiles), title: fo.maximized ? "Restore" : "Maximize" },
+          fo.maximized ? "⤡" : "⤢",
+        ),
         el("button", { ...tapHandler(closeFiles) }, "×"),
       ),
       fileBreadcrumb(fo.path),

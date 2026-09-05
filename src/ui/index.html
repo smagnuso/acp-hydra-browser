@@ -549,10 +549,24 @@ html.keyboard-open .composer { padding-bottom: 0.6rem; }
 
 /* File overlay */
 .file-modal { width: 80vw; max-width: 80vw; height: 80vh; display: flex; flex-direction: column; padding: 0; }
+.file-modal.maximized { width: 100vw; max-width: 100vw; height: 100vh; border-radius: 0; }
+.modal-bg:has(.file-modal.maximized) { padding: 0; }
+.file-modal .topbar .title { flex-shrink: 0; }
+.file-modal .topbar .pill { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-modal .topbar button { flex-shrink: 0; }
 .files { display: flex; flex-direction: column; height: 100%; flex: 1; overflow: hidden; }
 .files .crumbs { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 0.85rem; overflow-x: auto; white-space: nowrap; }
 .files .crumb { color: var(--accent); cursor: pointer; }
 .files .crumb:hover { text-decoration: underline; }
+.files .crumbs.preview-crumbs { display: flex; flex-direction: column; align-items: stretch; gap: 0.3rem; overflow: hidden; white-space: normal; }
+.files .crumbs-actions { display: flex; gap: 0.6em; white-space: nowrap; }
+/* Front-truncated (not end-truncated) so the filename at the tail of
+   the path — the part someone's actually looking for — stays visible;
+   the direction:rtl + ellipsis combination elides the *start* instead
+   of the browser's default of eliding the end. Plain block-level
+   overflow, deliberately not flex, so there is no flex-shrink/min-width
+   interaction with sibling crumbs to get wrong on a narrow screen. */
+.files .path-crumb { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .files .body { flex: 1; overflow-y: auto; overscroll-behavior-y: contain; padding: 0.5rem 0; }
 .files .entry { display: flex; gap: 0.5rem; align-items: center; padding: 0.35rem 0.75rem; cursor: pointer; }
 .files .entry:hover { background: var(--panel-2); }
@@ -560,6 +574,18 @@ html.keyboard-open .composer { padding-bottom: 0.6rem; }
 .files .entry .name { flex: 1; }
 .files .entry .size { color: var(--muted); font-size: 0.8rem; }
 .files .preview { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 0; }
+.files .md-view { padding: 0.75rem 1rem; }
+.files .md-view p:first-child { margin-top: 0; }
+.files .md-view p:last-child { margin-bottom: 0; }
+.files .md-view p { margin: 0.4rem 0; line-height: 1.5; }
+.files .md-view ul, .files .md-view ol { margin: 0.4rem 0; padding-left: 1.4rem; }
+.files .md-view li { margin: 0.2rem 0; }
+.files .md-view blockquote { margin: 0.4rem 0; padding: 0.25rem 0.75rem; border-left: 3px solid var(--border); color: var(--muted); }
+.files .md-view h1, .files .md-view h2, .files .md-view h3 { margin: 0.7rem 0 0.4rem; }
+.files .md-view table { border-collapse: collapse; margin: 0.5rem 0; font-size: 0.9em; max-width: 100%; display: block; overflow-x: auto; }
+.files .md-view th, .files .md-view td { border: 1px solid var(--border); padding: 0.3rem 0.55rem; vertical-align: top; }
+.files .md-view th { background: var(--panel-2); font-weight: 600; text-align: left; }
+.files .md-view pre { margin: 0.4rem 0; padding: 0.6rem 0.75rem; overflow-x: auto; background: var(--panel-2); border-radius: 6px; }
 .code-view { display: flex; align-items: flex-start; min-width: max-content; }
 .code-gutter { position: sticky; left: 0; z-index: 1; background: var(--code-bg); border-right: 1px solid var(--border); padding: 0.75rem 0; user-select: none; flex-shrink: 0; }
 .ln { display: block; padding: 0 0.75rem; line-height: 1.45; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 0.88em; color: var(--muted); cursor: pointer; text-align: right; min-width: 2.5rem; }

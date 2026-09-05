@@ -327,6 +327,10 @@ export interface FileOverlayState {
   entries: FileEntry[];
   preview: { path: string; content: string } | null;
   err: string | null;
+  maximized: boolean;
+  // Markdown files default to a rendered preview; this forces the raw,
+  // syntax-highlighted source view instead. Ignored for non-markdown files.
+  previewRaw: boolean;
 }
 
 export interface ChatState {
