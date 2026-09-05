@@ -3726,7 +3726,8 @@ function renderLogItem(item: ChatState["log"][number]): Node {
     return node;
   }
   if (item.kind === "system") {
-    return el("div", { class: "msg system" }, item.text);
+    const text = item.at !== undefined ? `${item.text} · ${formatDateTime(item.at)}` : item.text;
+    return el("div", { class: "msg system" }, text);
   }
   if (item.kind === "error") {
     return el("div", { class: "msg error" }, item.text);

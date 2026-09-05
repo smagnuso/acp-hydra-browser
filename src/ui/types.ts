@@ -307,7 +307,11 @@ export type LogItem =
       // line breaks and indentation survive.
       synthetic?: boolean;
     }
-  | { kind: "system"; text: string }
+  // `at` is the daemon's recordedAt for the frame that produced this
+  // notice (e.g. an agent waking itself off a finished background
+  // task) when known, same daemon-authoritative-when-available
+  // treatment as sentAt/endedAt above.
+  | { kind: "system"; text: string; at?: number }
   | { kind: "error"; text: string }
   | { kind: "spinner"; spinner: SpinnerState }
   // What a live spinner freezes into at finalizeTurn: a permanent

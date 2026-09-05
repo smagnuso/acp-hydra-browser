@@ -1960,6 +1960,7 @@ export function handleNotification(frame: JsonRpcFrame, fromCache = false): void
         text: label
           ? `agent resumed on its own: background task finished (${label})`
           : "agent resumed on its own",
+        at: recordedAt,
       });
       break;
     }
