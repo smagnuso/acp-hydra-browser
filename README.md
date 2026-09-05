@@ -25,7 +25,7 @@ binary on your PATH. The CLI dispatches `hydra-acp <name>` to any
 Register it as a hydra extension:
 
 ```sh
-hydra-acp extensions add hydra-acp-browser --command hydra-acp-browser
+hydra-acp extensions add hydra-acp-browser
 ```
 
 `extensions add` is config-only — it doesn't spawn anything yet. Either
@@ -42,14 +42,20 @@ Set the sign-in password once, on the machine running the daemon:
 hydra-acp auth password
 ```
 
-On startup, hydra-acp-browser writes the URL to open to
-`~/.hydra-acp/browser/link` (and logs it — see `hydra-acp extensions log
-hydra-acp-browser -f`). Open that URL and log in with the password you
-just set; a successful login sets an `hb_session` cookie and subsequent
-requests are authenticated by that cookie alone.
+Open the printed URL and log in with the password you just set; a
+successful login sets an `hb_session` cookie and subsequent requests are
+authenticated by that cookie alone.
 
-That's the whole setup for local (loopback) use. Building from source
-instead, or want it reachable from your phone? Keep reading.
+That's the whole setup for local (loopback) use. If you land on an empty
+session list, that's likely because no agent is configured yet — the
+browser is a client of hydra-acp, not a coding agent itself. Pick one
+with `hydra-acp agent list` / `hydra-acp agent set <id>`; see
+[hydra-acp's README](https://github.com/smagnuso/hydra-acp#choosing-an-agent)
+for the full picture (auth, per-session/per-editor overrides, switching
+mid-conversation).
+
+Building from source instead, or want it reachable from your phone? Keep
+reading.
 
 ## Access from your phone or over your LAN
 
@@ -65,9 +71,18 @@ hydra-acp-browser tailscale setup
 ```
 
 It mints a real Let's Encrypt cert via `tailscale cert`, binds to your
-tailnet IP, and restarts the extension for you. See [HTTPS](#https)
-below for the self-signed alternative if you're not on Tailscale, plus
-cert-trust steps for iOS/macOS/Linux.
+tailnet IP, and restarts the extension for you. It also sets
+`BROWSER_PREFERRED_HOST` to your MagicDNS name, so the server shows and
+QR-encodes the friendly `mybox.tailxxxx.ts.net` hostname instead of the
+raw tailnet IP. See [HTTPS](#https) below for the self-signed alternative
+if you're not on Tailscale, plus cert-trust steps for iOS/macOS/Linux.
+
+Grab the URL (and a scannable QR code for your phone) any time, without
+starting anything, with:
+
+```sh
+hydra-acp-browser url
+```
 
 ## Building from source
 
@@ -157,10 +172,11 @@ hydra-acp-browser tailscale setup
 
 Mints a real Let's Encrypt cert via `tailscale cert`, points
 `BROWSER_TLS_CERT`/`BROWSER_TLS_KEY` at it, binds `BROWSER_HOST` to your
-tailnet IP specifically (not `0.0.0.0` — your LAN never sees it), adds your
-MagicDNS name to `BROWSER_ALLOWED_HOSTS`, and offers to restart the
-extension. No trust prompts, no manual SAN wrangling. Certs expire after
-~90 days; re-run the same command to renew.
+tailnet IP specifically (not `0.0.0.0` — your LAN never sees it), sets
+`BROWSER_PREFERRED_HOST` to your MagicDNS name (implicitly allowed for the
+Host-header check, and used for display — see `hydra-acp-browser url`),
+and offers to restart the extension. No trust prompts, no manual SAN
+wrangling. Certs expire after ~90 days; re-run the same command to renew.
 
 If `tailscale cert` needs root (no `operator` set — see `tailscale set
 --operator=$(whoami)` to fix this permanently), the wizard offers to retry
@@ -247,6 +263,7 @@ HTTPS won't be sent over plain HTTP — clear cookies for the site (or hit
 | `BROWSER_TLS_CERT`           | (none)                                 | If set with `BROWSER_TLS_KEY`, listen on HTTPS. |
 | `BROWSER_TLS_KEY`            | (none)                                 | Path to TLS key. |
 | `BROWSER_LINK_FILE`          | `~/.hydra-acp/browser/link`            | URL written for convenience. |
+| `BROWSER_PREFERRED_HOST`     | (none)                                 | Hostname shown in the link file/logs and `hydra-acp-browser url` instead of `BROWSER_HOST` (set by `tailscale setup` to your MagicDNS name). Always implicitly allowed for the Host-header check — no need to also list it in `BROWSER_ALLOWED_HOSTS`. |
 | `BROWSER_ALLOWED_HOSTS`      | empty                                  | Comma-sep extra Host values for DNS-rebind allowlist (e.g. Tailscale name). |
 | `BROWSER_FILE_MAX_BYTES`     | `262144`                               | Upper bound for `/api/files/read`. |
 | `HYDRA_DAEMON_URL`           | from env / `http://127.0.0.1:55514`    | `HYDRA_ACP_DAEMON_URL` env wins. |
@@ -263,8 +280,8 @@ HTTPS won't be sent over plain HTTP — clear cookies for the site (or hit
   unless `BROWSER_TLS_CERT` and `BROWSER_TLS_KEY` are configured —
   mirrors hydra's daemon.
 - **DNS-rebind protection.** The `Host` header must match
-  `127.0.0.1[:port]`, `localhost[:port]`, or an entry in
-  `BROWSER_ALLOWED_HOSTS`.
+  `127.0.0.1[:port]`, `localhost[:port]`, `BROWSER_PREFERRED_HOST`, or an
+  entry in `BROWSER_ALLOWED_HOSTS`.
 - **CSRF.** State-changing requests check `Origin` (against
   `<scheme>://<allowed-host>:<port>`) and `Sec-Fetch-Site`
   (`same-origin` / `none` only).

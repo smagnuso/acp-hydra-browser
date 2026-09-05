@@ -11,6 +11,13 @@ export interface Config {
   browserPort: number;
   tls: TlsConfig | undefined;
   linkFile: string;
+  // Hostname to show in the printed/link-file URL and the `url` subcommand
+  // instead of browserHost — set by `tailscale setup` to the tailnet
+  // MagicDNS name, since browserHost itself is bound to the raw tailnet IP
+  // (see tailscale-wizard.ts). Always implicitly allowed for the Host
+  // header check (buildContext, server/http.ts) so setting this alone is
+  // enough; it doesn't also need to appear in BROWSER_ALLOWED_HOSTS.
+  preferredHost: string | undefined;
   allowedHosts: string[];
   fileMaxBytes: number;
   hydraDaemonUrl: string;
@@ -107,7 +114,11 @@ function commaList(map: Map<string, string>, key: string): string[] {
 export const DEFAULT_DAEMON_PORT = 55514;
 export const DEFAULT_BROWSER_PORT = 5514;
 
-export function loadConfig(path: string = paths.configFile()): Config {
+export function loadConfig(
+  path: string = paths.configFile(),
+  opts: { requireToken?: boolean } = {},
+): Config {
+  const { requireToken = true } = opts;
   let text = "";
   try {
     text = readFileSync(path, "utf8");
@@ -122,7 +133,10 @@ export function loadConfig(path: string = paths.configFile()): Config {
     `http://127.0.0.1:${DEFAULT_DAEMON_PORT}`;
   const hydraToken =
     process.env.HYDRA_ACP_TOKEN ?? map.get("HYDRA_TOKEN") ?? "";
-  if (!hydraToken) {
+  // Callers that only need the display/bind settings (e.g. the `url`
+  // subcommand — it never talks to the daemon) shouldn't have to have a
+  // token in scope just to read BROWSER_HOST out of a config file.
+  if (!hydraToken && requireToken) {
     throw new Error(
       "Missing HYDRA_ACP_TOKEN env var (or HYDRA_TOKEN config key). When run as a hydra extension, hydra injects this automatically; otherwise set it in ~/.hydra-acp/browser.conf.",
     );
@@ -148,6 +162,7 @@ export function loadConfig(path: string = paths.configFile()): Config {
     browserPort: intVal(map, "BROWSER_PORT", DEFAULT_BROWSER_PORT),
     tls,
     linkFile: expandHome(map.get("BROWSER_LINK_FILE") ?? paths.linkFile()),
+    preferredHost: map.get("BROWSER_PREFERRED_HOST") || undefined,
     allowedHosts: commaList(map, "BROWSER_ALLOWED_HOSTS"),
     fileMaxBytes: intVal(map, "BROWSER_FILE_MAX_BYTES", 256 * 1024),
     hydraDaemonUrl,

@@ -151,13 +151,20 @@ function authenticate(
 
 export function buildContext(config: Config): ServerContext {
   const scheme: "http" | "https" = config.tls ? "https" : "http";
+  // preferredHost is always implicitly allowed — it's the host the server
+  // itself will tell you to open (see index.ts's resolveDisplayHost), so
+  // requiring it to also be listed in BROWSER_ALLOWED_HOSTS would just be
+  // the same value written twice.
+  const extraHosts = config.preferredHost
+    ? [...config.allowedHosts, config.preferredHost]
+    : config.allowedHosts;
   return {
     config,
     security: buildSecurityContext(
       config.browserHost,
       config.browserPort,
       scheme,
-      config.allowedHosts,
+      extraHosts,
     ),
     rateLimiter: new AuthRateLimiter(),
     scheme,

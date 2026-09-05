@@ -7,9 +7,28 @@ import {
   checkSecFetchSite,
   checkStateChanging,
 } from "../src/util/csrf.js";
-import { DEFAULT_BROWSER_PORT } from "../src/config.js";
+import { buildContext } from "../src/server/http.js";
+import { DEFAULT_BROWSER_PORT, type Config } from "../src/config.js";
 
 const ctx = buildSecurityContext("127.0.0.1", DEFAULT_BROWSER_PORT, "http", ["my-tailscale.ts"]);
+
+function fixtureConfig(overrides: Partial<Config> = {}): Config {
+  return {
+    browserHost: "127.0.0.1",
+    browserPort: DEFAULT_BROWSER_PORT,
+    tls: undefined,
+    linkFile: "/tmp/link",
+    preferredHost: undefined,
+    allowedHosts: [],
+    fileMaxBytes: 256 * 1024,
+    hydraDaemonUrl: "http://127.0.0.1:55514",
+    hydraWsUrl: "ws://127.0.0.1:55514/acp",
+    hydraToken: "test-token",
+    permissionDisplayDelayMs: 500,
+    debug: false,
+    ...overrides,
+  };
+}
 
 test("checkHost allows loopback", () => {
   assert.equal(checkHost(ctx, { host: `127.0.0.1:${DEFAULT_BROWSER_PORT}` }), true);
@@ -86,4 +105,26 @@ test("checkStateChanging rejects cross-site fetch", () => {
     "sec-fetch-site": "cross-site",
   });
   assert.equal(r.ok, false);
+});
+
+test("buildContext always allows preferredHost, without needing it in allowedHosts too", () => {
+  const built = buildContext(
+    fixtureConfig({ preferredHost: "mybox.tail1234.ts.net" }),
+  );
+  assert.equal(
+    checkHost(built.security, { host: `mybox.tail1234.ts.net:${DEFAULT_BROWSER_PORT}` }),
+    true,
+  );
+  assert.equal(
+    checkOrigin(built.security, { origin: `http://mybox.tail1234.ts.net:${DEFAULT_BROWSER_PORT}` }),
+    true,
+  );
+});
+
+test("buildContext doesn't allow an arbitrary host when preferredHost is unset", () => {
+  const built = buildContext(fixtureConfig());
+  assert.equal(
+    checkHost(built.security, { host: `mybox.tail1234.ts.net:${DEFAULT_BROWSER_PORT}` }),
+    false,
+  );
 });

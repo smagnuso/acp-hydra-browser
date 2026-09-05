@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { writeFileSync, chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "./config.js";
+import qrcode from "qrcode-terminal";
+import { loadConfig, type Config } from "./config.js";
 import { buildContext, createServer } from "./server/http.js";
 import { registerSessionRoutes } from "./server/routes-sessions.js";
 import { registerAgentRoutes } from "./server/routes-agents.js";
@@ -44,6 +46,12 @@ async function main(argv: string[]): Promise<void> {
     await runTailscaleSetup();
     return;
   }
+  if (argv[0] === "url") {
+    const url = computeDisplayUrl(loadConfig(undefined, { requireToken: false }));
+    process.stdout.write(`${url}\n`);
+    qrcode.generate(url, { small: true });
+    return;
+  }
 
   const config = loadConfig();
   setDebug(config.debug);
@@ -71,7 +79,7 @@ async function main(argv: string[]): Promise<void> {
   void registerVersion(config.hydraWsUrl, config.hydraToken);
 
   const scheme = config.tls ? "https" : "http";
-  const url = `${scheme}://${displayHost(config.browserHost)}:${config.browserPort}/`;
+  const url = computeDisplayUrl(config);
   writeLinkFile(config.linkFile, url);
   log.info(`hydra daemon: ${config.hydraDaemonUrl}`);
   log.info(`listening on ${scheme}://${config.browserHost}:${config.browserPort}`);
@@ -116,11 +124,33 @@ async function registerVersion(wsUrl: string, token: string): Promise<void> {
   }
 }
 
-function displayHost(host: string): string {
-  if (host === "0.0.0.0") {
-    return "127.0.0.1";
+// preferredHost (set by `tailscale setup` to the tailnet MagicDNS name)
+// wins outright — browserHost itself is bound to a raw IP in that case,
+// not something worth showing anyone. Otherwise 0.0.0.0 is genuinely
+// ambiguous (it's not a value you can put in a browser bar), so this
+// substitutes the machine's own hostname for display purposes only;
+// hostname() essentially never throws, but the fallback keeps a listen
+// that came up fine from getting undone by a display-only lookup.
+// Any other explicit bind host (a specific LAN/tailnet IP, say) is
+// already the precise address to connect to, so it passes through
+// unchanged rather than risking a hostname that resolves somewhere else.
+function resolveDisplayHost(config: Config): string {
+  if (config.preferredHost) {
+    return config.preferredHost;
   }
-  return host;
+  if (config.browserHost === "0.0.0.0") {
+    try {
+      return hostname() || "127.0.0.1";
+    } catch {
+      return "127.0.0.1";
+    }
+  }
+  return config.browserHost;
+}
+
+function computeDisplayUrl(config: Config): string {
+  const scheme = config.tls ? "https" : "http";
+  return `${scheme}://${resolveDisplayHost(config)}:${config.browserPort}/`;
 }
 
 function writeLinkFile(path: string, url: string): void {
@@ -151,6 +181,8 @@ function printHelp(): void {
 
 Usage:
   hydra-acp-browser                Start the server.
+  hydra-acp-browser url            Print the URL to open (and a QR code
+                                      for it) without starting the server.
   hydra-acp-browser tailscale setup  Mint a Tailscale cert and configure
                                       HTTPS + Tailscale-only access.
   hydra-acp-browser --version      Print version and exit.

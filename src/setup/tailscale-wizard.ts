@@ -222,25 +222,34 @@ function step3WriteConfig(args: {
   header(3, TOTAL_STEPS, "Writing config");
 
   const { map } = readExisting(CONF_PATH);
-  const existingHosts = (map.get("BROWSER_ALLOWED_HOSTS") ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  const hosts = new Set(existingHosts);
-  hosts.add(args.dnsName);
-
   const port = Number.parseInt(map.get("BROWSER_PORT") ?? "", 10) || 5514;
 
+  // A pre-existing 0.0.0.0 is a deliberate choice, not just an unset
+  // default — someone bound to every interface because they also want
+  // plain-LAN clients (a machine that isn't on this tailnet) to reach
+  // it. 0.0.0.0 already covers the tailnet interface too, so narrowing
+  // it here would silently cut LAN clients off with no way back short
+  // of hand-editing the conf file. Leave it alone in that case; anyone
+  // who does want the narrower, tailnet-only bind can still set
+  // BROWSER_HOST manually.
+  const alreadyBoundEverywhere = map.get("BROWSER_HOST") === "0.0.0.0";
+
+  // BROWSER_PREFERRED_HOST alone covers both jobs the MagicDNS name used
+  // to need two keys for: buildContext (server/http.ts) always allows it
+  // for the Host header check, and it's what the server prints/writes to
+  // the link file and shows for `hydra-acp-browser url` — no separate
+  // BROWSER_ALLOWED_HOSTS entry needed for the same value.
   writeConf(CONF_PATH, {
     BROWSER_TLS_CERT: args.certPath,
     BROWSER_TLS_KEY: args.keyPath,
-    BROWSER_HOST: args.tailscaleIp,
-    BROWSER_ALLOWED_HOSTS: Array.from(hosts).join(","),
+    BROWSER_HOST: alreadyBoundEverywhere ? undefined : args.tailscaleIp,
+    BROWSER_PREFERRED_HOST: args.dnsName,
   });
   ok(`Wrote ${CONF_PATH} (chmod 600)`);
-  info(`BROWSER_HOST=${args.tailscaleIp} — bound to the tailnet interface only, not your LAN.`);
-  if (map.get("BROWSER_HOST") === "0.0.0.0") {
-    warn("Previously bound to 0.0.0.0 (every interface). Narrowed to the tailnet IP.");
+  if (alreadyBoundEverywhere) {
+    info("BROWSER_HOST=0.0.0.0 left as-is — already reachable on the tailnet interface, and this keeps plain-LAN clients working too.");
+  } else {
+    info(`BROWSER_HOST=${args.tailscaleIp} — bound to the tailnet interface only, not your LAN.`);
   }
   return port;
 }
@@ -277,4 +286,5 @@ export async function runTailscaleSetup(): Promise<void> {
   blank();
   ok("Setup complete.");
   info(`Open: https://${dnsName}:${port}/`);
+  info("Get that URL (and a QR code for your phone) any time with: hydra-acp-browser url");
 }
