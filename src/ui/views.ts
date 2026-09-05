@@ -3719,6 +3719,9 @@ function renderLogItem(item: ChatState["log"][number]): Node {
       // user's intent carried forward into the M2; the M1 was just a
       // draft that got superseded, not an abandoned thought.
       node.appendChild(body);
+      if (item.role === "user" && item.sentAt !== undefined) {
+        node.appendChild(el("div", { class: "msg-time" }, formatDateTime(item.sentAt)));
+      }
     }
     return node;
   }
@@ -4106,6 +4109,24 @@ function renderQueueEditor(
   );
 }
 
+// Wall-clock stamp for a prompt or a finished turn (mirrors the TUI's
+// formatWallClock, cli/src/tui/format.ts). Always carries both date and
+// time — a session gets revisited long after the fact often enough that
+// a bare time-of-day would be ambiguous, so unlike a typical chat app's
+// "today" special-case, the date never drops out. The year itself is
+// the one thing elided in the common case (this year), coming back
+// once a stamp is actually old enough for that to matter.
+function formatDateTime(ms: number): string {
+  const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const dateStr = d.toLocaleDateString(
+    undefined,
+    sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" },
+  );
+  const timeStr = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${dateStr}, ${timeStr}`;
+}
+
 function formatElapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;
@@ -4124,6 +4145,7 @@ function renderTurnStamp(item: {
   elapsedMs: number;
   toolCount: number;
   stopReason?: string;
+  endedAt: number;
 }): HTMLElement {
   const bad = item.stopReason !== undefined && item.stopReason !== "end_turn";
   const label = bad
@@ -4131,7 +4153,11 @@ function renderTurnStamp(item: {
     : item.toolCount > 0
     ? `${item.toolCount} tool${item.toolCount === 1 ? "" : "s"} · took ${formatElapsed(item.elapsedMs)}`
     : `thought · ${formatElapsed(item.elapsedMs)}`;
-  return el("div", { class: bad ? "turn-stamp bad" : "turn-stamp" }, label);
+  return el(
+    "div",
+    { class: bad ? "turn-stamp bad" : "turn-stamp" },
+    `${label} · ${formatDateTime(item.endedAt)}`,
+  );
 }
 
 function renderSpinner(spinner: SpinnerState): HTMLElement {

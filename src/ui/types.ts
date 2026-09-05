@@ -288,6 +288,13 @@ export type LogItem =
       // (observed after a reconnect's afterMessageId delta) and skip
       // creating a duplicate bubble instead of silently doubling it.
       messageId?: string;
+      // Daemon-authoritative send time (epoch ms) for a user prompt —
+      // hydra-acp/prompt_queue/added's enqueuedAt, the same value for
+      // every attached client (including the sender) and stable across
+      // a replay. Undefined until that notification binds this bubble
+      // (own prompts render optimistically before it arrives) or if the
+      // daemon predates the field.
+      sentAt?: number;
       queueEntry?: QueueEntry;
       // Images attached at submit time (pasted into the composer). Kept on
       // the log item so the sent bubble shows what was actually attached,
@@ -309,7 +316,11 @@ export type LogItem =
   // mirrors the TUI's frozen "thought · Xs" / "N tools · took Xs"
   // block. stopReason preserved so a cancelled/refused turn stamps
   // loudly instead of reading like a normal finish.
-  | { kind: "turn-stamp"; elapsedMs: number; toolCount: number; stopReason?: string }
+  // endedAt is the daemon's recordedAt for the closing turn_complete
+  // (or _hydra_turn_ended) when known, else the local clock — see
+  // freezeSpinner. Same daemon-authoritative-when-available treatment
+  // as sentAt above.
+  | { kind: "turn-stamp"; elapsedMs: number; toolCount: number; stopReason?: string; endedAt: number }
   | { kind: "perm"; toolCallId: string }
   | PlanLogItem
   | ExitPlanLogItem

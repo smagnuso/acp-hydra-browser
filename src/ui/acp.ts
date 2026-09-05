@@ -152,11 +152,14 @@ function insertAboveQueued(item: LogItem): void {
 // an in-flight own prompt then re-renders it as a duplicate bubble at
 // the bottom of the log (observed live, complete with a freeze-then-new
 // spinner churn). Stamping at every bind site closes that hole.
-function stampBubbleMessageId(entry: QueueEntry): void {
+function stampBubbleMessageId(entry: QueueEntry, sentAt?: number): void {
   if (!state.current || entry.messageId === undefined) return;
   for (const item of state.current.log) {
     if (item.kind === "stream" && item.queueEntry === entry) {
       item.messageId = entry.messageId;
+      if (sentAt !== undefined) {
+        item.sentAt = sentAt;
+      }
       cacheOwnPromptFrame(entry);
       return;
     }
@@ -514,11 +517,13 @@ function freezeSpinner(endedAt?: number, stopReason?: string): void {
   if (spinner) {
     const idx = c.log.findIndex((e) => e.kind === "spinner");
     if (idx >= 0) {
+      const at = endedAt ?? Date.now();
       c.log[idx] = {
         kind: "turn-stamp",
-        elapsedMs: Math.max(0, (endedAt ?? Date.now()) - spinner.startedAt),
+        elapsedMs: Math.max(0, at - spinner.startedAt),
         toolCount: spinner.toolCallIds.length,
         stopReason,
+        endedAt: at,
       };
     }
   }
@@ -907,6 +912,11 @@ function onPromptReceived(update: AnyRecord, recordedAt?: number): void {
     text,
     closed: true,
     messageId,
+    // Fallback for when prompt_queue_added's enqueuedAt was never seen
+    // (an old daemon, or a replay that skipped straight to
+    // prompt_received) — recordedAt here is turn-start time, not
+    // accept time, but it's the best available stand-in.
+    sentAt: recordedAt,
     attachments: extractImageAttachments(update.prompt),
   });
   // prompt_received IS the turn-open signal (cli's user-text handler
@@ -1120,6 +1130,14 @@ function onPromptQueueAdded(params: AnyRecord): void {
     !!state.current.ownClientId &&
     originatorClientId === state.current.ownClientId;
   const eventText = promptBlocksToText(params.prompt);
+  // Daemon accept-time timestamp (PROTOCOL.md's hydra-acp/prompt_queue/added
+  // "enqueuedAt") — present for every originator, own included, unlike
+  // prompt_received's recordedAt which excludes the sender. Same value
+  // for every attached client and stable across a replay, so it's what
+  // a "sent at" stamp on the bubble should show rather than the local
+  // clock at optimistic-send time.
+  const enqueuedAt =
+    typeof params.enqueuedAt === "number" ? params.enqueuedAt : undefined;
   if (isOwn) {
     // Two-pass bind. Pass 1: FIFO among entries genuinely awaiting a
     // bind. This must win over revival: a cancelled straggler from an
@@ -1178,7 +1196,7 @@ function onPromptQueueAdded(params: AnyRecord): void {
     }
     unbound.messageId = messageId;
     state.current.queueByMessageId.set(messageId, unbound);
-    stampBubbleMessageId(unbound);
+    stampBubbleMessageId(unbound, enqueuedAt);
     // The spinner opened for this prompt at dispatch was owner-tagged
     // with the local entry id (no messageId existed yet). Upgrade the
     // tag now so the stale-completion guard in the turn_complete
@@ -1279,6 +1297,7 @@ function onPromptQueueAdded(params: AnyRecord): void {
     closed: true,
     queueEntry: entry,
     messageId,
+    sentAt: enqueuedAt,
     attachments: extractImageAttachments(params.prompt),
   };
   if (position === 0) {

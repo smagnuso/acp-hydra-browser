@@ -141,6 +141,12 @@ function dispatchPrompt(
     text,
     closed: true,
     queueEntry: entry,
+    // Optimistic — replaced with the daemon's authoritative enqueuedAt
+    // once prompt_queue_added binds this entry (acp.ts's
+    // stampBubbleMessageId). Good enough for the sub-second gap before
+    // that arrives; for an offline-held entry it's however long the
+    // reconnect takes, which flushOfflineQueue's own bind corrects too.
+    sentAt: Date.now(),
     attachments: entry.attachments,
   });
   c.recentOwnPrompts.push({ text, at: Date.now() });
@@ -464,6 +470,12 @@ export function amendPrompt(): void {
     text,
     closed: true,
     queueEntry: entry,
+    // Optimistic — replaced with the daemon's authoritative enqueuedAt
+    // once prompt_queue_added binds this entry (acp.ts's
+    // stampBubbleMessageId). Good enough for the sub-second gap before
+    // that arrives; for an offline-held entry it's however long the
+    // reconnect takes, which flushOfflineQueue's own bind corrects too.
+    sentAt: Date.now(),
     attachments: entry.attachments,
   });
   c.recentOwnPrompts.push({ text, at: Date.now() });
