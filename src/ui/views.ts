@@ -2675,6 +2675,12 @@ function logItemSig(item: ChatState["log"][number]): unknown[] | null {
       qe?.amendedByMessageId,
       qe?.amendsMessageId,
       item.attachments?.length ?? 0,
+      // The bubble is painted with the local send time and restamped
+      // with the daemon's enqueuedAt when prompt_queue_added binds it
+      // (acp.ts's stampBubbleMessageId). Left out of the sig, that
+      // restamp is invisible: the cached node keeps whichever time was
+      // rendered first.
+      item.sentAt,
     ];
   }
   if (item.kind === "system" || item.kind === "error") {
@@ -2687,7 +2693,7 @@ function logItemSig(item: ChatState["log"][number]): unknown[] | null {
     return [item.plan, item.status];
   }
   if (item.kind === "turn-stamp") {
-    return [item.elapsedMs, item.toolCount, item.stopReason];
+    return [item.elapsedMs, item.toolCount, item.stopReason, item.endedAt];
   }
   return null;
 }

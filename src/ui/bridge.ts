@@ -198,6 +198,15 @@ export function handleFrame(frame: JsonRpcFrame): void {
   if (frame.method === "bridge/ready") {
     state.current.ready = true;
     state.current.cold = false;
+    // The `load=true` resurrect is for opening a cold session, and it
+    // has done its job the moment we're attached. Left set, it rides
+    // along on every later reconnect of this chat for the life of the
+    // page, so each one pays an extra upstream session/load round trip
+    // before the attach — lengthening exactly the handshake window a
+    // phone's socket tends to die in. Cleared here rather than at
+    // connect time so a drop *during* the handshake still retries with
+    // the resurrect intact.
+    state.current.loadOnConnect = false;
     state.banner = null;
     state.current.reconnectAttempt = 0;
     // Capture the server-side bridge's clientId so we can recognize
