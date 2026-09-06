@@ -25,6 +25,7 @@ function fixtureConfig(overrides: Partial<Config> = {}): Config {
     hydraWsUrl: "ws://127.0.0.1:55514/acp",
     hydraToken: "test-token",
     permissionDisplayDelayMs: 500,
+    permissionNotifyDelayMs: 15_000,
     debug: false,
     ...overrides,
   };

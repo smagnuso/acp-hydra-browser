@@ -19,9 +19,9 @@ import {
 import { checkStateChanging } from "../util/csrf.js";
 import type { ServerContext } from "./http.js";
 import { HydraRestClient } from "../hydra/client.js";
-import { hasSubscriptions } from "./push-store.js";
+import { hasSubscriptions, sendPushToEndpoint } from "./push-store.js";
 import { registerForPush } from "./turn-notify-callback.js";
-import { clearConnection, setConnectionVisible } from "./session-visibility.js";
+import { clearConnection, isSessionVisible, setConnectionVisible } from "./session-visibility.js";
 
 const log = logger("ws-bridge");
 
@@ -196,6 +196,30 @@ function handleConnection(
   const pendingPermissionFrames = new Map<string, NodeJS.Timeout>();
   const permissionDelayMs = ctx.config.permissionDisplayDelayMs;
 
+  // Permission requests that HAVE been shown (to this tab or a sibling
+  // client) but are still unresolved permissionNotifyDelayMs after that,
+  // pending a "waiting on you" push — see schedulePermissionNotify. A
+  // separate map from pendingPermissionFrames above: that one buffers a
+  // request the UI hasn't seen yet, this one times out a request the UI
+  // HAS seen, once no permission_resolved has followed it in time.
+  // Keyed by toolCallId per RFD #533, same as pendingPermissionFrames.
+  const pendingPermissionNotifyTimers = new Map<string, NodeJS.Timeout>();
+  const permissionNotifyDelayMs = ctx.config.permissionNotifyDelayMs;
+
+  // messageIds of this connection's own prompts that hydra has queued
+  // (hydra-acp/prompt_queue/added, matched by originator.clientId) but
+  // hasn't yet reported as started. Consumed (deleted) the moment a
+  // prompt_queue/removed{started} confirms which messageId is now the
+  // in-flight head — see currentTurnIsOwn below.
+  const ownQueuedMessageIds = new Set<string>();
+  // Whether the turn currently running on this session (if any) was
+  // started by a prompt THIS connection submitted, per the last
+  // prompt_queue/removed{started}. Only one turn runs at a time per
+  // session, so this is authoritative until the next "started" event —
+  // gates schedulePermissionNotify so a peer's (TUI, another tab)
+  // permission wait never buzzes this device.
+  let currentTurnIsOwn = false;
+
   let upstreamReady = false;
   // While the upstream handshake is running we can't yet forward browser
   // frames. Buffer them and flush once attach completes.
@@ -231,6 +255,18 @@ function handleConnection(
   // needs to hold the upstream connection open a little longer.
   let pendingOwnPrompts = 0;
 
+  async function fetchSessionTitle(): Promise<string> {
+    try {
+      const info = await HydraRestClient.forRequest(
+        ctx.config.hydraDaemonUrl,
+        ctx.config.hydraToken,
+      ).getSession(sessionId);
+      return info.title || "Hydra";
+    } catch {
+      return "Hydra";
+    }
+  }
+
   // Web Push registration for this connection's own prompts, mirroring
   // the foreground own-turn-end scope in notifications.ts (a
   // peer-submitted turn finishing isn't "browser initiated"). Only
@@ -240,19 +276,51 @@ function handleConnection(
     if (!(await hasSubscriptions())) {
       return;
     }
-    let title = "Hydra";
-    try {
-      const info = await HydraRestClient.forRequest(
-        ctx.config.hydraDaemonUrl,
-        ctx.config.hydraToken,
-      ).getSession(sessionId);
-      if (info.title) {
-        title = info.title;
-      }
-    } catch {
-      // Best-effort — fall back to the generic title below.
-    }
+    const title = await fetchSessionTitle();
     await registerForPush(ctx.config, sessionId, messageId, title, ownPushEndpoint);
+  }
+
+  // Fires after permissionNotifyDelayMs of an own-turn permission request
+  // sitting unresolved (see schedulePermissionNotify). Mirrors
+  // deliverPush's suppression rules in turn-notify-callback.ts: skip if
+  // this tab (or a sibling) is already looking at the session, and only
+  // target the device that actually submitted the prompt.
+  async function maybeSendPermissionPush(): Promise<void> {
+    if (isSessionVisible(sessionId)) {
+      log.info(`session=${sessionId} currently visible — suppressing permission push`);
+      return;
+    }
+    if (!ownPushEndpoint) {
+      return;
+    }
+    if (!(await hasSubscriptions())) {
+      return;
+    }
+    const title = await fetchSessionTitle();
+    await sendPushToEndpoint(ownPushEndpoint, {
+      title,
+      body: "Waiting on a permission approval.",
+      url: `/#/session/${encodeURIComponent(sessionId)}`,
+      tag: `hydra-acp-permission-${sessionId}`,
+    });
+  }
+
+  // Buffers a just-displayed permission request for permissionNotifyDelayMs.
+  // If session/update permission_resolved arrives for this toolCallId
+  // before the timer fires — answered in this tab, a sibling client, or
+  // the auto-approver — the notification handler below clears it and no
+  // push goes out. Skipped entirely when the in-flight turn isn't ours;
+  // see currentTurnIsOwn.
+  function schedulePermissionNotify(toolCallId: string): void {
+    if (permissionNotifyDelayMs <= 0 || !currentTurnIsOwn) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      pendingPermissionNotifyTimers.delete(toolCallId);
+      void maybeSendPermissionPush();
+      maybeStopUpstream();
+    }, permissionNotifyDelayMs);
+    pendingPermissionNotifyTimers.set(toolCallId, timer);
   }
 
   upstream.on("open", () => {
@@ -290,7 +358,25 @@ function handleConnection(
         pendingOwnPrompts > 0
       ) {
         pendingOwnPrompts -= 1;
+        ownQueuedMessageIds.add(params.messageId);
         void maybeRegisterPush(params.messageId);
+      }
+    }
+    // prompt_queue/removed{reason:"started"} is the authoritative signal
+    // for which messageId is now the session's in-flight head — see
+    // acp.ts's onPromptQueueRemoved. Reaches the originator too, unlike
+    // prompt_received/turn_complete, so this is also how a peer's turn
+    // starting becomes visible to us. Consumed (deleted) either way: once
+    // a queued own messageId either starts or leaves the queue some other
+    // way (cancelled/abandoned), it's done informing currentTurnIsOwn.
+    if (n.method === "hydra-acp/prompt_queue/removed") {
+      const params = (n.params ?? {}) as { messageId?: unknown; reason?: unknown };
+      const messageId = typeof params.messageId === "string" ? params.messageId : undefined;
+      if (messageId !== undefined) {
+        if (params.reason === "started") {
+          currentTurnIsOwn = ownQueuedMessageIds.has(messageId);
+        }
+        ownQueuedMessageIds.delete(messageId);
       }
     }
     // Permission resolution during the display-delay window cancels
@@ -315,6 +401,12 @@ function handleConnection(
           );
           return;
         }
+        const notifyTimer = pendingPermissionNotifyTimers.get(update.toolCallId);
+        if (notifyTimer) {
+          clearTimeout(notifyTimer);
+          pendingPermissionNotifyTimers.delete(update.toolCallId);
+          maybeStopUpstream();
+        }
       }
       if (handshakeBuffer) {
         handshakeBuffer.push(n);
@@ -335,13 +427,7 @@ function handleConnection(
       );
       return;
     }
-    if (r.method === "session/request_permission" && permissionDelayMs > 0) {
-      // Buffer the request for permissionDelayMs. Sibling controllers
-      // (the auto-approver) often answer within a handful of ms; if
-      // session/update permission_resolved arrives before the timer
-      // fires, the notification handler above clears this entry and
-      // the request never reaches the browser tab (no flash). Keyed
-      // by toolCallId per RFD #533.
+    if (r.method === "session/request_permission") {
       const params = (r.params ?? {}) as {
         toolCall?: { toolCallId?: unknown };
       };
@@ -349,15 +435,31 @@ function handleConnection(
         typeof params.toolCall?.toolCallId === "string"
           ? params.toolCall.toolCallId
           : undefined;
-      if (toolCallId) {
+      const deliver = (): void => {
+        outstandingFromUpstream.add(String(r.id));
+        sendBrowserFrame(r);
+        // Only once the request has actually been shown does the
+        // notify-delay clock start — see schedulePermissionNotify.
+        if (toolCallId) {
+          schedulePermissionNotify(toolCallId);
+        }
+      };
+      if (toolCallId && permissionDelayMs > 0) {
+        // Buffer the request for permissionDelayMs. Sibling controllers
+        // (the auto-approver) often answer within a handful of ms; if
+        // session/update permission_resolved arrives before the timer
+        // fires, the notification handler above clears this entry and
+        // the request never reaches the browser tab (no flash). Keyed
+        // by toolCallId per RFD #533.
         const timer = setTimeout(() => {
           pendingPermissionFrames.delete(toolCallId);
-          outstandingFromUpstream.add(String(r.id));
-          sendBrowserFrame(r);
+          deliver();
         }, permissionDelayMs);
         pendingPermissionFrames.set(toolCallId, timer);
         return;
       }
+      deliver();
+      return;
     }
     outstandingFromUpstream.add(String(r.id));
     sendBrowserFrame(r);
@@ -369,6 +471,13 @@ function handleConnection(
 
   upstream.on("close", ({ code, reason }) => {
     log.info(`upstream closed session=${sessionId} code=${code} reason=${reason}`);
+    // The daemon connection this timer would confirm against is gone —
+    // don't fire a stale "waiting on you" push for a turn that no longer
+    // has anywhere to report a resolution.
+    for (const timer of pendingPermissionNotifyTimers.values()) {
+      clearTimeout(timer);
+    }
+    pendingPermissionNotifyTimers.clear();
     try {
       browserWs.close();
     } catch {
@@ -638,27 +747,57 @@ function handleConnection(
     }
   }
 
-  function cleanup(): void {
-    clearConnection(sessionId, connId);
-    // If a session/prompt we just forwarded hasn't produced its
-    // prompt_queue/added yet, don't tear down the daemon connection
-    // immediately — backgrounding the app right after hitting send (the
-    // literal case Web Push exists for) closes the browser WS within a
-    // second or two on iOS, possibly before the notification lands.
-    // Killing upstream here would silently drop the turn-notify
-    // registration every time. Give it a short grace window instead.
+  // True once the browser side has gone away — gates maybeStopUpstream so
+  // it never tears down the daemon connection while the tab is still
+  // attached, only once there's nothing left to hold it open for.
+  let browserClosed = false;
+  let upstreamStopScheduled = false;
+
+  // Tears down the daemon connection once the browser is gone AND
+  // nothing still needs it kept alive: an own prompt awaiting its
+  // prompt_queue/added (brief grace window), or a permission-notify timer
+  // awaiting either its own deadline or a permission_resolved to cancel
+  // it against (see schedulePermissionNotify and the permission_resolved
+  // handling above). Re-entrant — called again each time one of those
+  // conditions clears, from wherever it cleared.
+  function maybeStopUpstream(): void {
+    if (!browserClosed || upstreamStopScheduled) {
+      return;
+    }
     if (pendingOwnPrompts > 0) {
+      // If a session/prompt we just forwarded hasn't produced its
+      // prompt_queue/added yet, don't tear down the daemon connection
+      // immediately — backgrounding the app right after hitting send
+      // (the literal case Web Push exists for) closes the browser WS
+      // within a second or two on iOS, possibly before the notification
+      // lands. Killing upstream here would silently drop the
+      // turn-notify registration every time. Give it a short grace
+      // window instead.
+      upstreamStopScheduled = true;
       log.info(
         `browser gone with ${pendingOwnPrompts} own prompt(s) unresolved for session=${sessionId} — holding upstream ${OWN_PROMPT_GRACE_MS}ms for prompt_queue/added`,
       );
       setTimeout(() => upstream.stop(), OWN_PROMPT_GRACE_MS);
-    } else {
-      upstream.stop();
+      return;
     }
+    if (pendingPermissionNotifyTimers.size > 0) {
+      log.info(
+        `browser gone with ${pendingPermissionNotifyTimers.size} permission-notify timer(s) pending for session=${sessionId} — holding upstream`,
+      );
+      return;
+    }
+    upstreamStopScheduled = true;
+    upstream.stop();
+  }
+
+  function cleanup(): void {
+    browserClosed = true;
+    clearConnection(sessionId, connId);
     for (const timer of pendingPermissionFrames.values()) {
       clearTimeout(timer);
     }
     pendingPermissionFrames.clear();
+    maybeStopUpstream();
     if (browserWs.readyState === WebSocket.OPEN) {
       try {
         browserWs.close();

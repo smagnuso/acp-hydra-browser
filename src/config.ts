@@ -34,6 +34,13 @@ export interface Config {
   // never sees the prompt. 0 disables (forward immediately, today's
   // behavior).
   permissionDisplayDelayMs: number;
+  // Delay (ms) after a permission request is actually shown to the
+  // browser before pushing a "waiting on you" notification, if it's
+  // still unresolved by then. Long enough that a quick answer from
+  // this tab, a sibling client (TUI, another browser tab), or the
+  // auto-approver never fires one — see ws-bridge.ts's
+  // pendingPermissionNotifyTimers. 0 disables.
+  permissionNotifyDelayMs: number;
   debug: boolean;
 }
 
@@ -169,6 +176,7 @@ export function loadConfig(
     hydraWsUrl,
     hydraToken,
     permissionDisplayDelayMs: intVal(map, "PERMISSION_DELAY_MS", 500),
+    permissionNotifyDelayMs: intVal(map, "PERMISSION_NOTIFY_DELAY_MS", 15_000),
     debug: bool(map, "DEBUG", false),
   };
 }
