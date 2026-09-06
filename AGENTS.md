@@ -113,6 +113,49 @@ Ships as `hydra-acp-browser` on PATH. Registered via
   timing issue. Any new independently-scrolling panel needs the same
   property.
 
+## Debugging a "the transcript is missing X" report
+
+Split it into *data* vs *render* before theorising — the two live in
+different halves of the system and the answer usually falls out in
+minutes. Three levels, cheapest first:
+
+1. **Does the daemon have it?**
+   `~/.hydra-acp/sessions/<id>/history.jsonl` is the record of truth;
+   `hydra session transcript <id>` is the readable view. If a
+   `prompt_received` frame is there, nothing was lost server-side.
+2. **Does a full attach replay it?** Connect to the daemon's `/acp`
+   directly (`wss://<host>/acp`, subprotocols `acp.v1` and
+   `hydra-acp-token.<token>` from `~/.hydra-acp/auth-token`), send
+   `initialize` + `session/attach {historyPolicy: "full"}`, and capture
+   the notifications. Feeding that capture through the real
+   `handleNotification` in a `tsx` script (stub `globalThis.document`,
+   hand-build a `ChatState` — see `test/acp-replay-cursor.test.ts`)
+   tells you whether the *client logic* renders it, with no browser
+   involved.
+3. **Does the real SPA render it?** Drive it with headless Chrome over
+   CDP: launch with `--remote-debugging-port` + `--ignore-certificate-errors`,
+   `Network.setCookie` `hb_session` = the daemon token (the browser
+   server only checks the cookie *exists*; the daemon validates it, so
+   the master token works and no password is needed),
+   `Emulation.setDeviceMetricsOverride` for phone metrics, seed
+   `localStorage["hydra-acp-browser:filters"]` to match the reporter's
+   `hideThoughts` etc., then dump `.chat-body > *` class names and
+   `getBoundingClientRect()`. `Network.webSocketCreated` also shows the
+   `afterMessageId`/`afterSeq`/`load` params the SPA actually sent,
+   which is the fastest way to tell a full replay from a delta.
+
+Correlate with the two logs, whose clocks match:
+`~/.hydra-acp/extensions/hydra-acp-browser/current.log` (`bridge open` /
+`browser closed`) and the daemon's `current.log`
+(`session/attach OK … requestedPolicy=… appliedPolicy=… replayed=N`).
+A `browser closed` landing *before* its own attach response means that
+connection's whole replay went nowhere.
+
+If all three levels come back clean, the transcript is intact and the
+reporter is looking at a wedged long-lived `ChatState` — a reload fixes
+it, and the bug is in whatever teardown dropped the items, not in the
+data.
+
 ## Updating this file
 
 If you discover a durable, non-obvious invariant while working here — the
