@@ -429,7 +429,14 @@ pre code { background: transparent; padding: 0; }
 
 .toolcard { background: var(--tool-bg); border: 1px solid var(--border); border-radius: 8px; padding: 0; align-self: stretch; }
 .toolcard .head { padding: 0.5rem 0.75rem; display: flex; gap: 0.5rem; align-items: center; cursor: pointer; }
-.toolcard .head .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; }
+.toolcard .head .title { flex: 1; min-width: 0; display: flex; gap: 0.4rem; align-items: baseline; overflow: hidden; font-size: 0.9rem; }
+/* edit-name never shrinks so the filename survives at any width; the
+   directory after it absorbs all of the truncation. Deliberately the
+   LAST thing in the row: text-overflow draws its ellipsis where the
+   final whole character fit rather than at the box edge, so an
+   ellipsized span with a sibling after it always shows a ragged gap. */
+.toolcard .head .title .edit-name { flex: 0 0 auto; white-space: nowrap; }
+.toolcard .head .title .edit-dir { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 0.85em; }
 .toolcard .head .kind { color: var(--muted); font-size: 0.8rem; }
 .toolcard .body { display: none; padding: 0 0.75rem 0.75rem; border-top: 1px solid var(--border); }
 .toolcard.open .body { display: block; }

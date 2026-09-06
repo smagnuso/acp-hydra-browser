@@ -3802,6 +3802,26 @@ function diffCacheFor(diff: EditDiff): {
   return hit;
 }
 
+// Filename first, directory after it as dimmed context, so the only
+// thing end-truncation can eat is path. Middle-truncating the natural
+// "dir/file" order instead needs two spans with the ellipsized one in
+// front, and that always leaves a ragged gap: a stretched span's
+// ellipsis is drawn where the last whole character fit, not at the box
+// edge, so whatever follows starts a sliver too far right. Keeping the
+// ellipsized run last hides that sliver in the padding before the diff
+// summary, where nobody can see it.
+function editedTitleEl(shownPath: string): HTMLElement {
+  const slashIdx = shownPath.lastIndexOf("/");
+  const name = slashIdx >= 0 ? shownPath.slice(slashIdx + 1) : shownPath;
+  const dir = slashIdx >= 0 ? shownPath.slice(0, slashIdx) : "";
+  return el(
+    "span",
+    { class: "title" },
+    el("span", { class: "edit-name" }, `Edited ${name}`),
+    dir.length > 0 ? el("span", { class: "edit-dir" }, dir) : null,
+  );
+}
+
 function renderEditDiff(item: EditDiffLogItem): HTMLElement {
   const cached = diffCacheFor(item.diff);
   const counts = cached.counts;
@@ -3823,7 +3843,7 @@ function renderEditDiff(item: EditDiffLogItem): HTMLElement {
       }),
     },
     el("span", null, item.expanded ? "▾" : "▸"),
-    el("span", { class: "title" }, `Edited ${shownPath}`),
+    editedTitleEl(shownPath),
     summary.length > 0 ? el("span", { class: "kind edit-summary" }, summary) : null,
   );
   const node = el(
