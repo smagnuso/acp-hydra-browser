@@ -1,12 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  symlinkSync,
+  rmSync,
+  realpathSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PathScopeError, resolveScopedPath } from "../src/server/routes-files.js";
 
 function makeRoot(): { cwd: string; cleanup: () => void } {
-  const cwd = mkdtempSync(join(tmpdir(), "hydra-acp-browser-"));
+  // realpath, because resolveScopedPath does: it is a security boundary,
+  // so it resolves before comparing. macOS hands out /var/folders/... for
+  // tmpdir, which is a symlink to /private/var/folders/..., and an
+  // unresolved fixture path would be asserting against a spelling the
+  // production code deliberately does not use.
+  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "hydra-acp-browser-")));
   mkdirSync(join(cwd, "sub"), { recursive: true });
   writeFileSync(join(cwd, "a.txt"), "hi");
   writeFileSync(join(cwd, "sub/b.txt"), "ok");
