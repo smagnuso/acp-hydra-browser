@@ -59,7 +59,7 @@ import {
   getLastClosedScrollTop,
   reopenClosedChat,
 } from "./routing.js";
-import { isFormControl, isWideLayout } from "./dom.js";
+import { hasActiveSelection, isFormControl, isWideLayout } from "./dom.js";
 import { buildChatPreviewPane, buildListPreviewPane, peekChatViewRoot } from "./views.js";
 import { beginExternalRenderHold, endExternalRenderHold } from "./renderer.js";
 import type { ChatState } from "./types.js";
@@ -344,6 +344,14 @@ function onTouchStart(e: TouchEvent): void {
   if (isWideLayout() || state.modal || state.banner) return;
   const touch = e.touches[0];
   if (!touch) return;
+  // A live text selection means this touch is grabbing a selection
+  // handle (word already selected via double-tap), not starting a
+  // swipe — a message bubble is a plain div, not a form control, so
+  // isFormControl below wouldn't otherwise exclude it. Arming here reads
+  // "extend the selection rightward" as "swipe the chat closed," and a
+  // more-vertical drag as an undecided candidate fighting the handle for
+  // the same touch, which is what makes handles hard to grab.
+  if (hasActiveSelection()) return;
   if (state.view === "list" && state.lastSessionId) {
     mode = "toChat";
   } else if (
