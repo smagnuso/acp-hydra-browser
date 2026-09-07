@@ -69,6 +69,41 @@ const ALLOWED_BROWSER_NOTIFICATION_METHODS = new Set<string>([
 // this only needs to outlast that brief window.
 const OWN_PROMPT_GRACE_MS = 20_000;
 
+// Entries replayed on a cold (uncursored) attach. The browser's replay is
+// effectively uninterruptible: the transcript only swaps in at
+// bridge/ready, which the client sends after the WHOLE replay has landed,
+// so a socket that dies mid-replay throws that work away and starts over.
+// Uncapped, a long-running session replays megabytes — one busy session
+// measured 1516 frames / 2.5MB — and a phone dropping its socket every few
+// seconds never reaches ready at all: four consecutive attaches moved the
+// entire 2.5MB between them and not one completed. Capping the cold window
+// keeps the handshake inside the connection window a flaky client actually
+// holds; the rest stays one "Load full history" away (fullHistory=true,
+// which sends historyLimit 0).
+//
+// Deliberately NOT applied to after_message (delta) attaches: those are
+// already bounded by the client's cursor, and capping one risks the cutoff
+// falling outside the window, which downgrades the reply to a full replay
+// and blanks the transcript the delta existed to preserve.
+//
+// Sized by measurement, not taste. Entries are not turns: a tool-heavy
+// turn can run hundreds of entries on its own, so too small a cap lands
+// the whole window INSIDE one turn and replays agent output with no
+// prompt above it — the same "the prompt went missing" report the cache's
+// own trim had to grow a turn-boundary snap to avoid. Measured against
+// the busiest session here (50 turns, 3.18MB uncapped):
+//
+//   limit   replay   complete turns
+//     400   0.18MB   0   <- opens mid-turn, prompt-less
+//    1500   0.64MB   1
+//    2500   0.83MB   5
+//    4000   1.09MB   15
+//
+// 2500 keeps several whole turns of scrollback at roughly a third of the
+// bytes. Re-measure before changing it; the entries-per-turn ratio is a
+// property of how tool-heavy the sessions are, not a constant.
+const COLD_ATTACH_HISTORY_LIMIT = 2500;
+
 const SHORT_CIRCUIT_AGENT_REQUEST_METHODS = new Set<string>([
   "fs/read_text_file",
   "fs/write_text_file",
@@ -671,7 +706,13 @@ function handleConnection(
       // session/attach keeps only RFD #533's own fields at the top level.
       ...(fullHistory
         ? { _meta: { "hydra-acp": { historyLimit: 0 } } }
-        : {}),
+        : wantsAfterMessage
+          ? {}
+          : {
+              _meta: {
+                "hydra-acp": { historyLimit: COLD_ATTACH_HISTORY_LIMIT },
+              },
+            }),
       clientInfo: {
         name: upstream.clientName,
         version: upstream.clientVersion,

@@ -575,13 +575,14 @@ export interface ChatState {
   // and the scroll events it generates defeat the guards anyway. See
   // pinAfterSwap in views.ts.
   pinAfterReplaySwap?: boolean;
-  // True when log[] was seeded from the local history-cache.ts cache
-  // rather than a full session/attach replay — meaning there may be
-  // older history on the daemon that we don't have, since the cache is
-  // itself capped (see history-cache.ts's MAX_BYTES_PER_SESSION). Drives
-  // the "load full history" button views.ts shows once the user has
-  // scrolled to the top of what's locally available. Cleared by
-  // routing.ts's requestFullHistory once a genuine full replay lands.
+  // True when log[] holds less than the session's whole history, so there
+  // may be older history on the daemon we don't have. Two sources: a log
+  // seeded from the local history-cache.ts cache (itself capped by
+  // MAX_BYTES_PER_SESSION), and any cold attach, whose replay is capped by
+  // ws-bridge.ts's COLD_ATTACH_HISTORY_LIMIT. Drives the "load full
+  // history" button views.ts shows once the user has scrolled to the top
+  // of what's locally available. Cleared by routing.ts's
+  // requestFullHistory once a genuine full replay lands.
   historyIsPartial?: boolean;
   // messageId of the bubble that was topmost-visible right before
   // requestFullHistory wiped and reloaded the log — a full replay

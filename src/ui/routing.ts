@@ -347,6 +347,7 @@ function connectChatSocket(chat: ChatState): void {
   // Set by requestFullHistory, and only by it: tells the bridge to lift
   // the daemon's replay cap for this one attach. Cleared once used so an
   // ordinary reconnect doesn't keep re-pulling the whole session.
+  const askedFullHistory = chat.wantFullHistory === true;
   if (chat.wantFullHistory) {
     url.searchParams.set("fullHistory", "true");
     chat.wantFullHistory = false;
@@ -356,6 +357,21 @@ function connectChatSocket(chat: ChatState): void {
   }
   if (chat.lastSeenSeq !== undefined) {
     url.searchParams.set("afterSeq", String(chat.lastSeenSeq));
+  }
+  // A cold attach replays only a capped window (ws-bridge.ts's
+  // COLD_ATTACH_HISTORY_LIMIT), so there is always older history on the
+  // daemon we didn't get — mark it partial or "Load full history" never
+  // appears and that history is unreachable. Cache hits set this too
+  // (hydrateFromCacheThenConnect), but a cold open with an empty cache
+  // wouldn't otherwise. Only for an uncursored attach: a delta keeps
+  // whatever the transcript already was, and an explicit full-history
+  // request is by definition not partial.
+  if (
+    !askedFullHistory &&
+    chat.lastSeenMessageId === undefined &&
+    chat.lastSeenSeq === undefined
+  ) {
+    chat.historyIsPartial = true;
   }
   // Which cursor the daemon will actually resolve, and so whether the
   // delta overlaps what we already rendered. See dropPendingCursorGroup.

@@ -135,7 +135,15 @@ export async function loadCachedSession(
         return;
       }
       rec.lastAccessed = Date.now();
-      store.put(rec);
+      // A throw here (e.g. Safari's synchronous QuotaExceededError) must
+      // not skip resolve() below — see mergeAndTrim's identical guard for
+      // why an unresolved promise here is far worse than a stale LRU
+      // timestamp.
+      try {
+        store.put(rec);
+      } catch (err) {
+        console.error("[hydra] history-cache LRU bump failed", err);
+      }
       resolve({
         frames: timed("cache-read-map", () => rec.frames.map((f) => f.frame)),
       });
@@ -144,10 +152,32 @@ export async function loadCachedSession(
   });
 }
 
+// Local copy of acp.ts's extractRecordedAt — importing it here would be
+// circular (acp.ts already imports queueFrameForCache from this file).
+function extractRecordedAt(frame: JsonRpcFrame): number | undefined {
+  const meta = (frame.params as { _meta?: unknown } | undefined)?._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const inner = (meta as Record<string, unknown>)["hydra-acp"];
+  if (!inner || typeof inner !== "object") return undefined;
+  const at = (inner as { recordedAt?: unknown }).recordedAt;
+  return typeof at === "number" && Number.isFinite(at) ? at : undefined;
+}
+
+function formatAge(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 90) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 90) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return `${h}h ago`;
+}
+
 // Diagnostic: what does this client's cache ACTUALLY hold for a session?
 // The whole transcript-corruption hunt kept stalling on the difference
 // between what the cache was assumed to contain and what it did, which
-// is invisible on a phone with no inspector.
+// is invisible on a phone with no inspector. The newest-frame age is the
+// single most direct way to tell "cache is stale" from "cache is fine,
+// something else is wrong" without an inspector.
 export async function describeCachedSession(sessionId: string): Promise<string> {
   const db = await openDb();
   if (!db) return "unavailable";
@@ -176,7 +206,13 @@ export async function describeCachedSession(sessionId: string): Promise<string> 
         .sort((a, b) => b[1] - a[1])
         .map(([k, n]) => `${k.replace(/_chunk$/, "")}:${n}`)
         .join(" ");
-      resolve(`${rec.frames.length}f ${(rec.totalBytes / 1e6).toFixed(1)}MB — ${top}`);
+      let newest: number | undefined;
+      for (const f of rec.frames) {
+        const at = extractRecordedAt(f.frame);
+        if (at !== undefined && (newest === undefined || at > newest)) newest = at;
+      }
+      const age = newest !== undefined ? formatAge(Date.now() - newest) : "unknown";
+      resolve(`${rec.frames.length}f ${(rec.totalBytes / 1e6).toFixed(1)}MB newest:${age} — ${top}`);
     };
     req.onerror = () => resolve("unreadable");
   });
@@ -329,7 +365,19 @@ function mergeAndTrim(
         totalBytes,
         lastAccessed: Date.now(),
       };
-      timed("cache-put", () => store.put(rec));
+      // A synchronous throw out of store.put (Safari raises
+      // QuotaExceededError this way, not as an async error event) must
+      // still reach resolve(). Without this try/catch, that throw skips
+      // resolve() and leaves this promise pending forever — flushPending
+      // awaits it in a loop, and enqueueFlush chains every future flush
+      // onto this one via flushChain, so one bad write permanently wedges
+      // the entire cache (every session, until a page reload) with
+      // nothing ever rejecting to surface an error.
+      try {
+        timed("cache-put", () => store.put(rec));
+      } catch (err) {
+        console.error("[hydra] history-cache write failed", err, { sessionId });
+      }
       resolve();
     };
     getReq.onerror = () => resolve();
@@ -355,8 +403,12 @@ function enforceSessionLru(db: IDBDatabase): Promise<void> {
       }
       all.sort((a, b) => a.lastAccessed - b.lastAccessed);
       const toEvict = all.slice(0, all.length - MAX_CACHED_SESSIONS);
-      for (const rec of toEvict) {
-        store.delete(rec.sessionId);
+      try {
+        for (const rec of toEvict) {
+          store.delete(rec.sessionId);
+        }
+      } catch (err) {
+        console.error("[hydra] history-cache LRU eviction failed", err);
       }
       resolve();
     };
