@@ -224,6 +224,35 @@ export async function describeCachedSession(sessionId: string): Promise<string> 
 const pendingFrames = new Map<string, JsonRpcFrame[]>();
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
+// Sessions whose next flush must REPLACE the stored record instead of
+// appending to it. See resetCachedSession.
+const replaceOnNextFlush = new Set<string>();
+
+// Called when a full session/attach replay is about to rebuild the
+// transcript from scratch (bridge.ts's bridge/replay_policy, alongside
+// acp.ts's resetChatHistoryState). The cache exists to repaint that
+// transcript on the next cold open, so it has to follow the same
+// lifecycle the transcript does.
+//
+// Without this the cache is append-only, and every cold open appends a
+// fresh replay of the same recent turns onto everything already stored.
+// It never converges on "what you last saw": it accumulates overlapping
+// copies of the same turns, and since prompts dedupe by messageId on
+// replay but streamed chunks cannot, the repeats land as extra text on
+// existing bubbles rather than as clean duplicates. The paint that
+// results is a pile of every replay this client has ever seen, with the
+// newest turns merely appended to the end of it.
+//
+// Deliberately a flag rather than an eager delete: the replay's own
+// frames start arriving immediately after this is called, and an async
+// delete racing the flush that stores them would drop the very content
+// it was meant to make room for. Consumed by mergeAndTrim on the first
+// flush after the reset, which is exactly the batch carrying the replay.
+export function resetCachedSession(sessionId: string): void {
+  pendingFrames.delete(sessionId);
+  replaceOnNextFlush.add(sessionId);
+}
+
 // Called from acp.ts's handleNotification for every recordable
 // session/update arriving from the daemon (never for one replayed out of
 // this cache). It fires on every streamed agent_message_chunk during an
@@ -313,7 +342,13 @@ function mergeAndTrim(
     const store = tx.objectStore(STORE);
     const getReq = store.get(sessionId);
     getReq.onsuccess = () => {
-      const existing = getReq.result as CachedSession | undefined;
+      // A full replay just rebuilt the transcript, so this batch is the
+      // authoritative picture of it — start from nothing rather than
+      // layering it onto the previous one (see resetCachedSession).
+      const replacing = replaceOnNextFlush.delete(sessionId);
+      const existing = replacing
+        ? undefined
+        : (getReq.result as CachedSession | undefined);
       // Do NOT dedupe these by update.messageId. It reads like a
       // natural key but isn't unique per frame: some agents stamp their
       // own message id (Claude's msg_01…) on every chunk of one reply,
