@@ -18,7 +18,13 @@ function makeRoot(): { cwd: string; cleanup: () => void } {
   // tmpdir, which is a symlink to /private/var/folders/..., and an
   // unresolved fixture path would be asserting against a spelling the
   // production code deliberately does not use.
-  const cwd = realpathSync(mkdtempSync(join(tmpdir(), "hydra-acp-browser-")));
+  //
+  // .native specifically. resolveScopedPath awaits fsp.realpath, and on
+  // Windows that expands an 8.3 short name (C:\Users\RUNNER~1\...) to its
+  // long form (C:\Users\runneradmin\...) while the plain sync realpath
+  // leaves it short. Same name, different answer, and the fixture would
+  // be asserting a spelling production never returns.
+  const cwd = realpathSync.native(mkdtempSync(join(tmpdir(), "hydra-acp-browser-")));
   mkdirSync(join(cwd, "sub"), { recursive: true });
   writeFileSync(join(cwd, "a.txt"), "hi");
   writeFileSync(join(cwd, "sub/b.txt"), "ok");
@@ -83,7 +89,7 @@ test("resolveScopedPath rejects symlink escape", async (t) => {
     // which does not exist on Windows, and a symlink whose target is
     // absent cannot demonstrate an escape: there is nothing beyond the
     // scope for it to reach, so the rejection under test never fires.
-    outside = realpathSync(mkdtempSync(join(tmpdir(), "hydra-acp-outside-")));
+    outside = realpathSync.native(mkdtempSync(join(tmpdir(), "hydra-acp-outside-")));
     writeFileSync(join(outside, "secret.txt"), "nope");
     try {
       symlinkSync(outside, join(cwd, "escape"), "dir");
