@@ -9,7 +9,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { PathScopeError, resolveScopedPath } from "../src/server/routes-files.js";
 
 function makeRoot(): { cwd: string; cleanup: () => void } {
@@ -34,9 +34,13 @@ test("resolveScopedPath allows files inside cwd", async () => {
     const a = await resolveScopedPath(cwd, "a.txt");
     assert.match(a, /a\.txt$/);
     const b = await resolveScopedPath(cwd, "sub/b.txt");
-    assert.match(b, /sub\/b\.txt$/);
+    // join, not a /-spelled regex: the request arrives with forward
+    // slashes (it is a URL path) but the resolved answer is a filesystem
+    // path, which is backslash-separated on Windows.
+    assert.equal(b, join(cwd, "sub", "b.txt"));
     const root = await resolveScopedPath(cwd, "");
-    assert.equal(root.replace(/\/$/, ""), cwd.replace(/\/$/, ""));
+    const trimSep = (v: string): string => (v.endsWith(sep) ? v.slice(0, -1) : v);
+    assert.equal(trimSep(root), trimSep(cwd));
   } finally {
     cleanup();
   }
@@ -70,19 +74,37 @@ test("resolveScopedPath rejects absolute paths outside cwd", async () => {
   }
 });
 
-test("resolveScopedPath rejects symlink escape", async () => {
+test("resolveScopedPath rejects symlink escape", async (t) => {
   const { cwd, cleanup } = makeRoot();
+  let outside: string | undefined;
   try {
-    symlinkSync("/etc", join(cwd, "escape"));
+    // A real directory outside the root, holding a real file, built here
+    // rather than borrowed from the OS. The original pointed at /etc,
+    // which does not exist on Windows, and a symlink whose target is
+    // absent cannot demonstrate an escape: there is nothing beyond the
+    // scope for it to reach, so the rejection under test never fires.
+    outside = realpathSync(mkdtempSync(join(tmpdir(), "hydra-acp-outside-")));
+    writeFileSync(join(outside, "secret.txt"), "nope");
+    try {
+      symlinkSync(outside, join(cwd, "escape"), "dir");
+    } catch (err) {
+      // Creating a symlink on Windows needs Developer Mode or admin
+      // rights. Skip rather than assert on a boundary we could not set up.
+      t.skip(`cannot create symlink here: ${(err as Error).message}`);
+      return;
+    }
     await assert.rejects(
       () => resolveScopedPath(cwd, "escape"),
       PathScopeError,
     );
     await assert.rejects(
-      () => resolveScopedPath(cwd, "escape/passwd"),
+      () => resolveScopedPath(cwd, "escape/secret.txt"),
       PathScopeError,
     );
   } finally {
     cleanup();
+    if (outside !== undefined) {
+      rmSync(outside, { recursive: true, force: true });
+    }
   }
 });
