@@ -54,7 +54,18 @@ const STATE_UPDATE_KINDS = new Set([
 // entirely, which is what keeps the transcript and scroll position intact
 // across a quiet reconnect instead of blanking and re-snapping to bottom.
 export function resetChatHistoryState(c: ChatState): void {
-  c.log = [];
+  // "offline" entries are the one part of the queue no replay can restore:
+  // they were never sent, so the daemon has never heard of them and they
+  // live only here and in IndexedDB. Wiping them would leave
+  // flushOfflineQueue nothing to dispatch on bridge/ready, so the prompt
+  // would never send and never be cleared from storage, so it would
+  // repaint as a ghost bubble on every cold open. Their bubbles ride
+  // along at the head of the log and flushOfflineQueue reseats them to the
+  // end (before the replay paint hold is released, so nothing flashes).
+  const held = c.promptQueue.filter((e) => e.status === "offline");
+  c.log = c.log.filter(
+    (it) => it.kind === "stream" && it.queueEntry !== undefined && held.includes(it.queueEntry),
+  );
   c.toolCalls = new Map();
   c.pendingPermissions = new Map();
   c.spinner = null;
@@ -68,7 +79,7 @@ export function resetChatHistoryState(c: ChatState): void {
   c.cost = null;
   c.busy = false;
   c.recentOwnPrompts = [];
-  c.promptQueue = [];
+  c.promptQueue = held;
   c.queueByMessageId = new Map();
   c.ownPromptIds = new Map();
   c.inTurn = false;

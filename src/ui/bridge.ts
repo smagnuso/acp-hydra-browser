@@ -20,6 +20,7 @@ import {
   dropPendingCursorGroup,
   resetChatHistoryState,
 } from "./acp.js";
+import { resetCachedSession } from "./history-cache.js";
 import { cancelAllQueued, flushOfflineQueue } from "./queue.js";
 import { parseArmedTaskList } from "./acp.js";
 import { getPushEndpoint, tabIsHidden } from "./notifications.js";
@@ -183,6 +184,11 @@ export function handleFrame(frame: JsonRpcFrame): void {
       // the situation pinIfDue's guards misread — see pinAfterSwap.
       state.current.pinAfterReplaySwap = true;
       resetChatHistoryState(state.current);
+      // The cache is a picture of the transcript, so it gets rebuilt from
+      // the same replay that is about to rebuild the transcript — instead
+      // of this replay being appended to every previous one. This is what
+      // makes the next cold open paint what you last had on screen.
+      resetCachedSession(state.current.sessionId);
     } else if (state.current.resumedByMessageId) {
       // Resumed by messageId, so the delta restarts at the first frame of
       // whichever message was still streaming when the socket died — see
