@@ -25,10 +25,16 @@
 // past the threshold history-cache.ts's own comment gives for avoiding
 // localStorage's shared, smaller per-origin quota.
 //
-// Only COLD sessions are persisted. Warm ones are always returned in
-// full on every poll regardless (served from the daemon's in-memory
-// map, no disk cost) — caching them here would be dead weight rewritten
-// on every save for no benefit.
+// Warm sessions are downgraded to "cold" before being persisted (see
+// trimForCache) rather than dropped outright. They used to be dropped —
+// the daemon returns the full warm set on every poll anyway, so caching
+// them felt like dead weight — but that meant a session busy/warm at
+// last write simply had no row at all in a cold-launch's first paint, a
+// hole that filled in only once the first live poll landed. A stale
+// "cold" is a small, self-correcting lie; a missing session card looks
+// broken. status/busy are the only fields that lie this way — busy in
+// particular only means anything mid-turn, which a cache can never
+// still be by the time it's read back.
 
 import type { SessionInfo } from "./types.js";
 
@@ -67,9 +73,6 @@ interface CacheRecord {
 export function trimForCache(sessions: SessionInfo[]): CachedSessionInfo[] {
   const out: CachedSessionInfo[] = [];
   for (const s of sessions) {
-    if (s.status === "warm") {
-      continue;
-    }
     // Federated (remote-set) entries are never cached: they're a live
     // merge from the peer's own list, not a durable local record, and
     // there's no offline-fallback story for federation yet (unlike a
@@ -78,14 +81,15 @@ export function trimForCache(sessions: SessionInfo[]): CachedSessionInfo[] {
     if (s.remote) {
       continue;
     }
+    const wasWarm = s.status === "warm";
     out.push({
       sessionId: s.sessionId,
       cwd: s.cwd,
       agentId: s.agentId,
       currentModel: s.currentModel,
       title: s.title,
-      status: s.status,
-      busy: s.busy,
+      status: wasWarm ? "cold" : s.status,
+      busy: wasWarm ? false : s.busy,
       awaitingInput: s.awaitingInput,
       priority: s.priority,
       importedFromMachine: s.importedFromMachine,
