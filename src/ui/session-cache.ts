@@ -25,12 +25,19 @@
 // past the threshold history-cache.ts's own comment gives for avoiding
 // localStorage's shared, smaller per-origin quota.
 //
-// Only COLD sessions are persisted. Warm ones are always returned in
-// full on every poll regardless (served from the daemon's in-memory
-// map, no disk cost) — caching them here would be dead weight rewritten
-// on every save for no benefit.
+// Warm sessions are downgraded to "cold" before being persisted (see
+// trimForCache) rather than dropped outright. They used to be dropped —
+// the daemon returns the full warm set on every poll anyway, so caching
+// them felt like dead weight — but that meant a session busy/warm at
+// last write simply had no row at all in a cold-launch's first paint, a
+// hole that filled in only once the first live poll landed. A stale
+// "cold" is a small, self-correcting lie; a missing session card looks
+// broken. status/busy are the only fields that lie this way — busy in
+// particular only means anything mid-turn, which a cache can never
+// still be by the time it's read back.
 
 import type { SessionInfo } from "./types.js";
+import { compareSessions } from "./session-sort.js";
 
 const DB_NAME = "hydra-acp-session-cache";
 const DB_VERSION = 1;
@@ -64,12 +71,22 @@ interface CacheRecord {
   cursor: number;
 }
 
+// Sorted on the way in, using the real (pre-downgrade) status — so a
+// session that's actually warm/busy right now is written near the top
+// of the persisted list, in the same position views.ts's own
+// compareSessions would rank it. trimForCache below then downgrades its
+// *status* to cold for storage, but leaves this position alone: reading
+// it back paints a "probably cold" card in the same spot it was really
+// in, rather than at the bottom of the cold pile for one render until
+// the first live poll corrects it. See seedInitialSessionOrder in
+// views.ts for the render-side half of this.
+export function sortForCache(sessions: SessionInfo[]): SessionInfo[] {
+  return sessions.slice().sort(compareSessions);
+}
+
 export function trimForCache(sessions: SessionInfo[]): CachedSessionInfo[] {
   const out: CachedSessionInfo[] = [];
   for (const s of sessions) {
-    if (s.status === "warm") {
-      continue;
-    }
     // Federated (remote-set) entries are never cached: they're a live
     // merge from the peer's own list, not a durable local record, and
     // there's no offline-fallback story for federation yet (unlike a
@@ -78,14 +95,15 @@ export function trimForCache(sessions: SessionInfo[]): CachedSessionInfo[] {
     if (s.remote) {
       continue;
     }
+    const wasWarm = s.status === "warm";
     out.push({
       sessionId: s.sessionId,
       cwd: s.cwd,
       agentId: s.agentId,
       currentModel: s.currentModel,
       title: s.title,
-      status: s.status,
-      busy: s.busy,
+      status: wasWarm ? "cold" : s.status,
+      busy: wasWarm ? false : s.busy,
       awaitingInput: s.awaitingInput,
       priority: s.priority,
       importedFromMachine: s.importedFromMachine,
@@ -205,7 +223,7 @@ async function flushPending(): Promise<void> {
   if (!db) return;
   const rec: CacheRecord = {
     key: RECORD_KEY,
-    sessions: trimForCache(write.sessions),
+    sessions: trimForCache(sortForCache(write.sessions)),
     cursor: write.cursor,
   };
   return new Promise((resolve) => {

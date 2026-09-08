@@ -1,17 +1,32 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { trimForCache } from "../src/ui/session-cache.js";
+import { sortForCache, trimForCache } from "../src/ui/session-cache.js";
 import type { SessionInfo } from "../src/ui/types.js";
 
-test("trimForCache drops warm sessions entirely", () => {
+test("sortForCache ranks a busy warm session above idle cold ones, using real status", () => {
   const sessions: SessionInfo[] = [
-    { sessionId: "warm-1", cwd: "/w", status: "warm" },
-    { sessionId: "cold-1", cwd: "/w", status: "cold" },
+    { sessionId: "cold-1", cwd: "/w", status: "cold", updatedAt: "2025-01-02T00:00:00Z" },
+    { sessionId: "warm-1", cwd: "/w", status: "warm", busy: true },
+    { sessionId: "cold-2", cwd: "/w", status: "cold", updatedAt: "2025-01-01T00:00:00Z" },
   ];
   assert.deepEqual(
-    trimForCache(sessions).map((s) => s.sessionId),
-    ["cold-1"],
+    sortForCache(sessions).map((s) => s.sessionId),
+    ["warm-1", "cold-1", "cold-2"],
   );
+});
+
+test("trimForCache downgrades warm sessions to cold rather than dropping them", () => {
+  const sessions: SessionInfo[] = [
+    { sessionId: "warm-1", cwd: "/w", status: "warm", busy: true },
+    { sessionId: "cold-1", cwd: "/w", status: "cold" },
+  ];
+  const out = trimForCache(sessions);
+  assert.deepEqual(
+    out.map((s) => s.sessionId),
+    ["warm-1", "cold-1"],
+  );
+  assert.equal(out[0]!.status, "cold");
+  assert.equal(out[0]!.busy, false);
 });
 
 test("trimForCache keeps only the fields the session-list card renders", () => {
@@ -73,8 +88,7 @@ test("trimForCache drops federated (remote-set) sessions even when cold", () => 
 
 test("trimForCache tolerates an all-warm or empty list", () => {
   assert.deepEqual(trimForCache([]), []);
-  assert.deepEqual(
-    trimForCache([{ sessionId: "w", cwd: "/w", status: "warm" }]),
-    [],
-  );
+  const out = trimForCache([{ sessionId: "w", cwd: "/w", status: "warm" }]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0]!.status, "cold");
 });
