@@ -46,7 +46,17 @@ async function main(argv: string[]): Promise<void> {
     await runTailscaleSetup();
     return;
   }
-  if (argv[0] === "url") {
+  // Bare invocation with no HYDRA_ACP_TOKEN means a human ran this
+  // directly in a terminal, not hydra spawning it as an extension
+  // (child-supervisor.ts always injects that env var) — same dual
+  // extension/CLI split as budgeter's index.ts. Printing the URL instead
+  // of silently starting a second, port-conflicting server is far more
+  // useful for "I just want the link" than what used to happen: falling
+  // straight through to loadConfig() and dying on a missing token, or
+  // succeeding and squatting on the port if one happened to be set.
+  // `run` is the explicit escape hatch to force server mode without
+  // faking the env var (e.g. local debugging).
+  if (argv[0] === "url" || (argv.length === 0 && !process.env.HYDRA_ACP_TOKEN)) {
     const url = computeDisplayUrl(loadConfig(undefined, { requireToken: false }));
     process.stdout.write(`${url}\n`);
     qrcode.generate(url, { small: true });
@@ -180,9 +190,13 @@ function printHelp(): void {
     `hydra-acp-browser — web UI extension for hydra-acp
 
 Usage:
-  hydra-acp-browser                Start the server.
+  hydra-acp-browser                Run as a hydra extension (HYDRA_ACP_TOKEN
+                                      set) starts the server; run bare by a
+                                      human in a terminal, same as \`url\`.
   hydra-acp-browser url            Print the URL to open (and a QR code
                                       for it) without starting the server.
+  hydra-acp-browser run            Force server mode even without
+                                      HYDRA_ACP_TOKEN set (e.g. local testing).
   hydra-acp-browser tailscale setup  Mint a Tailscale cert and configure
                                       HTTPS + Tailscale-only access.
   hydra-acp-browser --version      Print version and exit.
