@@ -47,6 +47,7 @@ import { buildDiffDisplayLines, countDiffChanges } from "./edit-diff.js";
 import { applyFontScale, applyTheme } from "./theme.js";
 import { describeCachedSession } from "./history-cache.js";
 import { bump, describeSlow, describeCounts } from "./perf.js";
+import { compareSessions } from "./session-sort.js";
 import type { DiffDisplayLine } from "./edit-diff.js";
 import type {
   AppState,
@@ -1002,40 +1003,6 @@ interface SessionGroup {
   sessions: SessionInfo[];
 }
 
-// Same tiering as the TUI picker's sortSessions (picker.ts): a mid-turn
-// agent blocked on a question (busy + awaiting-input) is the most urgent
-// row there is, plain busy comes next, then a stale awaiting-input flag
-// on a turn that's already over (often just an uncleared flag rather
-// than an agent actually standing by), then priority-pinned idle-warm,
-// then plain idle-warm, then priority-pinned cold, then plain cold —
-// priority only breaks ties within "both idle-warm" or "both cold", never
-// outranking actual activity. Tiebreak within a tier is the priority
-// integer itself, then updatedAt at minute precision so per-chunk mtime
-// churn doesn't reshuffle the list between polls.
-function compareSessions(a: SessionInfo, b: SessionInfo): number {
-  const priorityOf = (s: SessionInfo): number => (s.priority && s.priority > 0 ? s.priority : 0);
-  const tier = (s: SessionInfo): number => {
-    const isWarm = s.status === "warm";
-    const isPriority = priorityOf(s) > 0;
-    if (isWarm && s.busy && s.awaitingInput) return 6;
-    if (isWarm && s.busy) return 5;
-    if (isWarm && s.awaitingInput) return 4;
-    if (isWarm && isPriority) return 3;
-    if (isWarm) return 2;
-    if (isPriority) return 1;
-    return 0;
-  };
-  const dt = tier(b) - tier(a);
-  if (dt !== 0) {
-    return dt;
-  }
-  const dp = priorityOf(b) - priorityOf(a);
-  if (dp !== 0) {
-    return dp;
-  }
-  return String(b.updatedAt || "").slice(0, 16).localeCompare(String(a.updatedAt || "").slice(0, 16));
-}
-
 // Collapse a leading home directory into "~" so the session list has
 // room to actually show the rest of the path instead of truncating it.
 function shortenCwd(cwd: string): string {
@@ -1421,24 +1388,51 @@ function configOptionRow(option: ConfigOption): HTMLElement {
 // REORDER_HOLDOFF_MS and reordering resumes on its own, while an
 // approaching click (which involves actual motion right up to the
 // moment of contact) still finds the order held still.
+// Mouse only: a touch tap uses implicit pointer capture (the whole
+// gesture stays pinned to whatever element pointerdown hit, regardless
+// of any reflow in between), so a reorder mid-tap can't make the tap
+// land on the wrong card the way it can for an un-captured mouse click.
+// Listening for any pointerType here meant a touch-scroll — which fires
+// pointermove continuously for as long as a finger is dragging —
+// re-armed this holdoff on every tick, freezing the list in a stale
+// order for as long as someone kept scrolling it.
 const REORDER_HOLDOFF_MS = 500;
 let lastListPointerMoveAt = 0;
 document.addEventListener("pointermove", (e) => {
+  if ((e as PointerEvent).pointerType !== "mouse") return;
   if ((e.target as Element | null)?.closest?.(".list")) {
     lastListPointerMoveAt = performance.now();
   }
 });
 
 let lastCommittedOrder: string[] | null = null;
+// Set by seedInitialSessionOrder for exactly the first post-boot render.
+// The persisted session cache downgrades warm sessions to "cold" before
+// writing (session-cache.ts) — deliberately, since a stale warm/busy
+// flag would be a lie the moment it's read back — but it still writes
+// them in their last known correctly-sorted position. Recomputing
+// `natural` from that downgraded data on the very first render can't
+// see they were warm, so without this it would drop straight to the
+// bottom of the cold group for one render and then jump back up the
+// instant the first live poll restores the real status. Trusting the
+// seeded order for that one render instead avoids the visible jump; any
+// render after it (idle or not) goes through the normal path below.
+let trustSeededOrderOnce = false;
+
+export function seedInitialSessionOrder(ids: string[]): void {
+  lastCommittedOrder = ids;
+  trustSeededOrderOnce = true;
+}
 
 function stableSortSessions(sessions: SessionInfo[]): SessionInfo[] {
   const natural = sessions.slice().sort(compareSessions);
   const idle = performance.now() - lastListPointerMoveAt > REORDER_HOLDOFF_MS;
-  if (idle || !lastCommittedOrder) {
+  if (!trustSeededOrderOnce && (idle || !lastCommittedOrder)) {
     lastCommittedOrder = natural.map((s) => s.sessionId);
     return natural;
   }
-  const rank = new Map(lastCommittedOrder.map((id, i) => [id, i]));
+  trustSeededOrderOnce = false;
+  const rank = new Map((lastCommittedOrder ?? []).map((id, i) => [id, i]));
   return natural
     .map((s, i) => ({ s, i }))
     .sort((a, b) => {

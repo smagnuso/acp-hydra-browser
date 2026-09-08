@@ -8,6 +8,7 @@ import { isWideLayout } from "./dom.js";
 import { forceReconnect } from "./routing.js";
 import { mergeSessionListPage } from "./session-merge.js";
 import { loadPersistedSessionCache, queueSessionCacheWrite } from "./session-cache.js";
+import { seedInitialSessionOrder } from "./views.js";
 import type { SessionInfo } from "./types.js";
 
 function hasActiveSelection(): boolean {
@@ -81,6 +82,12 @@ export async function seedSessionCache(): Promise<void> {
   if (cached) {
     state.sessions = cached.sessions;
     sessionCursor = cached.cursor || undefined;
+    // The cache is already sorted as of its last write (session-cache.ts's
+    // sortForCache) — trust that position for the first render so a
+    // session downgraded to "cold" for storage doesn't visibly jump to
+    // the bottom of the list and back the instant the first live poll
+    // restores its real warm/busy status.
+    seedInitialSessionOrder(cached.sessions.map((s) => s.sessionId));
   }
 }
 

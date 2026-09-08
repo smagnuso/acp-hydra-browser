@@ -37,6 +37,7 @@
 // still be by the time it's read back.
 
 import type { SessionInfo } from "./types.js";
+import { compareSessions } from "./session-sort.js";
 
 const DB_NAME = "hydra-acp-session-cache";
 const DB_VERSION = 1;
@@ -68,6 +69,19 @@ interface CacheRecord {
   key: typeof RECORD_KEY;
   sessions: CachedSessionInfo[];
   cursor: number;
+}
+
+// Sorted on the way in, using the real (pre-downgrade) status — so a
+// session that's actually warm/busy right now is written near the top
+// of the persisted list, in the same position views.ts's own
+// compareSessions would rank it. trimForCache below then downgrades its
+// *status* to cold for storage, but leaves this position alone: reading
+// it back paints a "probably cold" card in the same spot it was really
+// in, rather than at the bottom of the cold pile for one render until
+// the first live poll corrects it. See seedInitialSessionOrder in
+// views.ts for the render-side half of this.
+export function sortForCache(sessions: SessionInfo[]): SessionInfo[] {
+  return sessions.slice().sort(compareSessions);
 }
 
 export function trimForCache(sessions: SessionInfo[]): CachedSessionInfo[] {
@@ -209,7 +223,7 @@ async function flushPending(): Promise<void> {
   if (!db) return;
   const rec: CacheRecord = {
     key: RECORD_KEY,
-    sessions: trimForCache(write.sessions),
+    sessions: trimForCache(sortForCache(write.sessions)),
     cursor: write.cursor,
   };
   return new Promise((resolve) => {
