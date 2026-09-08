@@ -58,8 +58,8 @@ async function main(argv: string[]): Promise<void> {
   // faking the env var (e.g. local debugging).
   if (argv[0] === "url" || (argv.length === 0 && !process.env.HYDRA_ACP_TOKEN)) {
     const url = computeDisplayUrl(loadConfig(undefined, { requireToken: false }));
-    process.stdout.write(`${url}\n`);
     qrcode.generate(url, { small: true });
+    process.stdout.write(`${url}\n\n`);
     return;
   }
 
