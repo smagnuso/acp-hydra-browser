@@ -263,7 +263,9 @@ pre code { background: transparent; padding: 0; }
 .card .card-body { display: flex; align-items: center; gap: 0.75rem; }
 .card .meta { flex: 1; min-width: 0; }
 .card .meta .row2 { color: var(--muted); font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card .row3 { color: var(--muted); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; }
+.card .row3 { display: flex; align-items: baseline; gap: 0.5rem; color: var(--muted); font-size: 0.8rem; }
+.card .row3 .cwd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; min-width: 0; }
+.card .row3 .age { flex-shrink: 0; margin-left: auto; opacity: 0.6; }
 /* Right-aligned and never shrinking: the badge set varies per card
    (cold / warm / busy / blocked / imported, plus kill), so left-aligning
    them against a variable-width subtitle left every card's badges

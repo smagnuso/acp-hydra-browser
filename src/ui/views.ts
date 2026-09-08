@@ -1524,11 +1524,9 @@ export function restoreListAnchor(list: HTMLElement, anchor: ListScrollAnchor | 
 
 function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
   const title = s.title || fallbackTitle(s.sessionId);
-  const subtitle = [
-    shortSessionId(s.sessionId),
-    agentWithModel(s.agentId, s.currentModel),
-    `age ${formatRelativeAge(s.updatedAt)}`,
-  ].join(" · ");
+  const subtitle = [shortSessionId(s.sessionId), agentWithModel(s.agentId, s.currentModel)].join(
+    " · ",
+  );
   // A session with armed background tasks but no turn in flight is idle
   // right now but may restart itself with no prompt. The TUI just folds
   // that into "busy" rather than giving it its own status, so mirror
@@ -1636,9 +1634,17 @@ function renderSessionCard(s: SessionInfo, showCwd: boolean): HTMLElement {
           : []),
       ),
     ),
-    showCwd
-      ? el("div", { class: "row3" }, s.cwd ? shortenCwd(s.cwd) : "?")
-      : null,
+    // Bottom-right recency hint, same abbreviated format ("2h", "5d",
+    // "3w"...) as the TUI's own session picker (cli's session-row.ts
+    // formatRelativeAge) — moved out of the subtitle line into its own
+    // corner so it reads as a fixed landmark rather than competing with
+    // the session id/agent text for space.
+    el(
+      "div",
+      { class: "row3" },
+      showCwd ? el("span", { class: "cwd" }, s.cwd ? shortenCwd(s.cwd) : "?") : null,
+      el("span", { class: "age" }, formatRelativeAge(s.updatedAt)),
+    ),
     // Pinned to the card's own top-right corner rather than living in
     // the badge row. In that row its position drifted with whichever
     // badges a given card happened to have, and an action styled to sit
