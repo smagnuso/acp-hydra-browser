@@ -2282,6 +2282,16 @@ interface ChatView {
   // lifetime. Rebuilding it per render tore down the browser's native
   // IME/autocorrect session mid-word — see renderChat.
   composerTextarea?: HTMLTextAreaElement;
+  // True while a pointer is down on one of the composer's buttons (Send/
+  // Enqueue/Amend/Stop). renderChat rebuilds the whole button row every
+  // call; a rebuild landing between that pointerdown and its pointerup
+  // removes the node the finger is on, which fires pointercancel instead
+  // of pointerup — tapHandler's real handler never runs, and the late
+  // compatibility click is deliberately not trusted (see dom.ts), so the
+  // tap is silently swallowed. Holding the rebuild off until release
+  // (same idiom as viewport.ts's pointerActive freeze) avoids that.
+  composerGestureActive: boolean;
+  pendingComposer: HTMLElement | null;
 }
 
 const PIN_HOLDOFF_MS = 450;
@@ -2648,8 +2658,36 @@ function ensureChatView(c: ChatState): ChatView {
     lastScrollAt: 0,
     reflowUntil: 0,
     turnToast,
+    composerGestureActive: false,
+    pendingComposer: null,
   };
   chatViews.set(c, view);
+  // Capture phase: tapHandler's own onpointerdown/onpointerup stop
+  // propagation on the button itself, which would otherwise hide this
+  // from a composerSlot listener attached in the bubble phase. Read/write
+  // through `readyView` rather than a local flag, since renderChat — a
+  // different function — needs to see this state to know whether to
+  // stash its freshly-built composer instead of applying it.
+  const readyView = view;
+  composerSlot.addEventListener(
+    "pointerdown",
+    (e: PointerEvent) => {
+      if ((e.target as HTMLElement)?.closest?.("button")) {
+        readyView.composerGestureActive = true;
+      }
+    },
+    { capture: true },
+  );
+  const releaseComposerGesture = (): void => {
+    if (!readyView.composerGestureActive) return;
+    readyView.composerGestureActive = false;
+    if (readyView.pendingComposer) {
+      readyView.composerSlot.replaceChildren(readyView.pendingComposer);
+      readyView.pendingComposer = null;
+    }
+  };
+  composerSlot.addEventListener("pointerup", releaseComposerGesture, { capture: true });
+  composerSlot.addEventListener("pointercancel", releaseComposerGesture, { capture: true });
   return view;
 }
 
@@ -3572,7 +3610,15 @@ function renderChat(c: ChatState): HTMLElement {
     }
   }
   view.armedSlot.replaceChildren(renderArmedTasksBlock(c));
-  view.composerSlot.replaceChildren(composer);
+  // Don't rebuild the button row out from under a finger that's already
+  // down on it — see composerGestureActive on ChatView. Applied on
+  // release instead, by the composerSlot pointerup/pointercancel
+  // listener in ensureChatView.
+  if (view.composerGestureActive) {
+    view.pendingComposer = composer;
+  } else {
+    view.composerSlot.replaceChildren(composer);
+  }
   reconcileChatBody(c, view);
   return view.root;
 }
